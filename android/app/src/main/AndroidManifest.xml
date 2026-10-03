@@ -15,6 +15,7 @@
         <meta-data android:name="fclPlugin" android:value="true"/>
         <meta-data android:name="zalithRendererPlugin" android:value="true"/>
         <meta-data android:name="renderer" android:value="Rust Renderer:librust_gl.so:/librust_gl.so"/>
+        <meta-data android:name="boatEnv" android:value="LIBGL_ES=3:POJAV_RENDERER=opengles3:RENDERER_BACKEND=auto"/>
         <meta-data android:name="pojavEnv" android:value="LIBGL_ES=3:POJAV_RENDERER=opengles3:RENDERER_BACKEND=auto"/>
     </application>
 </manifest>

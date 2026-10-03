@@ -10,7 +10,7 @@ import com.launchers_plugin.renderer.buildscript.renderer
 buildscript {
     repositories { maven("https://jitpack.io") }
     dependencies {
-        classpath("com.github.ZalithLauncher.RendererPlugin-v2:dsl:1.0.1")
+        classpath("com.github.ZalithLauncher.RendererPlugin-v2:dsl:1.0-alpha6")
     }
 }
 
@@ -30,10 +30,7 @@ val pluginRendererConfig = buildJsonValue {
         dlopenLibPaths = emptyList(),
         env = buildEnvs {
             normal("LIBGL_ES", "3")
-            selectable(
-                key = "RENDERER_BACKEND",
-                items = RendererConfig.EnvItems("auto", listOf("gles", "vulkan")),
-            )
+            normal("RENDERER_BACKEND", "auto")
         },
         minMCVer = null,
         maxMCVer = null,
