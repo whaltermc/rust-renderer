@@ -56,6 +56,14 @@ android {
 
     buildFeatures { resValues = true }
 
+    buildTypes {
+        getByName("release") {
+            isDebuggable = false
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+
     packaging {
         jniLibs { useLegacyPackaging = true }
     }
