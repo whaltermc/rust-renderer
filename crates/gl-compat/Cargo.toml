@@ -1,0 +1,17 @@
+[package]
+name = "gl-compat"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "rust_gl"
+crate-type = ["cdylib"]
+
+[dependencies]
+renderer-core = { path = "../renderer-core" }
+gles-backend = { path = "../gles-backend" }
+vulkan-backend = { path = "../vulkan-backend" }
+
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.14"
+log = "0.4"

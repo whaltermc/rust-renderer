@@ -1,0 +1,1 @@
+/storage/emulated/0/minecraft-rust-renderer/target/release/librust_gl.so: /storage/emulated/0/minecraft-rust-renderer/crates/gl-compat/src/lib.rs /storage/emulated/0/minecraft-rust-renderer/crates/gles-backend/src/lib.rs /storage/emulated/0/minecraft-rust-renderer/crates/renderer-core/src/lib.rs /storage/emulated/0/minecraft-rust-renderer/crates/vulkan-backend/src/lib.rs

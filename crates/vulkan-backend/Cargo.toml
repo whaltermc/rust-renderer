@@ -1,0 +1,7 @@
+[package]
+name = "vulkan-backend"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+renderer-core = { path = "../renderer-core" }
