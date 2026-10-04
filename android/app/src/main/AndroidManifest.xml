@@ -3,12 +3,27 @@
 
     <application
         android:label="Rust Renderer"
-        android:hasCode="false"
         android:extractNativeLibs="true">
 
+        <!-- REQUIRED: ZalithLauncher2 discovers plugins by querying ACTION_MAIN activities -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- V2 renderer config (JSON written by the DSL into @string/config) -->
         <meta-data
             android:name="fclPlugin_V2"
             android:resource="@string/config" />
+
+        <!-- Optional: legacy marker so older FCL/ZL code paths can see the package -->
+        <meta-data
+            android:name="fclPlugin"
+            android:value="true" />
 
     </application>
 
