@@ -44,12 +44,25 @@ val pluginRendererConfig = buildJsonValue {
         dlopenLibPaths = emptyList(),
 
         env = buildEnvs {
+            // Real backend is GLES 3.x passthrough — do NOT claim Mesa/Zink/GL 4.6.
             normal("LIBGL_ES", "3")
-            // Advertise desktop GL 3.2 so Minecraft version checks pass (passthrough GLES).
+            normal("RENDERER_BACKEND", "gles")
+            // Our glGetString spoof (see gl-compat) reports 3.3 / GLSL 330.
             normal("RENDERER_SPOOF_GL", "1")
 
+            // Override Zalith defaults that otherwise inject Mesa 4.6 + zink for
+            // non-GL4ES renderers. Those contradict GLES passthrough and confuse
+            // LWJGL / shader path selection.
+            normal("MESA_GL_VERSION_OVERRIDE", "3.3")
+            normal("MESA_GLSL_VERSION_OVERRIDE", "330")
+            // Empty disables the zink loader override when the env is applied last.
+            normal("MESA_LOADER_DRIVER_OVERRIDE", "")
+            // Avoid treating our SO as a Mesa DRI driver.
+            normal("LIB_MESA_NAME", "")
+
+            // Keep selectable backend for future vulkan work; default stays gles.
             selectable(
-                key = "RENDERER_BACKEND",
+                key = "RENDERER_BACKEND_SELECT",
                 items = RendererConfig.EnvItems(
                     defaultValue = "gles",
                     values = listOf(
@@ -75,8 +88,8 @@ android {
         minSdk = 26
         targetSdk = 34
 
-        versionCode = 12
-        versionName = "0.1.11"
+        versionCode = 13
+        versionName = "0.1.12"
 
         resValue(
             "string",

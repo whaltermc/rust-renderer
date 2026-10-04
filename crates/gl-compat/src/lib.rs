@@ -151,7 +151,7 @@ const GL_MINOR_VERSION: u32 = 0x821C;
 static SPOOF_VERSION: &[u8] = b"3.3 (Core Profile) RustRenderer GLES passthrough\0";
 static SPOOF_GLSL: &[u8] = b"3.30\0";
 
-/// OPT-IN, EXPERIMENTAL: `RENDERER_SPOOF_GL=1` makes the renderer claim OpenGL 3.2 core.
+/// OPT-IN, EXPERIMENTAL: `RENDERER_SPOOF_GL=1` makes the renderer claim OpenGL 3.3 core.
 /// The claim is NOT backed by a full implementation. Off by default (spec: never advertise
 /// unsupported features).
 fn spoof_gl() -> bool {
