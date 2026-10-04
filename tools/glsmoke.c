@@ -658,6 +658,11 @@ int main(int argc, char **argv) {
             "glGetFloatv","glGetIntegerv","glGetBooleanv","glGetError",
             "glActiveTexture","glClientActiveTexture","glMultiTexCoord2f",
             "glGetString","glGetStringi","glGetTexImage","glReadBuffer","glDrawBuffer",
+            /* ARB/EXT historical spellings and the fixed-function surface: OptiFine calls
+             * these, and a client that resolves them with dlsym got SIGSEGV pc=0x0. */
+            "glGenTexturesARB","glBindTextureARB","glTexImage2DARB","glTexParameteriARB",
+            "glFramebufferTexture2DEXT","glRenderbufferStorageEXT","glGenerateMipmapEXT",
+            "glVertexPointer","glNormalPointer","glColorPointer","glTexCoordPointer",
         };
         char missing[2048];
         missing[0] = 0;

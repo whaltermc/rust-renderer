@@ -44,6 +44,26 @@ Both multisample paths are now covered by the harness (`minecraft depth attachme
 the non-DSA `createTexture` path and the DSA path, the latter asserting a **complete**
 framebuffer.
 
+### The `pc=0x0` crash that stubs could not prevent
+
+Returning a no-op stub for unresolved `gl*` names fixed the *resolver* path, but 1.16.5 with
+OptiFine still died at `SIGSEGV pc=0x0`, after "Reloading custom textures". Two more gaps
+behind it:
+
+- **OptiFine calls ARB/EXT-suffixed names** — `glGenTexturesARB`, `glBindTextureARB`,
+  `glTexImage2DARB`, `glFramebufferTexture2DEXT`, `glRenderbufferStorageEXT`,
+  `glGenerateMipmapEXT` and more. None were exported.
+- **The fixed-function surface was never exported either.** `glBegin`, `glEnd`, `glVertex3f`,
+  `glColor4f`, `glTexCoord2f`, the matrix stack and the client-array pointers existed only in
+  the resolver's stub table, and were stubbed rather than forwarded. ES 3.x implements all of
+  them, so 1.12-1.16 were drawing through calls that did nothing.
+
+`crates/gl-compat/src/aliases.rs` exports the whole surface and **forwards** the calls ES
+implements, instead of stubbing them. Names ES genuinely lacks (`glTexImage1D`, `glSelectBuffer`,
+the evaluators, display lists, pixel maps) are exported as announcing stubs, so a client that
+depends on one is visible in the log instead of silently getting nothing. Exported entry points
+went from 453 to 569.
+
 ### The follow-up `0x0502`: depth formats paired with a type ES rejects
 
 With `RENDERER_TRACE_GL=1` the next device log named the call exactly:

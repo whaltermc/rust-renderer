@@ -9,6 +9,7 @@
 //! This is still incomplete for full Minecraft parity (no Vulkan, limited shader rewrite,
 //! missing some desktop-only APIs). Expect crash/black-screen on unhandled paths.
 
+mod aliases;
 mod caps;
 mod dsa;
 mod dsa_named;
