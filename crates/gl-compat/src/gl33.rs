@@ -118,7 +118,8 @@ pub unsafe extern "C" fn glDrawElementsInstanced(mode:u32,count:i32,ty:u32,indic
 #[no_mangle]
 pub unsafe extern "C" fn glDrawRangeElementsBaseVertex(
     mode: u32,
-    start: i32,
+    start: u32,
+    end: u32,
     count: i32,
     ty: u32,
     indices: *const c_void,
@@ -127,30 +128,25 @@ pub unsafe extern "C" fn glDrawRangeElementsBaseVertex(
     if count <= 0 {
         return;
     }
-    if let Some(direct) = f::<unsafe extern "C" fn(u32, i32, i32, u32, *const c_void, i32)>(
+    if let Some(direct) = f::<unsafe extern "C" fn(u32, u32, u32, i32, u32, *const c_void, i32)>(
+        "glDrawRangeElementsBaseVertex",
+    ) {
+        return direct(mode, start, end, count, ty, indices, base_vertex);
+    }
+    if let Some(direct) = f::<unsafe extern "C" fn(u32, i32, u32, *const c_void, i32)>(
         "glDrawElementsBaseVertex",
     ) {
-        return direct(mode, start, count, ty, indices, base_vertex);
+        return direct(mode, count, ty, indices, base_vertex);
     }
     if base_vertex == 0 {
-        let stride = match ty {
-            0x1401 => 1usize, // GL_UNSIGNED_BYTE
-            0x1403 => 2,      // GL_UNSIGNED_SHORT
-            0x1405 => 4,      // GL_UNSIGNED_INT
-            _ => {
-                err(GL_INVALID_ENUM);
-                return;
-            }
-        };
-        if let Some(draw) = f::<unsafe extern "C" fn(u32, i32, u32, usize)>("glDrawElements") {
-            return draw(mode, count, ty, start.max(0) as usize * stride);
+        if let Some(draw) = f::<unsafe extern "C" fn(u32, i32, u32, *const c_void)>("glDrawElements") {
+            return draw(mode, count, ty, indices);
         }
     }
     static ONCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     crate::log_once(
         &ONCE,
-        "[gl33] glDrawRangeElementsBaseVertex with a non-zero base vertex needs ES 3.2 \
-         (glDrawElementsBaseVertex); this driver does not provide it",
+        "[gl33] glDrawRangeElementsBaseVertex needs a GLES base-vertex entry point on this driver",
     );
     err(GL_INVALID_OPERATION);
 }
@@ -569,7 +565,15 @@ unsafe fn forward_get_tex_image(target: u32, level: i32, format: u32, ty: u32, p
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn glGetTextureImage(texture: u32, level: i32, format: u32, ty: u32, pixels: *mut c_void) {
+pub unsafe extern "C" fn glGetTextureImage(
+    texture: u32,
+    level: i32,
+    format: u32,
+    ty: u32,
+    buf_size: i32,
+    pixels: *mut c_void,
+) {
+    let _ = buf_size;
     let Some(guard) = TextureBindingGuard::capture() else {
         err(GL_INVALID_OPERATION);
         return;

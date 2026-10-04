@@ -430,54 +430,58 @@ pub unsafe extern "C" fn glGetNamedFramebufferAttachmentParameteriv(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn glClearNamedFramebufferiv(fbo: u32, mask: u32, b: *const i32) {
+pub unsafe extern "C" fn glClearNamedFramebufferiv(
+    fbo: u32, buffer: u32, drawbuffer: i32, value: *const i32
+) {
     if !unsafe { bind_fbo(fbo) } {
         mark_error_site("glClearNamedFramebufferiv");
         errors().set(0x0502);
         return;
     }
-    if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, u32, *const i32)>("glClearBufferiv")
-    {
-        f(GL_FRAMEBUFFER, mask, b);
+    if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, u32, i32, *const i32)>("glClearBufferiv") {
+        f(buffer, drawbuffer, value);
     }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn glClearNamedFramebufferuiv(fbo: u32, mask: u32, b: *const u32) {
+pub unsafe extern "C" fn glClearNamedFramebufferuiv(
+    fbo: u32, buffer: u32, drawbuffer: i32, value: *const u32
+) {
     if !unsafe { bind_fbo(fbo) } {
         mark_error_site("glClearNamedFramebufferuiv");
         errors().set(0x0502);
         return;
     }
-    if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, u32, *const u32)>("glClearBufferuiv")
-    {
-        f(GL_FRAMEBUFFER, mask, b);
+    if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, u32, i32, *const u32)>("glClearBufferuiv") {
+        f(buffer, drawbuffer, value);
     }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn glClearNamedFramebufferfv(fbo: u32, mask: u32, b: *const f32) {
+pub unsafe extern "C" fn glClearNamedFramebufferfv(
+    fbo: u32, buffer: u32, drawbuffer: i32, value: *const f32
+) {
     if !unsafe { bind_fbo(fbo) } {
         mark_error_site("glClearNamedFramebufferfv");
         errors().set(0x0502);
         return;
     }
-    if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, u32, *const f32)>("glClearBufferfv")
-    {
-        f(GL_FRAMEBUFFER, mask, b);
+    if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, u32, i32, *const f32)>("glClearBufferfv") {
+        f(buffer, drawbuffer, value);
     }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn glClearNamedFramebufferfi(fbo: u32, mask: u32, d: f32, i: i32) {
+pub unsafe extern "C" fn glClearNamedFramebufferfi(
+    fbo: u32, buffer: u32, drawbuffer: i32, depth: f32, stencil: i32
+) {
     if !unsafe { bind_fbo(fbo) } {
         mark_error_site("glClearNamedFramebufferfi");
         errors().set(0x0502);
         return;
     }
-    if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, u32, f32, i32)>("glClearBufferfi")
-    {
-        f(GL_FRAMEBUFFER, mask, d, i);
+    if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, i32, f32, i32)>("glClearBufferfi") {
+        f(buffer, drawbuffer, depth, stencil);
     }
 }
 
@@ -833,7 +837,7 @@ pub unsafe extern "C" fn glBindBuffersRange(
 
 #[no_mangle]
 pub unsafe extern "C" fn glBindVertexBuffers(
-    first: u32, count: i32, buffers: *const u32, offsets: *const isize, _sizes: *const isize,
+    first: u32, count: i32, buffers: *const u32, offsets: *const isize, strides: *const i32,
 ) {
     if count < 0 || (count > 0 && buffers.is_null()) {
         errors().set(0x0501);
@@ -842,9 +846,9 @@ pub unsafe extern "C" fn glBindVertexBuffers(
     for i in 0..count as usize {
         let id = *buffers.add(i);
         if let Some(f) =
-            driver_fn_cached::<unsafe extern "C" fn(u32, u32, isize)>("glBindVertexBuffer")
+            driver_fn_cached::<unsafe extern "C" fn(u32, u32, isize, i32)>("glBindVertexBuffer")
         {
-            f(first + i as u32, id, if offsets.is_null() { 0 } else { *offsets.add(i) });
+            f(first + i as u32, id, if offsets.is_null() { 0 } else { *offsets.add(i) }, if strides.is_null() { 0 } else { *strides.add(i) });
         } else {
             mark_error_site("glBindVertexBuffers");
             errors().set(0x0502);
@@ -855,7 +859,7 @@ pub unsafe extern "C" fn glBindVertexBuffers(
 
 #[no_mangle]
 pub unsafe extern "C" fn glVertexArrayVertexBuffers(
-    vao: u32, first: u32, count: i32, buffers: *const u32,
+    vao: u32, first: u32, count: i32, buffers: *const u32, offsets: *const isize, strides: *const i32,
 ) {
     if count < 0 || (count > 0 && buffers.is_null()) {
         errors().set(0x0501);
@@ -867,9 +871,9 @@ pub unsafe extern "C" fn glVertexArrayVertexBuffers(
     for i in 0..count as usize {
         let id = *buffers.add(i);
         if let Some(f) =
-            driver_fn_cached::<unsafe extern "C" fn(u32, u32, isize)>("glBindVertexBuffer")
+            driver_fn_cached::<unsafe extern "C" fn(u32, u32, isize, i32)>("glBindVertexBuffer")
         {
-            f(first + i as u32, id, 0);
+            f(first + i as u32, id, if offsets.is_null() { 0 } else { *offsets.add(i) }, if strides.is_null() { 0 } else { *strides.add(i) });
         }
     }
 }
@@ -963,15 +967,17 @@ pub unsafe extern "C" fn glGetTextureLevelParameterfv(
 
 #[no_mangle]
 pub unsafe extern "C" fn glGetCompressedTextureImage(
-    id: u32, level: i32, format: u32, size: isize, data: *mut c_void,
+    id: u32, level: i32, buf_size: i32, data: *mut c_void,
 ) {
     let target = unsafe { bind_tex(id) };
     if let Some(f) =
-        driver_fn_cached::<unsafe extern "C" fn(u32, i32, u32, isize, *mut c_void)>(
-            "glGetCompressedTexImage",
-        )
+        driver_fn_cached::<unsafe extern "C" fn(u32, i32, *mut c_void)>("glGetCompressedTexImage")
     {
-        f(target, level, format, size, data);
+        let _ = buf_size;
+        f(target, level, data);
+    } else {
+        mark_error_site("glGetCompressedTextureImage");
+        errors().set(0x0502);
     }
 }
 
@@ -1110,103 +1116,6 @@ pub unsafe extern "C" fn glGetProgramResourceLocationIndex(
     0xFFFF_FFFF
 }
 
-/// Debug-message filtering. This layer produces no debug output, so there is nothing to
-/// filter; the call has to be accepted because a trace of real Minecraft 1.17 shows it being
-/// called on start-up, and an unresolved name is a null function pointer.
-#[no_mangle]
-pub unsafe extern "C" fn glDebugMessageControl(
-    _source: u32,
-    _type_: u32,
-    _severity: u32,
-    _count: i32,
-    _ids: *const u32,
-    _enabled: u8,
-) {
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn glDebugMessageControlARB(
-    _source: u32,
-    _type_: u32,
-    _severity: u32,
-    _count: i32,
-    _ids: *const u32,
-    _enabled: u8,
-) {
-}
-
-/// Image texture binding. Found missing from a real Minecraft 1.21.1 trace.
-#[no_mangle]
-pub unsafe extern "C" fn glBindImageTexture(
-    unit: u32,
-    texture: u32,
-    level: i32,
-    layered: i32,
-    layer: i32,
-    access: i32,
-    format: u32,
-) {
-    match driver_fn_cached::<unsafe extern "C" fn(u32, u32, i32, i32, i32, i32, u32)>(
-        "glBindImageTexture",
-    ) {
-        Some(f) => f(unit, texture, level, layered, layer, access, format),
-        None => mark_error_site("glBindImageTexture"),
-    }
-}
-
-/// Multi-draw with a base vertex. Found missing from a real Minecraft 1.21.1 trace.
-///
-/// ES 3.2 provides this directly. Where it is absent the fallback is exact rather than
-/// approximate: the per-draw index pointer advances by the index size, and each draw carries
-/// the same base vertex.
-#[no_mangle]
-pub unsafe extern "C" fn glMultiDrawElementsBaseVertex(
-    mode: u32,
-    count: i32,
-    ty: u32,
-    indices: *const c_void,
-    base_vertex: i32,
-    primcount: i32,
-) {
-    if primcount <= 0 {
-        return;
-    }
-    if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, i32, u32, *const c_void, i32, i32)>(
-        "glMultiDrawElementsBaseVertex",
-    ) {
-        return f(mode, count, ty, indices, base_vertex, primcount);
-    }
-    if let Some(draw) =
-        driver_fn_cached::<unsafe extern "C" fn(u32, i32, u32, *const c_void, i32)>(
-            "glDrawElementsBaseVertex",
-        )
-    {
-        let stride = match ty {
-            0x1401 => 1isize,
-            0x1403 => 2,
-            0x1405 => 4,
-            _ => {
-                mark_error_site("glMultiDrawElementsBaseVertex");
-                errors().set(0x0500);
-                return;
-            }
-        };
-        let base = indices as usize;
-        for i in 0..primcount as isize {
-            draw(
-                mode,
-                count,
-                ty,
-                base.wrapping_add((i * stride) as usize) as *const c_void,
-                base_vertex,
-            );
-        }
-        return;
-    }
-    mark_error_site("glMultiDrawElementsBaseVertex");
-    errors().set(0x0502);
-}
-
 /// Names registered in the resolver, so the reachability test can check them.
 pub const EXPORTS: &[&str] = &[
     "glCreateTextures", "glCreateFramebuffers", "glCreateRenderbuffers",
@@ -1227,8 +1136,7 @@ pub const EXPORTS: &[&str] = &[
     "glGetVertexArrayiv", "glGetVertexArrayIndexediv", "glGetVertexArrayIndexed64iv",
     "glTextureStorage1D", "glTextureSubImage1D", "glCompressedTextureSubImage1D",
     "glCopyTextureSubImage1D", "glTextureBuffer", "glNamedFramebufferTextureMultiviewOVR",
-    "glGetProgramResourceLocationIndex", "glDebugMessageControl", "glDebugMessageControlARB",
-    "glBindImageTexture", "glMultiDrawElementsBaseVertex",
+    "glGetProgramResourceLocationIndex",
     "glTexStorage2DMultisample", "glTexStorage3DMultisample", "glTextureStorage2DMultisample",
 ];
 

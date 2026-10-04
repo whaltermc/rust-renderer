@@ -97,7 +97,7 @@ fn strip_mojang_directives(src: &str) -> String {
 /// Highest fragment output layer the device can be asked for. Iris/OptiFine packs use up to
 /// eight; GLES 3.0 only guarantees four, and the real limit comes from the capability probe,
 /// but declaring more than the shader writes is what used to break compilation.
-pub const MAX_FRAG_OUTPUTS: usize = 8;
+pub const MAX_FRAG_OUTPUTS: usize = 4;
 
 /// How many fragment outputs this shader actually writes.
 ///
