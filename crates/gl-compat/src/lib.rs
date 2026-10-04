@@ -95,21 +95,21 @@ fn backend() -> Option<&'static dyn Backend> {
 
     // Vulkan is only *attempted* for the modes that ask for it. Note the game reaches us
     // through desktop GL entry points, which the GLES driver serves; a Vulkan backend is
-    // selected here only for renderer-owned work (fixed-function emulation), and only when
-    // it reports it can actually render.
-    let wants_vulkan = matches!(cfg.backend, BackendKind::Auto | BackendKind::Vulkan | BackendKind::Hybrid);
-    let vulkan = if wants_vulkan {
+    // usable here only for renderer-owned work (fixed-function emulation), and only when it
+    // reports it can actually render.
+    let wants_vulkan = matches!(
+        cfg.backend,
+        BackendKind::Auto | BackendKind::Vulkan | BackendKind::Hybrid
+    );
+    let probed = if wants_vulkan {
         match vulkan_backend::probe() {
             Ok(b) => {
-                if b.can_render() {
-                    Some(b)
-                } else {
-                    log(&format!(
-                        "[Vulkan] {} present but cannot render (no SPIR-V/pipeline/present path)",
-                        b.device_info().renderer
-                    ));
-                    None
+                let i = b.device_info();
+                log(&format!("[Vulkan] found {} — {}", i.renderer, i.api_version));
+                if !b.can_render() {
+                    log("[Vulkan] device present but it cannot render yet (no SPIR-V/pipeline/present path)");
                 }
+                Some(b)
             }
             Err(e) => {
                 log(&format!("[Vulkan] {e}"));
@@ -119,27 +119,46 @@ fn backend() -> Option<&'static dyn Backend> {
     } else {
         None
     };
+    // Description for logging, taken before the backend is moved into a match arm.
+    let detected_vulkan = probed.as_ref().map(|b| b.device_info().renderer.clone());
+    let vulkan_can_render = probed.as_ref().is_some_and(|b| b.can_render());
 
     let chosen: Option<Box<dyn Backend>> = match cfg.backend {
-        // Explicit Vulkan, no device: fail loudly rather than silently running on GLES.
-        BackendKind::Vulkan => match vulkan {
-            Some(b) => Some(b),
-            None => {
-                log("[Renderer] RENDERER_BACKEND=vulkan requested but unavailable; using GLES so the game still starts");
+        // Explicit Vulkan: never claim to be rendering on a backend that cannot.
+        BackendKind::Vulkan => match probed {
+            Some(b) if vulkan_can_render => Some(b),
+            _ => {
+                log("[Renderer] RENDERER_BACKEND=vulkan requested but no Vulkan device can render; using GLES so the game still starts");
                 gles()
             }
         },
-        // Hybrid: GLES serves the GL surface; Vulkan is preferred for renderer-owned work
-        // when it can render, which (today) it cannot, so GLES wins and Vulkan is only
-        // reported. Falls back rather than failing.
+        // Hybrid: GLES serves the GL entry points that every frame is drawn through; Vulkan
+        // is kept for renderer-owned work once it can render. Today it cannot, so GLES draws
+        // the frame and this says so explicitly rather than looking like gles was ignored.
         BackendKind::Hybrid => {
-            if vulkan.is_some() {
-                log("[Renderer] hybrid: Vulkan can render, GLES still serves the GL entry points");
+            match (&detected_vulkan, vulkan_can_render) {
+                (Some(dev), true) => log(&format!(
+                    "[Renderer] hybrid: Vulkan device '{dev}' will take renderer-owned work; \
+                     GLES still serves the GL entry points"
+                )),
+                (Some(dev), false) => log(&format!(
+                    "[Renderer] hybrid: Vulkan device '{dev}' detected but it cannot render yet, \
+                     so GLES serves the whole frame. Vulkan is used for device reporting only."
+                )),
+                (None, _) => log(
+                    "[Renderer] hybrid: no Vulkan device available, so GLES serves the whole frame",
+                ),
             }
             gles()
         }
         BackendKind::Gles => gles(),
-        BackendKind::Auto => vulkan.or_else(gles),
+        BackendKind::Auto => {
+            if vulkan_can_render {
+                probed
+            } else {
+                gles()
+            }
+        }
     };
 
     match chosen {

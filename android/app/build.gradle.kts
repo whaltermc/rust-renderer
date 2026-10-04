@@ -48,12 +48,7 @@ val pluginRendererConfig = buildJsonValue {
         env = buildEnvs {
             // Real backend is GLES 3.x passthrough — do NOT claim Mesa/Zink/GL 4.6.
             normal("LIBGL_ES", "3")
-            // Default stays gles: the GL entry points the game calls are served by the
-            // GLES driver. `vulkan` and `hybrid` are selectable below but cannot render the
-            // game yet (see vulkan-backend docs); the code logs why and stays on GLES.
-            normal("RENDERER_BACKEND", "gles")
             // Our glGetString spoof (see gl-compat) reports 3.3 / GLSL 330.
-            normal("RENDERER_SPOOF_GL", "1")
             normal("JAVA_TOOL_OPTIONS", "-Dorg.lwjgl.util.NoChecks=true")
 
             // Override Zalith defaults that otherwise inject Mesa 4.6 + zink for
@@ -66,16 +61,42 @@ val pluginRendererConfig = buildJsonValue {
             // Avoid treating our SO as a Mesa DRI driver.
             normal("LIB_MESA_NAME", "")
 
-            // Keep selectable backend for future vulkan work; default stays gles.
+            // Renderer options. Each setting is declared exactly once: the previous build
+            // sent RENDERER_BACKEND both as a fixed env var and as a selectable under a
+            // different key, which is what made the backend appear twice in the list.
+            // `vulkan` and `hybrid` cannot render the game yet (see vulkan-backend docs) and
+            // the code logs why, then stays on GLES.
             selectable(
-                key = "RENDERER_BACKEND_SELECT",
+                key = "RENDERER_BACKEND",
                 items = RendererConfig.EnvItems(
                     defaultValue = "gles",
                     values = listOf(
                         "gles",
-                        "vulkan",
                         "hybrid",
+                        "vulkan",
                         "auto"
+                    )
+                )
+            ),
+            // 1 = report OpenGL 3.3 / GLSL 330 so version checks pass; 0 = report the real
+            // GLES strings (useful when diagnosing a driver-specific problem).
+            selectable(
+                key = "RENDERER_SPOOF_GL",
+                items = RendererConfig.EnvItems(
+                    defaultValue = "1",
+                    values = listOf(
+                        "1",
+                        "0"
+                    )
+                )
+            ),
+            selectable(
+                key = "RENDERER_DEBUG",
+                items = RendererConfig.EnvItems(
+                    defaultValue = "0",
+                    values = listOf(
+                        "0",
+                        "1"
                     )
                 )
             )

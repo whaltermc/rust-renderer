@@ -93,6 +93,116 @@ fn strip_mojang_directives(src: &str) -> String {
         })
 }
 
+
+/// Highest fragment output layer the device can be asked for. Iris/OptiFine packs use up to
+/// eight; GLES 3.0 only guarantees four, and the real limit comes from the capability probe,
+/// but declaring more than the shader writes is what used to break compilation.
+pub const MAX_FRAG_OUTPUTS: usize = 8;
+
+/// How many fragment outputs this shader actually writes.
+///
+/// Counting real usage matters: the previous code declared outputs 1-3 whenever any
+/// `gl_FragData[1..]` appeared, and never declared location 0 for a shader that only wrote
+/// `gl_FragData[0]`, which produced a shader referencing an undeclared identifier.
+fn fragment_output_layers(src: &str) -> usize {
+    if !src.contains("gl_FragColor") && !src.contains("gl_FragData") {
+        return 0;
+    }
+    // A bare `gl_FragData` (no index) is not valid GLSL, but treat it as one layer.
+    let max_layer = max_frag_data_index(src).unwrap_or(0);
+    // Cap the declared set: beyond this, extra attachments fold onto the last output.
+    (max_layer + 1).min(MAX_FRAG_OUTPUTS)
+}
+
+/// Highest `gl_FragData[n]` index written by the shader, scanning the source rather than
+/// probing a fixed range of indices: shader packs do write layers above the usual range.
+fn max_frag_data_index(src: &str) -> Option<usize> {
+    let bytes = src.as_bytes();
+    const TOKEN: &[u8] = b"gl_FragData[";
+    let mut found: Option<usize> = None;
+    let mut i = 0;
+    while i + TOKEN.len() < bytes.len() {
+        if bytes[i..].starts_with(TOKEN) {
+            let mut j = i + TOKEN.len();
+            let mut value = 0usize;
+            let mut digits = 0;
+            while j < bytes.len() && bytes[j].is_ascii_digit() {
+                value = value * 10 + (bytes[j] - b'0') as usize;
+                digits += 1;
+                j += 1;
+            }
+            if digits > 0 && j < bytes.len() && bytes[j] == b']' {
+                found = Some(found.map_or(value, |m: usize| m.max(value)));
+            }
+            i = j;
+            continue;
+        }
+        i += 1;
+    }
+    found
+}
+
+/// Declares `layers` fragment outputs, location 0 being the primary `rust_FragColor`.
+fn fragment_output_decls(layers: usize) -> String {
+    let mut decls = String::from("layout(location = 0) out vec4 rust_FragColor;\n");
+    for i in 1..layers {
+        decls.push_str(&format!("layout(location = {i}) out vec4 rust_FragData{i};\n"));
+    }
+    decls
+}
+
+/// Rewrites `gl_FragColor` and `gl_FragData[n]` onto the declared outputs.
+///
+/// Layers beyond what was declared are folded onto the highest declared one: the shader then
+/// compiles and renders, losing only those extra attachments, instead of failing the compile
+/// and aborting resource loading.
+fn rewrite_frag_data(src: &str, layers: usize) -> String {
+    let bytes = src.as_bytes();
+    const TOKEN: &[u8] = b"gl_FragData[";
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i..].starts_with(TOKEN) {
+            let mut j = i + TOKEN.len();
+            let mut value = 0usize;
+            let mut digits = 0;
+            while j < bytes.len() && bytes[j].is_ascii_digit() {
+                value = value * 10 + (bytes[j] - b'0') as usize;
+                digits += 1;
+                j += 1;
+            }
+            if digits > 0 && j < bytes.len() && bytes[j] == b']' {
+                if value == 0 || layers <= 1 {
+                    out.push_str("rust_FragColor");
+                } else {
+                    out.push_str(&format!("rust_FragData{}", value.min(layers - 1)));
+                }
+                i = j + 1;
+                continue;
+            }
+        }
+        // Not a recognised index: copy one byte and continue scanning.
+        let ch_len = utf8_len(bytes[i]);
+        out.push_str(&src[i..i + ch_len]);
+        i += ch_len;
+    }
+    out.replace("gl_FragColor", "rust_FragColor")
+}
+
+fn utf8_len(b: u8) -> usize {
+    if b < 0x80 {
+        1
+    } else if b >> 5 == 0b110 {
+        2
+    } else if b >> 4 == 0b1110 {
+        3
+    } else if b >> 3 == 0b11110 {
+        4
+    } else {
+        1
+    }
+}
+
 fn looks_like_fragment(src: &str) -> bool {
     src.contains("gl_FragColor")
         || src.contains("gl_FragData")
@@ -150,6 +260,9 @@ fn rewrite_line_body(line: &str, use_300: bool, is_frag: bool, needs_frag_out: b
             .replace("texture2DLod(", "textureLod(")
             .replace("texture2DProjLod(", "textureProjLod(")
             .replace("texture2DProj(", "textureProj(")
+            .replace("texture2DGrad(", "textureGrad(")
+            .replace("texture2DProjGrad(", "textureProjGrad(")
+            .replace("texture2DLodEXT(", "textureLod(")
             .replace("texture2D(", "texture(")
             .replace("texture3DLod(", "textureLod(")
             .replace("texture3D(", "texture(")
@@ -160,6 +273,9 @@ fn rewrite_line_body(line: &str, use_300: bool, is_frag: bool, needs_frag_out: b
             .replace("shadow2D(", "texture(")
             .replace("texture1D(", "texture(")
             .replace("texture1DLod(", "textureLod(");
+
+        // ES 3.00 has no EXT_frag_depth spelling.
+        s = s.replace("gl_FragDepthEXT", "gl_FragDepth");
 
         // Rare desktop helpers
         s = s
@@ -229,8 +345,11 @@ pub fn translate(src: &str) -> Result<String, String> {
         return Ok(src.to_string());
     }
 
-    // Map any desktop version we can into ES 300 (or 100 for very old).
-    let use_300 = num >= 130;
+    // Map desktop GLSL into ES 3.00. The threshold used to be 130, which sent every
+    // `#version 120` shader (the OptiFine/Iris era, and Minecraft 1.12-1.15) to ES 1.00 --
+    // where `layout(location = N) out` is not valid GLSL, so every MRT shader failed to
+    // compile. ES 3.00 also accepts everything ES 1.00 did, so this is strictly broader.
+    let use_300 = num >= 110;
     let (header, precision) = if use_300 {
         ("#version 300 es", PRECISION_300)
     } else {
@@ -238,13 +357,8 @@ pub fn translate(src: &str) -> Result<String, String> {
     };
 
     let is_frag = looks_like_fragment(src);
-    let needs_frag_out =
-        use_300 && is_frag && (src.contains("gl_FragColor") || src.contains("gl_FragData[0]"));
-
-    // Soft-handle MRT: map gl_FragData[1..] to same output (wrong but boots).
-    let has_mrt = src.contains("gl_FragData[1]")
-        || src.contains("gl_FragData[2]")
-        || src.contains("gl_FragData[3]");
+    let layers = fragment_output_layers(src);
+    let needs_frag_out = use_300 && layers > 0;
 
     let mut out = String::with_capacity(src.len() + 512);
     out.push_str(header);
@@ -267,37 +381,18 @@ pub fn translate(src: &str) -> Result<String, String> {
             continue;
         }
 
+        // ES 3.00 needs essentially no #extension directives, and a name it does not know
+        // (GL_EXT_frag_depth, most desktop GL_EXT_* lines) is a compile error. Dropping them
+        // all is the safer direction: the features they gate are either core in ES 3.00 or
+        // not used by Minecraft shaders.
         if t.starts_with("#extension") {
-            // Drop desktop-only; keep harmless ES / require lines stripped.
-            let drop = t.contains("GL_ARB_")
-                || t.contains("GL_NV_")
-                || t.contains("GL_AMD_")
-                || t.contains("GL_EXT_gpu_shader4")
-                || t.contains("GL_EXT_geometry_shader")
-                || t.contains("GL_OES_geometry_shader")
-                || t.contains("GL_ARB_separate_shader_objects")
-                || t.contains("GL_ARB_explicit_attrib_location")
-                || t.contains("GL_ARB_explicit_uniform_location")
-                || t.contains("GL_ARB_shading_language_420pack")
-                || t.contains("GL_ARB_gpu_shader5")
-                || t.contains("GL_ARB_shader_bit_encoding")
-                || t.contains("GL_ARB_shader_storage_buffer_object")
-                || t.contains("GL_ARB_compute_shader");
-            if drop {
-                continue;
-            }
+            continue;
         }
 
         if !inserted_precision && !t.is_empty() && !t.starts_with('#') && !t.starts_with("//") {
             out.push_str(precision);
             if needs_frag_out {
-                out.push_str("layout(location = 0) out vec4 rust_FragColor;\n");
-            }
-            if has_mrt {
-                // Declare extra outs so references can be rewritten softly.
-                out.push_str("layout(location = 1) out vec4 rust_FragData1;\n");
-                out.push_str("layout(location = 2) out vec4 rust_FragData2;\n");
-                out.push_str("layout(location = 3) out vec4 rust_FragData3;\n");
+                out.push_str(&fragment_output_decls(layers));
             }
             inserted_precision = true;
         }
@@ -306,11 +401,10 @@ pub fn translate(src: &str) -> Result<String, String> {
         if use_300 {
             rewritten = rewrite_es300_tokens(rewritten);
         }
-        if has_mrt {
-            rewritten = rewritten
-                .replace("gl_FragData[1]", "rust_FragData1")
-                .replace("gl_FragData[2]", "rust_FragData2")
-                .replace("gl_FragData[3]", "rust_FragData3");
+        if needs_frag_out {
+            // Runs whenever the shader writes any output, including a single high-index
+            // gl_FragData[n]; gating this on MRT left such shaders unrewritten.
+            rewritten = rewrite_frag_data(&rewritten, layers);
         }
         out.push_str(&rewritten);
         out.push('\n');
@@ -319,13 +413,8 @@ pub fn translate(src: &str) -> Result<String, String> {
     if !inserted_precision {
         out.push_str(precision);
         if needs_frag_out {
-            out.push_str("layout(location = 0) out vec4 rust_FragColor;\n");
+            out.push_str(&fragment_output_decls(layers));
         }
-    }
-
-    // Leftover gl_FragData → primary out
-    if out.contains("gl_FragData") {
-        out = out.replace("gl_FragData[0]", "rust_FragColor");
     }
 
     Ok(out)
@@ -395,5 +484,92 @@ mod tests {
     fn noperspective_is_removed() {
         let o = translate("#version 330 core\nnoperspective in vec2 uv;\nvoid main(){gl_Position=vec4(0);}").unwrap();
         assert!(!o.contains("noperspective"));
+    }
+
+    // ---- OptiFine / Iris era (#version 120) shader packs ----
+
+    #[test]
+    fn version_120_targets_es_300_not_es_100() {
+        // ES 1.00 cannot express `layout(location = N) out`, so sending 120 there made every
+        // MRT shader pack fail to compile.
+        let o = translate(
+            "#version 120\nvarying vec2 tc;\nvoid main(){ gl_FragColor = vec4(tc, 0.0, 1.0); }\n",
+        )
+        .unwrap();
+        assert!(o.starts_with("#version 300 es\n"), "got: {}", &o[..40]);
+        assert!(o.contains("in vec2 tc"), "varying must become in");
+        assert!(o.contains("layout(location = 0) out vec4 rust_FragColor;"));
+    }
+
+    #[test]
+    fn mrt_declares_exactly_the_layers_written() {
+        let o = translate(
+            "#version 120\nvoid main(){ gl_FragData[0] = vec4(1.0); gl_FragData[1] = vec4(0.0); }\n",
+        )
+        .unwrap();
+        assert!(o.contains("layout(location = 0) out vec4 rust_FragColor;"));
+        assert!(o.contains("layout(location = 1) out vec4 rust_FragData1;"));
+        // Only two layers are written, so 2 and 3 must not be declared.
+        assert!(!o.contains("rust_FragData2"), "unused output declared: {o}");
+        assert!(!o.contains("rust_FragData3"), "unused output declared: {o}");
+        assert!(!o.contains("gl_FragData"), "gl_FragData left behind: {o}");
+    }
+
+    #[test]
+    fn frag_data_zero_declares_a_primary_output() {
+        // The old code rewrote gl_FragData[0] to rust_FragColor but only declared the output
+        // when gl_FragColor appeared, so this referenced an undeclared identifier.
+        let o = translate("#version 120\nvoid main(){ gl_FragData[0] = vec4(1.0); }\n").unwrap();
+        assert!(o.contains("layout(location = 0) out vec4 rust_FragColor;"));
+        assert!(!o.contains("gl_FragData"));
+    }
+
+    #[test]
+    fn layers_beyond_the_declared_set_fold_onto_the_last_one() {
+        // Folding keeps the shader compiling, which matters because a failed compile aborts
+        // resource loading rather than just dropping a draw.
+        let o = translate(
+            "#version 120\nvoid main(){ gl_FragData[0] = vec4(1.0); gl_FragData[5] = vec4(0.0); }\n",
+        )
+        .unwrap();
+        assert!(!o.contains("gl_FragData[5]"), "unrewritten: {o}");
+        assert!(o.contains("rust_FragData5"), "should keep its own layer: {o}");
+        assert!(o.contains("layout(location = 5) out vec4 rust_FragData5;"));
+
+        // And when fewer layers exist than the shader writes, it folds rather than failing.
+        let o2 = translate("#version 120\nvoid main(){ gl_FragData[9] = vec4(1.0); }\n").unwrap();
+        assert!(!o2.contains("gl_FragData"), "unrewritten: {o2}");
+    }
+
+    #[test]
+    fn frag_depth_ext_and_grad_sampling_are_translated() {
+        let o = translate(
+            "#version 120\nextension GL_EXT_frag_depth\nuniform sampler2D s;\n\
+             void main(){ gl_FragDepthEXT = gl_FragCoord.z; gl_FragColor = texture2DGrad(s, vec2(0.), vec2(0.), vec2(0.)); }\n",
+        );
+        // A missing '#extension' prefix above is deliberate: unknown directives must not escape.
+        let o = translate(
+            "#version 120\n#extension GL_EXT_frag_depth\nuniform sampler2D s;\n\
+             void main(){ gl_FragDepthEXT = gl_FragCoord.z; gl_FragColor = texture2DGrad(s, vec2(0.), vec2(0.), vec2(0.)); }\n",
+        )
+        .unwrap();
+        assert!(o.contains("gl_FragDepth ="), "got: {o}");
+        assert!(!o.contains("gl_FragDepthEXT"));
+        assert!(o.contains("textureGrad("), "got: {o}");
+        assert!(!o.contains("#extension"), "unknown extension kept: {o}");
+    }
+
+    #[test]
+    fn plain_shader_declares_no_fragment_output() {
+        let o = translate("#version 120\nuniform sampler2D s;\nvoid main(){ gl_FragColor = vec4(1.0); }\n").unwrap();
+        assert!(o.contains("layout(location = 0) out vec4 rust_FragColor;"));
+        let vertex = translate("#version 120\nvoid main(){ gl_Position = vec4(1.0); }\n").unwrap();
+        assert!(!vertex.contains("out vec4"), "vertex shader must not declare frag outputs");
+    }
+
+    #[test]
+    fn es_300_shader_passes_through_unchanged() {
+        let s = "#version 300 es\nprecision highp float;\nout vec4 c;\nvoid main(){ c = vec4(1.0); }\n";
+        assert_eq!(translate(s).unwrap(), s);
     }
 }

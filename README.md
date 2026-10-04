@@ -93,8 +93,15 @@ read through `RENDERER_BACKEND_SELECT`:
 | `hybrid` | GLES for the GL surface, Vulkan preferred for renderer-owned work when it can render. |
 | `auto` | First backend that initializes *and can render*, in the order vulkan → gles. |
 
-`RENDERER_BACKEND_SELECT` takes precedence over the plugin's shipped `RENDERER_BACKEND=gles`
-default, which is what makes the picker do anything; a junk value is ignored rather than fatal.
+The plugin declares this as a **single** selectable option. The previous build shipped
+`RENDERER_BACKEND` both as a fixed env var and as a selectable under a different key, which
+is what made the backend show up twice in the launcher's renderer list; `RENDERER_BACKEND_SELECT`
+is still accepted as a fallback so an already-installed launcher build keeps working. A junk
+value is ignored rather than fatal.
+
+`hybrid` reports what it actually did: GLES serves every GL entry point, so until Vulkan can
+render, hybrid means "GLES draws the frame, Vulkan supplies device information". The log says
+which of those happened instead of leaving the choice looking like it did nothing.
 
 ### What the Vulkan backend does and does not do
 
@@ -282,10 +289,10 @@ Logs: `adb logcat -s RustRenderer RendererV2Plugin`
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `RENDERER_BACKEND` | `gles` | `gles` / `vulkan` / `hybrid` / `auto` (overridden by `RENDERER_BACKEND_SELECT` from the launcher picker) |
-| `RENDERER_SPOOF_GL` | `1` | Advertise OpenGL 3.3 core / GLSL 3.30 (set `0` to report real GLES strings) |
+| `RENDERER_BACKEND` | `gles` | `gles` / `hybrid` / `vulkan` / `auto` — one option in the launcher; `RENDERER_BACKEND_SELECT` is still read as a fallback for older launcher builds |
+| `RENDERER_SPOOF_GL` | `1` | Advertise OpenGL 3.3 core / GLSL 3.30; `0` reports the real GLES strings. Selectable in the launcher. |
 | `LIBGL_ES` | `3` | Hint for launcher / other libs |
-| `RENDERER_DEBUG` | unset | `1` enables extra logging later |
+| `RENDERER_DEBUG` | `0` | `1` enables extra logging. Selectable in the launcher. |
 
 ## Next work (spec order)
 
@@ -325,7 +332,7 @@ Do not claim Minecraft compatibility until a concrete version has been tested an
 | Vanilla MC 1.17–1.20 | Partial — modern shaders via GLES3 passthrough + GLSL rewrite; test per version |
 | Vanilla MC 1.21 / 26.x | Experimental — needs more GL 4.x / DSA coverage |
 | Sodium | **Out of scope for a 3.3 layer** — see above: unsupported architecture per Sodium's own docs, needs 4.5-class drivers, and is a mod requiring a working Fabric/NeoForge loader |
-| Iris / shader packs | **Not yet** — needs broader GLSL + extension surface (shadow, compute later) |
+| Iris / shader packs | GLSL translated (OptiFine/Iris-era `#version 120`, MRT, `gl_FragData`, `texture2DGrad`, `gl_FragDepthEXT`); **unverified** — MRT needs `glDrawBuffers` paths that are untested here, and Iris/OptiFine are mods needing Fabric/Forge + Mixin |
 | Performance | GLES driver does the heavy lifting; FF path is only used when no program is bound |
 
 These rows describe earlier device testing and are **not** re-verified for the current tree

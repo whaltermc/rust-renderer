@@ -50,8 +50,8 @@ pub struct Config {
 impl Config {
     /// Reads the backend selection and debug flag from the environment.
     pub fn from_env() -> Self {
-        let select = std::env::var("RENDERER_BACKEND_SELECT").ok();
-        let base = std::env::var("RENDERER_BACKEND").ok();
+        let select = std::env::var("RENDERER_BACKEND").ok();
+        let base = std::env::var("RENDERER_BACKEND_SELECT").ok();
         let debug = std::env::var("RENDERER_DEBUG").map(|v| v == "1").unwrap_or(false);
         Self {
             backend: select_backend(select.as_deref(), base.as_deref()),
@@ -60,17 +60,19 @@ impl Config {
     }
 }
 
-/// Chooses the backend from the two environment variables the plugin sets.
+/// Chooses the backend from the environment.
 ///
-/// `select` (`RENDERER_BACKEND_SELECT`) wins over `base` (`RENDERER_BACKEND`): the plugin
-/// ships the latter as a fixed default while the launcher sets the former to whatever the
-/// user picked in the renderer options. Without this precedence the picker is inert.
-/// An unparseable value is ignored rather than fatal, so a stale or hand-edited value
-/// cannot stop the game from starting.
-pub fn select_backend(select: Option<&str>, base: Option<&str>) -> BackendKind {
-    select
+/// The plugin exposes **one** backend option, `RENDERER_BACKEND`, so the launcher has a
+/// single source of truth for it in its renderer settings. `RENDERER_BACKEND_SELECT` is
+/// still accepted as a fallback because an already-installed launcher build may carry the
+/// older key, but shipping both described the same setting twice.
+///
+/// An unparseable value is ignored rather than fatal, so a stale or hand-edited value cannot
+/// stop the game from starting.
+pub fn select_backend(primary: Option<&str>, legacy_select: Option<&str>) -> BackendKind {
+    primary
         .and_then(BackendKind::parse)
-        .or_else(|| base.and_then(BackendKind::parse))
+        .or_else(|| legacy_select.and_then(BackendKind::parse))
         .unwrap_or(BackendKind::Auto)
 }
 
@@ -312,7 +314,34 @@ mod tests {
     }
 
     #[test]
-    fn launcher_picker_beats_the_shipped_default() {
+    fn the_single_backend_option_is_honoured() {
+        for (value, want) in [
+            ("gles", BackendKind::Gles),
+            ("vulkan", BackendKind::Vulkan),
+            ("hybrid", BackendKind::Hybrid),
+            ("auto", BackendKind::Auto),
+        ] {
+            assert_eq!(select_backend(Some(value), None), want, "for {value}");
+        }
+    }
+
+    #[test]
+    fn an_older_launcher_key_still_works_as_a_fallback() {
+        // An installed launcher build may still send RENDERER_BACKEND_SELECT.
+        assert_eq!(select_backend(None, Some("hybrid")), BackendKind::Hybrid);
+        // The current key wins when both are present.
+        assert_eq!(select_backend(Some("vulkan"), Some("hybrid")), BackendKind::Vulkan);
+    }
+
+    #[test]
+    fn unusable_values_fall_through_instead_of_failing() {
+        assert_eq!(select_backend(Some(""), Some("vulkan")), BackendKind::Vulkan);
+        assert_eq!(select_backend(Some("nonsense"), Some("gles")), BackendKind::Gles);
+        assert_eq!(select_backend(None, None), BackendKind::Auto);
+    }
+
+    #[test]
+    fn legacy_launcher_picker_beats_the_shipped_default() {
         // The plugin always ships RENDERER_BACKEND=gles; picking "hybrid" in the launcher
         // has to win, otherwise the option does nothing.
         assert_eq!(
