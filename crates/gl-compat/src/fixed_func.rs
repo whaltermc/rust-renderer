@@ -21,7 +21,7 @@ pub const GL_TRIANGLES: u32 = 0x0004;
 const GL_TRIANGLE_STRIP: u32 = 0x0005;
 const GL_TRIANGLE_FAN: u32 = 0x0006;
 pub const GL_QUADS: u32 = 0x0007; // desktop only — expand to triangles
-pub const GL_PROXY_TEXTURE_2D: u32 = 0x8514;
+pub const GL_PROXY_TEXTURE_2D: u32 = 0x8064; // was 0x8514 (cube-map binding), which never matched
 const GL_TEXTURE_2D: u32 = 0x0DE1;
 const GL_MAX_TEXTURE_SIZE: u32 = 0x0D33;
 const GL_TEXTURE_WIDTH: u32 = 0x1000;
@@ -86,6 +86,8 @@ struct FfState {
     color4: [f32; 4],
     alpha_func: (u32, f32),
     fog_enabled: bool,
+    /// Desktop-only enable caps (GL_TEXTURE_2D, GL_LIGHTING, ...) that ES rejects.
+    legacy_caps: Vec<u32>,
     /// Last proxy tex probe size (Minecraft max-texture probe).
     proxy_w: i32,
     proxy_h: i32,
@@ -106,6 +108,7 @@ impl FfState {
             color4: [1.0, 1.0, 1.0, 1.0],
             alpha_func: (0x0207, 0.0), // GL_ALWAYS
             fog_enabled: false,
+            legacy_caps: Vec::new(),
             proxy_w: 0,
             proxy_h: 0,
         }
@@ -392,13 +395,12 @@ pub fn map_tex_parameter(pname: u32) -> Option<u32> {
 }
 
 /// Desktop proxy-texture probe used by Minecraft to find max texture size.
-pub fn handle_proxy_tex_image(target: u32, width: i32, height: i32) -> bool {
+pub fn handle_proxy_tex_image(target: u32, width: i32, height: i32, max: i32) -> bool {
     if target != GL_PROXY_TEXTURE_2D {
         return false;
     }
     with_ff(|s| {
-        // Accept up to a generous ES limit; report back via GetTexLevelParameter.
-        let max = 16384;
+        // Accept up to the real driver limit; report back via GetTexLevelParameter.
         if width <= max && height <= max && width > 0 && height > 0 {
             s.proxy_w = width;
             s.proxy_h = height;
@@ -454,3 +456,53 @@ pub fn current_color() -> [f32; 4] {
     with_ff(|s| s.color4)
 }
 
+
+/// Desktop-only `glEnable`/`glDisable` caps. GLES 3 rejects them with GL_INVALID_ENUM, so we
+/// record them here instead of forwarding. Returns true when the cap was consumed.
+pub fn handle_cap(cap: u32, on: bool) -> bool {
+    let legacy = matches!(
+        cap,
+        0x0DE0 // GL_TEXTURE_1D
+            | 0x0DE1 // GL_TEXTURE_2D
+            | 0x0BC0 // GL_ALPHA_TEST
+            | 0x0B50 // GL_LIGHTING
+            | 0x4000..=0x4007 // GL_LIGHT0..7
+            | 0x0B60 // GL_FOG
+            | 0x0BA1 // GL_NORMALIZE
+            | 0x803A // GL_RESCALE_NORMAL
+            | 0x0B57 // GL_COLOR_MATERIAL
+            | 0x0BF2 // GL_COLOR_LOGIC_OP
+            | 0x0B20 // GL_LINE_SMOOTH
+            | 0x0B41 // GL_POLYGON_SMOOTH
+            | 0x0B10 // GL_POINT_SMOOTH
+            | 0x0C60..=0x0C63 // GL_TEXTURE_GEN_S/T/R/Q
+            | 0x809D // GL_MULTISAMPLE
+            | 0x2A01 // GL_POLYGON_OFFSET_POINT
+            | 0x2A02 // GL_POLYGON_OFFSET_LINE
+            | 0x0B24 // GL_LINE_STIPPLE
+            | 0x0B42 // GL_POLYGON_STIPPLE
+            | 0x3000..=0x3005 // GL_CLIP_PLANE0..5
+            | 0x8861 // GL_POINT_SPRITE
+            | 0x8642 // GL_VERTEX_PROGRAM_POINT_SIZE
+    );
+    if !legacy {
+        return false;
+    }
+    with_ff(|s| {
+        if on {
+            if !s.legacy_caps.contains(&cap) {
+                s.legacy_caps.push(cap);
+            }
+        } else {
+            s.legacy_caps.retain(|c| *c != cap);
+        }
+        if cap == 0x0B60 {
+            s.fog_enabled = on;
+        }
+    });
+    true
+}
+
+pub fn legacy_cap_enabled(cap: u32) -> bool {
+    with_ff(|s| s.legacy_caps.contains(&cap))
+}

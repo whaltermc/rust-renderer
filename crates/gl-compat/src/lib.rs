@@ -164,6 +164,9 @@ pub extern "C" fn glViewport(x: i32, y: i32, w: i32, h: i32) {
 
 #[no_mangle]
 pub extern "C" fn glEnable(cap: u32) {
+    if fixed_func::handle_cap(cap, true) {
+        return;
+    }
     if let Some(be) = backend() {
         be.enable(cap);
         return;
@@ -180,6 +183,9 @@ pub extern "C" fn glEnable(cap: u32) {
 
 #[no_mangle]
 pub extern "C" fn glDisable(cap: u32) {
+    if fixed_func::handle_cap(cap, false) {
+        return;
+    }
     if let Some(be) = backend() {
         be.disable(cap);
         return;
@@ -514,7 +520,8 @@ pub unsafe extern "C" fn glTexImage2D(
     t: u32, l: i32, ifmt: i32, w: i32, h: i32, b: i32, f: u32, ty: u32, d: *const c_void,
 ) {
     // Desktop proxy texture probe (Minecraft max texture size detection)
-    if fixed_func::handle_proxy_tex_image(t, w, h) {
+    let max_tex = backend().map(|b| b.capabilities().max_texture_size).unwrap_or(2048);
+    if fixed_func::handle_proxy_tex_image(t, w, h, max_tex) {
         return;
     }
     let ifmt2 = format_translate::map_internal_format(ifmt, f, ty);
@@ -935,6 +942,14 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glTexEnvf" => glTexEnvf as *const c_void,
         b"glTexEnvi" => glTexEnvi as *const c_void,
         b"glTexEnvfv" => glTexEnvfv as *const c_void,
+        b"glLightf" => glLightf as *const c_void,
+        b"glLightfv" => glLightfv as *const c_void,
+        b"glLightModeli" => glLightModeli as *const c_void,
+        b"glLightModelf" => glLightModelf as *const c_void,
+        b"glLightModelfv" => glLightModelfv as *const c_void,
+        b"glMaterialf" => glMaterialf as *const c_void,
+        b"glMaterialfv" => glMaterialfv as *const c_void,
+        b"glColorMaterial" => glColorMaterial as *const c_void,
         b"glTexParameterf" => glTexParameterf as *const c_void,
         b"glGetTexLevelParameteriv" => glGetTexLevelParameteriv as *const c_void,
         b"eglGetDisplay" => eglGetDisplay as *const c_void,
@@ -1072,6 +1087,26 @@ pub extern "C" fn wglGetProcAddress(name: *const c_char) -> *const c_void {
 #[no_mangle] pub extern "C" fn glTexEnvf(target: u32, pname: u32, param: f32) { fixed_func::gl_tex_envf(target, pname, param); }
 #[no_mangle] pub extern "C" fn glTexEnvi(target: u32, pname: u32, param: i32) { fixed_func::gl_tex_envi(target, pname, param); }
 #[no_mangle] pub unsafe extern "C" fn glTexEnvfv(target: u32, pname: u32, params: *const f32) { fixed_func::gl_tex_envfv(target, pname, params); }
+
+// ---- fixed-function lighting: accepted and ignored (NOT emulated yet) ---------------------
+// Without these, lookups fall through to the driver's ES1 stubs, which raise
+// "OpenGL ES API version mismatch" on every call. Visual effect: surfaces render unlit.
+fn warn_once(name: &'static str) {
+    static SEEN: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+    let mut g = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+    if !g.contains(&name) {
+        g.push(name);
+        log(&format!("[GLCompat] {name}: fixed-function lighting is not emulated yet; call ignored"));
+    }
+}
+#[no_mangle] pub extern "C" fn glLightf(_l: u32, _p: u32, _v: f32) { warn_once("glLightf"); }
+#[no_mangle] pub unsafe extern "C" fn glLightfv(_l: u32, _p: u32, _v: *const f32) { warn_once("glLightfv"); }
+#[no_mangle] pub extern "C" fn glLightModeli(_p: u32, _v: i32) { warn_once("glLightModeli"); }
+#[no_mangle] pub extern "C" fn glLightModelf(_p: u32, _v: f32) { warn_once("glLightModelf"); }
+#[no_mangle] pub unsafe extern "C" fn glLightModelfv(_p: u32, _v: *const f32) { warn_once("glLightModelfv"); }
+#[no_mangle] pub extern "C" fn glMaterialf(_f: u32, _p: u32, _v: f32) { warn_once("glMaterialf"); }
+#[no_mangle] pub unsafe extern "C" fn glMaterialfv(_f: u32, _p: u32, _v: *const f32) { warn_once("glMaterialfv"); }
+#[no_mangle] pub extern "C" fn glColorMaterial(_f: u32, _m: u32) { warn_once("glColorMaterial"); }
 
 // =============================================================================
 // EGL forwarding — MobileGL-style: same .so is the EGL provider for the launcher.
