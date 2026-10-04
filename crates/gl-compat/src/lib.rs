@@ -169,16 +169,96 @@ fn spoof_gl() -> bool {
 }
 
 /// Resolves a driver function pointer of type `T` (must be a fn pointer type).
+/// Direct GLESv3/v2 symbol bridge used by every forwarded entry point.
+/// Symbol lookup does NOT require a current context (only the first real GL *call*
+/// that queries state does). This is what LWJGL needs: dlsym our exports, then
+/// each export jumps into the system GLES driver.
+struct GlesDriver {
+    lib: libloading::Library,
+}
+
+fn gles_driver() -> Option<&'static GlesDriver> {
+    static DRV: OnceLock<Option<GlesDriver>> = OnceLock::new();
+    DRV.get_or_init(|| {
+        // Prefer GLESv3; fall back to GLESv2 (still exports most ES3 entry points
+        // on modern Android drivers via eglGetProcAddress, but many core symbols
+        // are in the GLESv3 soname).
+        let candidates = [
+            "libGLESv3.so",
+            "/system/lib64/libGLESv3.so",
+            "/vendor/lib64/libGLESv3.so",
+            "libGLESv2.so",
+            "/system/lib64/libGLESv2.so",
+        ];
+        for path in candidates {
+            match unsafe { libloading::Library::new(path) } {
+                Ok(lib) => {
+                    log(&format!("[GLBridge] loaded GLES driver: {path}"));
+                    return Some(GlesDriver { lib });
+                }
+                Err(e) => log(&format!("[GLBridge] {path}: {e}")),
+            }
+        }
+        log("[GLBridge] FAILED to load any GLESv3/v2 library");
+        None
+    })
+    .as_ref()
+}
+
+/// Resolve a GLES driver symbol by name. Safe to call before a context exists.
 unsafe fn driver_fn<T: Copy>(name: &str) -> Option<T> {
     assert_eq!(std::mem::size_of::<T>(), std::mem::size_of::<*const c_void>());
-    let be = backend()?;
-    let p = be.proc_address(name);
-    if p.is_null() {
-        None
-    } else {
-        // SAFETY: caller guarantees T is the fn-pointer type matching `name`'s C prototype.
-        Some(std::mem::transmute_copy::<*const c_void, T>(&p))
+    // 1) dlsym from libGLESv3/v2
+    if let Some(drv) = gles_driver() {
+        let mut buf = [0u8; 128];
+        if name.len() < buf.len() {
+            buf[..name.len()].copy_from_slice(name.as_bytes());
+            buf[name.len()] = 0;
+            if let Ok(s) = unsafe { drv.lib.get::<T>(&buf[..=name.len()]) } {
+                return Some(*s);
+            }
+        }
     }
+    // 2) eglGetProcAddress from system libEGL (extensions + some core)
+    if let Some(ptr) = sys_egl_get_proc(name) {
+        if !ptr.is_null() {
+            return Some(std::mem::transmute_copy(&ptr));
+        }
+    }
+    None
+}
+
+/// System eglGetProcAddress (not our export) — used for GLES extension lookup.
+fn sys_egl_get_proc(name: &str) -> Option<*const c_void> {
+    static GPA: OnceLock<usize> = OnceLock::new();
+    let addr = *GPA.get_or_init(|| {
+        let paths = [
+            "/system/lib64/libEGL.so",
+            "/vendor/lib64/libEGL.so",
+            "libEGL.so",
+        ];
+        for path in paths {
+            if let Ok(lib) = unsafe { libloading::Library::new(path) } {
+                let ptr = unsafe {
+                    lib.get::<unsafe extern "C" fn()>(b"eglGetProcAddress\0")
+                        .map(|s| *s as usize)
+                        .unwrap_or(0)
+                };
+                std::mem::forget(lib);
+                if ptr != 0 {
+                    return ptr;
+                }
+            }
+        }
+        0
+    });
+    if addr == 0 {
+        return None;
+    }
+    type F = unsafe extern "C" fn(*const c_char) -> *const c_void;
+    let f: F = unsafe { std::mem::transmute(addr) };
+    let c = std::ffi::CString::new(name).ok()?;
+    Some(unsafe { f(c.as_ptr()) })
 }
 
 #[no_mangle]
@@ -709,29 +789,49 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         _ => {
             let f = forwarded(n);
             if !f.is_null() {
-                f
-            } else {
-                // Fall through to the driver so GLES extensions still resolve.
-                match backend() {
-                    Some(be) => {
-                        let name = String::from_utf8_lossy(n);
-                        let p = be.proc_address(&name);
-                        if p.is_null() {
-                            log(&format!(
-                                "[GLCompat] Missing entry point: {name}"
-                            ));
-                        }
-                        p
-                    }
-                    None => {
-                        log(&format!(
-                            "[GLCompat] Missing entry point (no backend): {}",
-                            String::from_utf8_lossy(n)
-                        ));
-                        std::ptr::null()
-                    }
+                return f;
+            }
+            // LWJGL bridge: resolve unknown names from GLES driver / eglGetProcAddress
+            let name = String::from_utf8_lossy(n);
+            // Try ARB/EXT/OES suffix strip for desktop aliases
+            let base = name
+                .strip_suffix("ARB")
+                .or_else(|| name.strip_suffix("EXT"))
+                .or_else(|| name.strip_suffix("OES"))
+                .or_else(|| name.strip_suffix("KHR"))
+                .unwrap_or(&name);
+            if base.as_bytes() != n {
+                let f2 = forwarded(base.as_bytes());
+                if !f2.is_null() {
+                    return f2;
                 }
             }
+            if let Some(ptr) = unsafe {
+                let mut out: Option<*const c_void> = None;
+                // prefer direct GLES dlsym
+                if let Some(drv) = gles_driver() {
+                    let mut buf = [0u8; 128];
+                    if n.len() < buf.len() {
+                        buf[..n.len()].copy_from_slice(n);
+                        buf[n.len()] = 0;
+                        if let Ok(s) = drv.lib.get::<unsafe extern "C" fn()>(&buf[..=n.len()]) {
+                            out = Some(*s as *const c_void);
+                        }
+                    }
+                }
+                out
+            } {
+                if !ptr.is_null() {
+                    return ptr;
+                }
+            }
+            if let Some(ptr) = sys_egl_get_proc(&name) {
+                if !ptr.is_null() {
+                    return ptr;
+                }
+            }
+            log(&format!("[GLBridge] Missing entry point: {name}"));
+            std::ptr::null()
         }
     }
 }
@@ -755,6 +855,12 @@ pub extern "C" fn glXGetProcAddressARB(name: *const c_char) -> *const c_void {
 
 #[no_mangle]
 pub extern "C" fn glGetProcAddress(name: *const c_char) -> *const c_void {
+    glXGetProcAddress(name)
+}
+
+/// Some LWJGL / GLFW paths probe the WGL name even on non-Windows hosts.
+#[no_mangle]
+pub extern "C" fn wglGetProcAddress(name: *const c_char) -> *const c_void {
     glXGetProcAddress(name)
 }
 
