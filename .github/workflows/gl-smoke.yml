@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          submodules: recursive
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -108,17 +110,23 @@ jobs:
               > target/reports-angle/NOT-RUN.txt
           fi
 
-      # Replay real Minecraft GL captures through librust_gl.so. eglretrace recreates the
-      # recorded context and re-issues every call; preloading the library puts this bridge in
-      # the path, so the frames are rendered by the code Android actually runs.
-      - name: Replay Minecraft traces through the bridge
+      # The project's own replay tool: loads librust_gl.so, replays a Minecraft capture and
+      # compares the rendered frame with a golden reference. Bundled fixtures cover the 1.17
+      # and 26.3 boundaries.
+      - name: Replay Minecraft traces (tools/trace_replay)
         run: |
-          sudo apt-get install -y --no-install-recommends apitrace xvfb libgl1-mesa-dri
-          mkdir -p target/reports
+          sudo apt-get install -y --no-install-recommends cmake libegl1-mesa-dev libgles2-mesa-dev
           set +e
-          ./tools/trace-replay.sh 2>&1 | tee target/reports/trace-replay.log
-          echo "trace replay exit: $?"
+          for fixture in 1.17 26.3; do
+            echo "== fixture $fixture"
+            tools/trace_replay/run_fixture.sh "$fixture" 2>&1 | tee -a "target/replay-$fixture.log" | tail -20
+            echo "fixture $fixture exit: ${PIPESTATUS[0]}"
+          done
           set -e
+          mkdir -p target/reports/trace-replay
+          cp -r target/trace-replay/results target/reports/trace-replay/ 2>/dev/null || true
+          for f in target/replay-*.log; do [ -f "$f" ] && cp "$f" target/reports/trace-replay/; done
+          echo "::notice::trace_replay results are uploaded as artifacts; see result.json per fixture"
 
       # Entry-point coverage measured against real Minecraft apitrace captures, from the
       # MobileGL fixture set. A name a real run calls but the library does not export is a
@@ -167,7 +175,6 @@ jobs:
             target/reports/screenshots/
             target/reports-angle/
             target/reports/trace-coverage.log
-            target/reports/trace-replay.log
             target/reports/lane-comparison.md
           if-no-files-found: error
 
