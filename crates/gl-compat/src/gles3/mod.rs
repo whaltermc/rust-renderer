@@ -35,6 +35,8 @@ pub struct GlesCapabilities {
     pub max_texture_units: i32,
     pub max_combined_texture_units: i32,
     pub max_uniform_block_size: i32,
+    /// The device string as the driver reports it, used to name the renderer honestly.
+    pub device_description: String,
     /// `GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT`; 0 when unsupported.
     pub max_anisotropy: i32,
     /// Whether the probe ran against a live context.
@@ -172,6 +174,7 @@ pub fn probe() -> GlesCapabilities {
     limit(GL_MAX_UNIFORM_BLOCK_SIZE, &mut caps.max_uniform_block_size);
     limit(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &mut caps.max_anisotropy);
 
+    caps.device_description = caps.version_string.clone();
     caps.valid = true;
     caps
 }

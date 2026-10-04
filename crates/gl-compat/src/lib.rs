@@ -550,8 +550,35 @@ fn sys_egl_get_proc(name: &str) -> Option<*const c_void> {
     Some(unsafe { f(c.as_ptr()) })
 }
 
-static SPOOF_VENDOR: &[u8] = b"RustRenderer\0";
-static SPOOF_RENDERER: &[u8] = b"RustRenderer GLES passthrough\0";
+/// What mods and the game are told this renderer is.
+///
+/// Two things matter here. The first is honesty about the architecture: this is a
+/// desktop-GL-to-GLES *translation layer*, and several mods change behaviour when they detect
+/// one (Sodium documents that translation layers are unsupported for it, for instance), so
+/// saying "GLES passthrough" was both inaccurate and unhelpful. The second is that naming the
+/// real device driver means a bug report or a log line identifies the GPU that actually
+/// renders, instead of pointing at the layer.
+fn renderer_identity() -> (&'static CStr, &'static CStr) {
+    static IDENTITY: OnceLock<(&'static CStr, &'static CStr)> = OnceLock::new();
+    *IDENTITY.get_or_init(|| {
+        // Name the device the capability probe actually saw, so a bug report identifies the
+        // GPU that renders rather than the layer in front of it.
+        let caps = gles3::caps();
+        let device = if caps.device_description.is_empty() {
+            "unknown device".to_string()
+        } else {
+            caps.device_description.clone()
+        };
+        let vendor: &'static CStr = c"OpenGL ES translation layer";
+        let renderer: &'static CStr = match CString::new(format!(
+            "Rust Renderer GL translation ({device})"
+        )) {
+            Ok(s) => Box::leak(s.into_boxed_c_str()),
+            Err(_) => c"Rust Renderer GL translation",
+        };
+        (vendor, renderer)
+    })
+}
 static SPOOF_EXTENSIONS: &[u8] = b"\0"; // empty; use glGetStringi when needed
 
 #[no_mangle]
@@ -565,8 +592,8 @@ pub extern "C" fn glGetString(name: u32) -> *const u8 {
         match name {
             GL_VERSION => return SPOOF_VERSION.as_ptr(),
             GL_SHADING_LANGUAGE_VERSION => return SPOOF_GLSL.as_ptr(),
-            GL_VENDOR => return SPOOF_VENDOR.as_ptr(),
-            GL_RENDERER => return SPOOF_RENDERER.as_ptr(),
+            GL_VENDOR => return renderer_identity().0.as_ptr() as *const u8,
+            GL_RENDERER => return renderer_identity().1.as_ptr() as *const u8,
             GL_EXTENSIONS => return merged_extension_string().as_ptr(),
             _ => {}
         }
@@ -593,8 +620,8 @@ pub extern "C" fn glGetString(name: u32) -> *const u8 {
 
     // Last-resort non-null fallbacks
     match name {
-        GL_VENDOR => SPOOF_VENDOR.as_ptr(),
-        GL_RENDERER => SPOOF_RENDERER.as_ptr(),
+        GL_VENDOR => renderer_identity().0.as_ptr() as *const u8,
+        GL_RENDERER => renderer_identity().1.as_ptr() as *const u8,
         GL_VERSION => SPOOF_VERSION.as_ptr(),
         GL_SHADING_LANGUAGE_VERSION => SPOOF_GLSL.as_ptr(),
         GL_EXTENSIONS => SPOOF_EXTENSIONS.as_ptr(),

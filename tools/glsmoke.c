@@ -710,6 +710,18 @@ int main(int argc, char **argv) {
     safe_str(vbuf, sizeof vbuf, vp);
     printf("  GL_VERSION = %s\n", vbuf);
     ok(vp && strstr(vbuf, "3.3"), "reports OpenGL 3.3 (spoof active)");
+    /* The renderer must name both the architecture and the device, so a mod that detects a
+     * translation layer can adapt and a bug report identifies the real GPU. */
+    {
+        char rbuf[256], vvbuf[256];
+        const GLubyte *rp = p_glGetString(GL_RENDERER);
+        const GLubyte *vv = p_glGetString(GL_VENDOR);
+        safe_str(rbuf, sizeof rbuf, rp);
+        safe_str(vvbuf, sizeof vvbuf, vv);
+        printf("  GL_RENDERER = %s\n  GL_VENDOR   = %s\n", rbuf, vvbuf);
+        ok(strstr(rbuf, "translation") != NULL, "renderer names itself a translation layer");
+        ok(rp && strstr(rbuf, "(") != NULL, "renderer names the device it translates to");
+    }
     const GLubyte *sp = p_glGetString(GL_SHADING_LANGUAGE_VERSION);
     safe_str(sbuf, sizeof sbuf, sp);
     printf("  GLSL = %s\n", sbuf);

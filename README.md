@@ -570,6 +570,23 @@ GL_VERTEX_ATTRIB_ARRAY_STRIDE)` returns 0 even for an attribute that demonstrabl
 correctly, so stride cannot be used to diagnose anything here. That is why the harness no
 longer reports stride as data.
 
+### How the game identifies this renderer
+
+`GL_VENDOR` and `GL_RENDERER` are built once from the capability probe, so they name both
+what this is and what it is drawing on:
+
+```
+GL_VENDOR    OpenGL ES translation layer
+GL_RENDERER  Rust Renderer GL translation (OpenGL ES 3.2 Mali-G77 MC9)
+GL_VERSION   3.3 (Core Profile) RustRenderer GLES translation
+```
+
+Two reasons. It is accurate -- this is a desktop-GL-to-GLES translation layer, and calling it
+a "passthrough" was not true. And several mods change behaviour when they detect a translation
+layer, so naming it lets them adapt rather than crash; Sodium in particular documents that it
+does not support them. Naming the device also means a log line or bug report identifies the GPU
+that actually renders instead of pointing at the layer in front of it.
+
 ### Entry points are grouped by API family
 
 `crates/gl-compat/src/` is organised the way the layer actually thinks, rather than as one
