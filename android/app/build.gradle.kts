@@ -107,6 +107,19 @@ val pluginRendererConfig = buildJsonValue {
                     )
                 )
             )
+            // Logs the last 16 forwarded GL calls whenever glGetError returns non-zero.
+            // Minecraft only reports the numeric code, so this is what turns "OpenGL error
+            // 1282" into a named call.
+            selectable(
+                key = "RENDERER_TRACE_GL",
+                items = RendererConfig.EnvItems(
+                    defaultValue = "0",
+                    values = listOf(
+                        "0",
+                        "1"
+                    )
+                )
+            ),
             selectable(
                 key = "RENDERER_DEBUG",
                 items = RendererConfig.EnvItems(

@@ -51,6 +51,54 @@ pub(crate) fn current_array_buffer() -> u32 {
     ARRAY_BUFFER_BINDING.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+
+/// Ring buffer of the most recent forwarded GL entry points.
+///
+/// The 1.21.11 failure was `IllegalStateException: OpenGL error 1282` with no "GL error site"
+/// line, which proved the error came from the *driver*, not from this layer -- and left no way
+/// to tell which call provoked it. Minecraft only ever reports the numeric code, so the bridge
+/// keeps the last few calls and dumps them when `glGetError` returns something.
+///
+/// Enabled with `RENDERER_TRACE_GL=1` so the common path stays a single relaxed atomic load.
+const TRACE_LEN: usize = 16;
+static TRACE: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+static TRACE_ON: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(u8::MAX);
+
+fn trace_enabled() -> bool {
+    let cached = TRACE_ON.load(Ordering::Relaxed);
+    if cached != u8::MAX {
+        return cached != 0;
+    }
+    let on = std::env::var("RENDERER_TRACE_GL").map(|v| v == "1").unwrap_or(false);
+    TRACE_ON.store(u8::from(on), Ordering::Relaxed);
+    on
+}
+
+/// Records a forwarded GL call. Called from `forward_all!`, so it covers every pass-through.
+#[inline]
+pub(crate) fn trace_call(name: &'static str) {
+    if !trace_enabled() {
+        return;
+    }
+    let mut t = TRACE.lock().unwrap_or_else(|e| e.into_inner());
+    if t.len() == TRACE_LEN {
+        t.remove(0);
+    }
+    t.push(name);
+}
+
+/// Dumps the recent call history, newest last. Called when the game sees a GL error.
+fn dump_trace(reason: &str) {
+    if !trace_enabled() {
+        return;
+    }
+    let t = TRACE.lock().unwrap_or_else(|e| e.into_inner());
+    if t.is_empty() {
+        return;
+    }
+    log(&format!("[GLTrace] {reason}; last calls: {}", t.join(" -> ")));
+}
+
 /// Runs `f` only the first time it is called. Used for one-time diagnostics that would
 /// otherwise repeat per frame.
 pub(crate) fn log_once(flag: &std::sync::atomic::AtomicBool, msg: &str) {
@@ -195,15 +243,24 @@ fn backend() -> Option<&'static dyn Backend> {
 pub extern "C" fn glGetError() -> u32 {
     let ours = errors().take();
     if ours != 0 {
+        dump_trace(&format!("glGetError from this layer: 0x{ours:04X}"));
         return ours;
     }
     if let Some(b) = backend() {
-        return b.get_error();
+        let e = b.get_error();
+        if e != 0 {
+            dump_trace(&format!("glGetError from the driver: 0x{e:04X}"));
+        }
+        return e;
     }
     unsafe {
         type F = unsafe extern "C" fn() -> u32;
         if let Some(f) = driver_fn_cached::<F>("glGetError") {
-            return f();
+            let e = f();
+            if e != 0 {
+                dump_trace(&format!("glGetError from the driver: 0x{e:04X}"));
+            }
+            return e;
         }
     }
     0
@@ -1157,6 +1214,7 @@ macro_rules! forward_all {
             #[no_mangle]
             pub unsafe extern "C" fn $name($($a: $t),*) $(-> $r)? {
                 type F = unsafe extern "C" fn($($t),*) $(-> $r)?;
+                trace_call(stringify!($name));
                 match driver_fn_cached::<F>(stringify!($name)) {
                     Some(f) => f($($a),*),
                     None => {
@@ -1822,6 +1880,8 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glTextureBuffer" => dsa_named::glTextureBuffer as *const c_void,
         b"glNamedFramebufferTextureMultiviewOVR" => dsa_named::glNamedFramebufferTextureMultiviewOVR as *const c_void,
         b"glGetProgramResourceLocationIndex" => dsa_named::glGetProgramResourceLocationIndex as *const c_void,
+        b"glTexStorage2DMultisample" => dsa_named::glTexStorage2DMultisample as *const c_void,
+        b"glTexStorage3DMultisample" => dsa_named::glTexStorage3DMultisample as *const c_void,
         b"glVertexArrayAttribStride" => dsa::glVertexArrayAttribStride as *const c_void,
         b"glVertexAttribStride" => dsa::glVertexAttribStride as *const c_void,
         b"glGetVertexArrayAttribStride" => dsa::glGetVertexArrayAttribStride as *const c_void,

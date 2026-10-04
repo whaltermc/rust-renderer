@@ -30,9 +30,27 @@ than persisting:
    `WindowFramebuffer.createDepthAttachment`. The log also named **62 unresolved entry
    points**, nearly all named-object/DSA spellings.
 
-Both fixes for report 2 are in: the 62 entry points (see `dsa_named.rs`) and the texture-target
-bug that made a depth attachment report `GL_INVALID_OPERATION`. **It has not been retested on a
-device**, so treat "boots further" as the expectation, not a result. Treat the host harness results as necessary but *not* sufficient — they did
+After the fix, report 3 (same device, same mod set) resolved **54 of those 62** entry points and
+failed at the *same* place with the same `1282` — and crucially **no `GL error site` line
+appeared**, which proves the error is raised by the **Mali driver**, not by this layer. Since
+Minecraft only ever reports the numeric code, there was no way to tell which call provoked it,
+so the bridge now keeps a ring buffer of the last 16 forwarded GL calls and dumps them when
+`glGetError` returns non-zero (`RENDERER_TRACE_GL=1`).
+
+Still open after report 3, and the next things to do:
+
+- 8 entry points remain unresolved (`glCopyTextureSubImage2D/3D`,
+  `glCompressedTextureSubImage2D/3D`, `glBlitNamedFramebuffer`, `glBindImageTextures`,
+  `glTransformFeedbackBufferBase/Range`).
+- **`glTexStorage2DMultisample` was missing entirely** — the call 1.20.5+ uses for the
+  multisampled depth attachment in `WindowFramebuffer.createDepthAttachment`, which is exactly
+  where this crash is. Now added, mapped onto `glTexImage2DMultisample` with null data, since
+  GLES has no `*TexStorage*Multisample`.
+- The `1282` itself is still unexplained. Turn on `RENDERER_TRACE_GL` and the next log will
+  name the call instead of the code.
+
+**None of this has been retested on a device.** Treat it as "the missing surface is filled in
+and the next failure will be diagnosable", not as "it runs". Treat the host harness results as necessary but *not* sufficient — they did
 not predict the device outcome, and they should not be read as evidence that the bridge works.
 
 The host suite runs against Mesa's llvmpipe software rasteriser. That catches translation and

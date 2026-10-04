@@ -883,6 +883,42 @@ pub unsafe extern "C" fn glGetCompressedTextureImage(
     }
 }
 
+/// `glTexStorage2DMultisample` exists on desktop GL and is what Minecraft 1.20.5+ calls for
+/// the multisampled depth attachment in `WindowFramebuffer.createDepthAttachment`. GLES has
+/// no `*TexStorage*Multisample`, but `glTexImage2DMultisample` with a null data pointer is
+/// the same thing: allocate immutable multisample storage, uninitialised.
+#[no_mangle]
+pub unsafe extern "C" fn glTexStorage2DMultisample(
+    target: u32, samples: i32, internalformat: u32, w: i32, h: i32,
+) {
+    let ifmt = format_translate::map_internal_format(internalformat as i32, 0, 0) as u32;
+    if let Some(f) = driver_fn_cached::<
+        unsafe extern "C" fn(u32, i32, u32, i32, i32, i32),
+    >("glTexImage2DMultisample")
+    {
+        f(target, samples, ifmt, w, h, 0);
+    } else {
+        mark_error_site("glTexStorage2DMultisample");
+        errors().set(0x0502);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glTexStorage3DMultisample(
+    target: u32, samples: i32, internalformat: u32, w: i32, h: i32, d: i32,
+) {
+    let ifmt = format_translate::map_internal_format(internalformat as i32, 0, 0) as u32;
+    if let Some(f) = driver_fn_cached::<
+        unsafe extern "C" fn(u32, i32, u32, i32, i32, i32, i32),
+    >("glTexImage3DMultisample")
+    {
+        f(target, samples, ifmt, w, h, d, 0);
+    } else {
+        mark_error_site("glTexStorage3DMultisample");
+        errors().set(0x0502);
+    }
+}
+
 /// 1D textures and texel buffers never existed in GLES 3.x.
 #[no_mangle]
 pub unsafe extern "C" fn glTextureStorage1D(_id: u32, _levels: i32, _fmt: u32, _w: i32) {
@@ -960,6 +996,7 @@ pub const EXPORTS: &[&str] = &[
     "glTextureStorage1D", "glTextureSubImage1D", "glCompressedTextureSubImage1D",
     "glCopyTextureSubImage1D", "glTextureBuffer", "glNamedFramebufferTextureMultiviewOVR",
     "glGetProgramResourceLocationIndex",
+    "glTexStorage2DMultisample", "glTexStorage3DMultisample",
 ];
 
 #[cfg(test)]
