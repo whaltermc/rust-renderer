@@ -957,12 +957,6 @@ forward_all! {
     glGetFragDataLocation(p: u32, name: *const c_char) -> i32;
     glMultiDrawArrays(mode: u32, first: *const i32, count: *const i32, drawcount: i32);
     glMultiDrawElements(mode: u32, count: *const i32, ty: u32, indices: *const *const c_void, drawcount: i32);
-    glCopyBufferSubData(r: u32, w: u32, ro: isize, wo: isize, size: isize);
-    glInvalidateFramebuffer(t: u32, n: i32, att: *const u32);
-    glInvalidateSubFramebuffer(t: u32, n: i32, att: *const u32, x: i32, y: i32, w: i32, h: i32);
-    glTexStorage2D(t: u32, levels: i32, ifmt: u32, w: i32, h: i32);
-    glTexStorage3D(t: u32, levels: i32, ifmt: u32, w: i32, h: i32, d: i32);
-    glFenceSync(c: u32, f: u32) -> *mut c_void;
 }
 
 
