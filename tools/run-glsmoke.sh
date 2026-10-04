@@ -23,10 +23,12 @@ cc -O1 -o "$OUT" tools/glsmoke.c -lEGL -ldl -lm
 
 # llvmpipe: there is no GPU here, and a real one is not needed for correctness checks.
 REPORT="${GLSMOKE_REPORT:-$PWD/target/reports/gl-smoke.html}"
-mkdir -p "$(dirname "$REPORT")"
-LIBGL_ALWAYS_SOFTWARE=1 "$OUT" "$SO" "$REPORT"
+SHOTS="${GLSMOKE_SHOT_DIR:-$PWD/target/reports/screenshots}"
+mkdir -p "$(dirname "$REPORT")" "$SHOTS"
+GLSMOKE_SHOT_DIR="$SHOTS" LIBGL_ALWAYS_SOFTWARE=1 "$OUT" "$SO" "$REPORT"
 status=$?
 [ -f "$REPORT" ] && echo "wrote $REPORT"
+ls "$SHOTS"/*.png 2>/dev/null | sed 's/^/  screenshot: /' || true
 
 if [ $status -eq 77 ]; then
     echo "no GL driver available; nothing was tested"

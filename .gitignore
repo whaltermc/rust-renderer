@@ -20,3 +20,6 @@ android/app/src/main/jniLibs/**/*.so
 # Editor and tool noise
 *.rs.bk
 *.log
+
+# Test report output
+/target/reports/

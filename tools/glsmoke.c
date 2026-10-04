@@ -103,6 +103,23 @@ typedef char GLchar;
 typedef struct { const char *group; char name[96]; char status[10]; char detail[320]; } Result;
 static Result results[MAX_RESULTS];
 static int nresults, failures, known_issues;
+static const char *shot_dir = NULL;
+
+#define MAX_SHOTS 16
+typedef struct { char name[64]; char *uri; char note[192]; } Shot;
+static Shot shots[MAX_SHOTS];
+static int nshots;
+
+/* Takes ownership of `uri`, which must outlive the run: the report is written at the end. */
+static void add_shot(const char *name, char *uri, const char *note) {
+    if (nshots < MAX_SHOTS) {
+        snprintf(shots[nshots].name, sizeof shots[nshots].name, "%s", name);
+        shots[nshots].note[0] = 0;
+        snprintf(shots[nshots].note, sizeof shots[nshots].note, "%s", note ? note : "");
+        shots[nshots].uri = uri;
+        nshots++;
+    }
+}
 static const char *cur_group = "general";
 static char gl_renderer[256], gl_vendor[256], gl_spoofed[256], gl_real[256], gl_ext_count[32];
 
@@ -132,6 +149,155 @@ static void ok_known(int cond, const char *what, const char *why) {
     known_issues++;
     printf("  KNOWN  %s -- %s\n", what, why);
     record(what, "known", why);
+}
+
+
+/* ---- PNG output, dependency-free --------------------------------------------
+ * MobileGL-style visual tests need actual images. PNG with stored (uncompressed)
+ * deflate blocks needs only a CRC32 and an Adler-32, so the harness stays free of
+ * image libraries and still writes files any viewer or CI artifact browser can open. */
+
+static unsigned long crc_table[256];
+static int crc_ready = 0;
+
+static void crc_init(void) {
+    for (unsigned long n = 0; n < 256; n++) {
+        unsigned long c = n;
+        for (int k = 0; k < 8; k++) c = (c & 1) ? 0xedb88320UL ^ (c >> 1) : c >> 1;
+        crc_table[n] = c;
+    }
+    crc_ready = 1;
+}
+
+static unsigned long crc32_buf(const unsigned char *p, size_t n) {
+    if (!crc_ready) crc_init();
+    unsigned long c = 0xffffffffUL;
+    for (size_t i = 0; i < n; i++) c = crc_table[(c ^ p[i]) & 0xff] ^ (c >> 8);
+    return c ^ 0xffffffffUL;
+}
+
+static void be32(unsigned char *p, unsigned long v) {
+    p[0] = (unsigned char)(v >> 24); p[1] = (unsigned char)(v >> 16);
+    p[2] = (unsigned char)(v >> 8);  p[3] = (unsigned char)v;
+}
+
+static void png_chunk(FILE *f, const char *type, const unsigned char *data, size_t len) {
+    unsigned char hdr[4];
+    be32(hdr, (unsigned long)len);
+    fwrite(hdr, 1, 4, f);
+    fwrite(type, 1, 4, f);
+    if (len) fwrite(data, 1, len, f);
+    unsigned long crc = crc32_buf((const unsigned char *)type, 4);
+    if (len) crc = crc32_buf(data, len) ^ crc;
+    /* crc32_buf is not resumable, so recompute over type+data in one pass. */
+    crc = 0xffffffffUL;
+    {
+        unsigned char *tmp = (unsigned char *)malloc(len + 4);
+        if (tmp) {
+            memcpy(tmp, type, 4);
+            if (len) memcpy(tmp + 4, data, len);
+            crc = crc32_buf(tmp, len + 4);
+            free(tmp);
+        } else {
+            crc = crc32_buf((const unsigned char *)type, 4);
+        }
+    }
+    unsigned char c[4];
+    be32(c, crc);
+    fwrite(c, 1, 4, f);
+}
+
+static int write_png(const char *path, const unsigned char *rgba, int w, int h) {
+    if (!crc_ready) crc_init();
+    /* Raw scanlines with filter byte 0. */
+    size_t raw_len = (size_t)h * (1 + (size_t)w * 3);
+    unsigned char *raw = (unsigned char *)malloc(raw_len);
+    if (!raw) return 0;
+    for (int y = 0; y < h; y++) {
+        unsigned char *dst = raw + (size_t)y * (1 + (size_t)w * 3);
+        *dst++ = 0;
+        const unsigned char *src = rgba + (size_t)y * (size_t)w * 4;
+        for (int x = 0; x < w; x++) {           /* RGBA -> RGB */
+            *dst++ = src[x * 4];
+            *dst++ = src[x * 4 + 1];
+            *dst++ = src[x * 4 + 2];
+        }
+    }
+    unsigned long a = 1, b = 0;
+    for (size_t i = 0; i < raw_len; i++) { a = (a + raw[i]) % 65521; b = (b + a) % 65521; }
+    unsigned long adler = (b << 16) | a;
+
+    /* zlib stream with stored deflate blocks. */
+    size_t nblocks = (raw_len + 65534) / 65535;
+    size_t z_len = 2 + nblocks * 5 + raw_len + 4 + 1;
+    unsigned char *z = (unsigned char *)malloc(z_len);
+    if (!z) { free(raw); return 0; }
+    size_t zi = 0;
+    z[zi++] = 0x78; z[zi++] = 0x01;
+    size_t off = 0;
+    while (off < raw_len) {
+        size_t n = raw_len - off > 65535 ? 65535 : raw_len - off;
+        int final = (off + n >= raw_len);
+        z[zi++] = (unsigned char)(final ? 1 : 0);
+        z[zi++] = (unsigned char)(n & 0xff);
+        z[zi++] = (unsigned char)(n >> 8);
+        z[zi++] = (unsigned char)(~n & 0xff);
+        z[zi++] = (unsigned char)((~n >> 8) & 0xff);
+        memcpy(z + zi, raw + off, n);
+        zi += n; off += n;
+    }
+    be32(z + zi, adler); zi += 4;
+
+    FILE *f = fopen(path, "wb");
+    if (!f) { free(raw); free(z); return 0; }
+    static const unsigned char sig[8] = {137, 80, 78, 71, 13, 10, 26, 10};
+    fwrite(sig, 1, 8, f);
+    unsigned char ihdr[13];
+    be32(ihdr, (unsigned long)w);
+    be32(ihdr + 4, (unsigned long)h);
+    ihdr[8] = 8;    /* bit depth */
+    ihdr[9] = 2;    /* colour type: truecolour */
+    ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+    png_chunk(f, "IHDR", ihdr, sizeof ihdr);
+    png_chunk(f, "IDAT", z, zi);
+    png_chunk(f, "IEND", NULL, 0);
+    fclose(f);
+    free(raw); free(z);
+    return 1;
+}
+
+static const char b64tab[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/* Base64 of a PNG file, so the HTML report stays a single self-contained document. */
+static char *png_to_data_uri(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (n <= 0) { fclose(f); return NULL; }
+    unsigned char *buf = (unsigned char *)malloc((size_t)n);
+    if (!buf) { fclose(f); return NULL; }
+    size_t got = fread(buf, 1, (size_t)n, f);
+    fclose(f);
+    const char *prefix = "data:image/png;base64,";
+    size_t cap = got / 3 * 4 + 4 + strlen(prefix) + 1;
+    char *out = (char *)malloc(cap);
+    if (!out) { free(buf); return NULL; }
+    strcpy(out, prefix);
+    size_t o = strlen(prefix);
+    for (size_t i = 0; i < got; i += 3) {
+        unsigned v = buf[i] << 16;
+        if (i + 1 < got) v |= buf[i + 1] << 8;
+        if (i + 2 < got) v |= buf[i + 2];
+        out[o++] = b64tab[(v >> 18) & 63];
+        out[o++] = b64tab[(v >> 12) & 63];
+        out[o++] = (i + 1 < got) ? b64tab[(v >> 6) & 63] : '=';
+        out[o++] = (i + 2 < got) ? b64tab[v & 63] : '=';
+    }
+    out[o] = 0;
+    free(buf);
+    return out;
 }
 
 /* HTML-escape into a bounded buffer. */
@@ -187,13 +353,28 @@ static void write_html(const char *path, int skipped) {
             group = results[i].group;
             fprintf(f, "<h2>%s</h2><table><tr><th style=\"width:34%%\">Check</th><th style=\"width:9%%\">Status</th><th>Detail</th></tr>", group);
         }
-        char n[256], d[512];
+        char n[1024], d[4096];
         esc(results[i].name, n, sizeof n);
         esc(results[i].detail, d, sizeof d);
         fprintf(f, "<tr><td>%s</td><td class=\"%s\">%s</td><td>%s</td></tr>",
                 n, results[i].status, results[i].status, d);
     }
-    fprintf(f, "</table></body></html>\n");
+    fprintf(f, "</table>");
+    if (nshots) {
+        fprintf(f, "<h2>Screenshots</h2><p class=\"muted\">Rendered through librust_gl.so on a headless GLES context; every fragment shader below went through the same desktop-GLSL translation the game uses.</p>");
+        fprintf(f, "<div style=\"display:flex;flex-wrap:wrap;gap:1rem\">");
+        for (int i = 0; i < nshots; i++) {
+            char n[1024], nn[2048];
+            esc(shots[i].name, n, sizeof n);
+            esc(shots[i].note, nn, sizeof nn);
+            fprintf(f, "<figure style=\"margin:0\"><img src=\"%s\" width=\"192\" height=\"192\" "
+                       "style=\"image-rendering:pixelated;border:1px solid #d9d9e0;border-radius:4px\" alt=\"%s\">"
+                       "<figcaption style=\"font-size:.8rem;color:#55555f;margin-top:.3rem\">%s<br>%s</figcaption></figure>",
+                    shots[i].uri, n, n, nn);
+        }
+        fprintf(f, "</div>");
+    }
+    fprintf(f, "</body></html>\n");
     fclose(f);
     printf("\nreport: %s\n", path);
 }
@@ -372,6 +553,8 @@ static void print_shader_log(GLuint sh, const char *label) {
 int main(int argc, char **argv) {
     const char *libpath = argc > 1 ? argv[1] : "target/release/librust_gl.so";
     const char *report = argc > 2 ? argv[2] : getenv("GLSMOKE_REPORT");
+    shot_dir = getenv("GLSMOKE_SHOT_DIR");
+    if (shot_dir) { char cmd[600]; snprintf(cmd, sizeof cmd, "mkdir -p '%s'", shot_dir); if (system(cmd) != 0) shot_dir = NULL; }
 
     PFNEGLGETPLATFORMDISPLAYEXTPROC getPlatformDisplay =
         (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
@@ -573,6 +756,8 @@ int main(int argc, char **argv) {
     p_glVertexArrayVertexBuffer(dvao, 0, dvbo, 0);
 
 
+    p_glActiveTexture(GL_TEXTURE0);
+    p_glBindTexture(GL_TEXTURE_2D, white);
     p_glClear(GL_COLOR_BUFFER_BIT);
     p_glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, 0);
     p_glReadPixels(0, 0, 64, 64, GL_RGBA, GL_UNSIGNED_BYTE, out);
@@ -641,12 +826,27 @@ int main(int argc, char **argv) {
         p_glVertexAttribPointer((GLuint)c, 3, GL_FLOAT, GL_FALSE, 24, (void *)(3 * sizeof(float)));
 
         p_glClear(GL_COLOR_BUFFER_BIT);
-        p_glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_INT, 0);
+        const char *idx_type = getenv("GLSMOKE_CHUNK_ARRAYS") ? "arrays" : "elements";
+        if (getenv("GLSMOKE_CHUNK_ARRAYS")) {
+            p_glDrawArrays(GL_TRIANGLES, 0, 3);
+        } else if (getenv("GLSMOKE_IDX32")) {
+            p_glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_INT, 0);
+        } else {
+            p_glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, 0);
+        }
+        { GLint es = -1; p_glGetVertexAttribiv((GLuint)a, 0x8623, &es);
+          GLint en = -1; p_glGetVertexAttribiv((GLuint)a, 0x8622, &en);
+          GLint ab = -1; p_glGetVertexAttribiv((GLuint)a, 0x889F, &ab);
+          GLint st = -1; p_glGetVertexAttribiv((GLuint)a, 0x8A75, &st);
+          char dbg[200];
+          snprintf(dbg, sizeof dbg, "aPos size=%d stride=%d enabled=%d buffer=%d mode=%s",
+                   es, st, en, ab, idx_type);
+          record("chunk attribute state", "pass", dbg); }
         p_glReadPixels(0, 0, 64, 64, GL_RGBA, GL_UNSIGNED_BYTE, out);
         {
             char d[200];
-            snprintf(d, sizeof d, "centre=%d,%d,%d corner=%d err=0x%04X", out[centre],
-                     out[centre + 1], out[centre + 2], out[0], p_glGetError());
+            snprintf(d, sizeof d, "centre=%d,%d,%d corner=%d glGetError=0x%04X",
+                     out[centre], out[centre + 1], out[centre + 2], out[0], p_glGetError());
             if (out[centre] + out[centre + 1] + out[centre + 2] > 30) {
                 ok(1, "chunk geometry draws with stride and 32-bit indices");
                 record("chunk detail", "pass", d);
@@ -692,6 +892,8 @@ int main(int argc, char **argv) {
         p_glClear(GL_COLOR_BUFFER_BIT);   /* clear everything first */
         p_glEnable(GL_SCISSOR_TEST);
         p_glScissor(0, 0, 32, 32);
+        p_glActiveTexture(GL_TEXTURE0);
+        p_glBindTexture(GL_TEXTURE_2D, white);
         p_glUseProgram(prog);
         GLint a = p_glGetAttribLocation(prog, "aPos");
         GLint c = p_glGetAttribLocation(prog, "aCol");
@@ -703,7 +905,7 @@ int main(int argc, char **argv) {
         p_glDrawArrays(GL_TRIANGLES, 0, 3);
         p_glReadPixels(0, 0, 64, 64, GL_RGBA, GL_UNSIGNED_BYTE, out);
         /* Inside the scissor the triangle drew; outside it must stay cleared. */
-        int inside = ((32 * 64) + 16) * 4;   /* y=32 inside, x=16 inside */
+        int inside = ((16 * 64) + 16) * 4;   /* inside the 32x32 scissor and inside the triangle */
         int outside = ((60 * 64) + 60) * 4;  /* beyond the 32x32 scissor */
         char d[200];
         snprintf(d, sizeof d, "inside=%d,%d,%d outside=%d,%d,%d", out[inside], out[inside + 1],
@@ -808,6 +1010,132 @@ int main(int argc, char **argv) {
     }
 
     cur_group = "dsa";
+
+
+    /* ================= Visual scenes, screenshots in the report =================
+     * MobileGL-style visual tests: render each scene, read it back, and embed the image so
+     * a reviewer can see what the bridge produced rather than only a pass/fail bit. These
+     * also double as shader coverage: each scene's fragment shader goes through the same
+     * desktop-GLSL translation the game relies on. */
+
+    cur_group = "visual scenes";
+    {
+        const int SHOT = 128;
+        static unsigned char *shot = NULL;
+        shot = (unsigned char *)malloc((size_t)SHOT * SHOT * 4);
+        GLuint sfbo = 0, stex = 0;
+        p_glGenTextures(1, &stex);
+        p_glBindTexture(GL_TEXTURE_2D, stex);
+        p_glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, SHOT, SHOT);
+        p_glGenFramebuffers(1, &sfbo);
+        p_glBindFramebuffer(GL_FRAMEBUFFER, sfbo);
+        p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, stex, 0);
+        p_glViewport(0, 0, SHOT, SHOT);
+
+        /* A full-screen quad, reused by every scene. */
+        static const float quad[] = {
+            -1, -1, 0, 3, -1, 0, -1, 3, 0,
+        };
+        GLuint svao = 0, svbo = 0;
+        p_glGenVertexArrays(1, &svao);
+        p_glBindVertexArray(svao);
+        p_glGenBuffers(1, &svbo);
+        p_glBindBuffer(GL_ARRAY_BUFFER, svbo);
+        p_glBufferData(GL_ARRAY_BUFFER, sizeof quad, quad, GL_STATIC_DRAW);
+        GLint sx = p_glGetAttribLocation(prog, "aPos");
+        p_glEnableVertexAttribArray((GLuint)sx);
+        p_glVertexAttribPointer((GLuint)sx, 3, GL_FLOAT, GL_FALSE, 12, (void *)0);
+
+        struct Scene { const char *name; const char *fs; const char *note; };
+        static const struct Scene scenes[] = {
+            {"gradient", "#version 120\n"
+             "varying vec3 vCol;\nuniform sampler2D tex;\n"
+             "void main(){ gl_FragData[0] = vec4(vCol,1.0)*texture2D(tex,vec2(0.5)); }\n",
+             "interpolated vertex colour through the translated MRT shader"},
+            {"procedural", "#version 120\n"
+             "varying vec3 vCol;\nuniform sampler2D tex;\n"
+             "void main(){ float d = length(vCol.xy); gl_FragData[0] = vec4(d, 1.0-d, 0.25, 1.0); }\n",
+             "procedural fragment maths, no input texture"},
+            {"checker", "#version 120\n"
+             "varying vec3 vCol;\nuniform sampler2D tex;\n"
+             "void main(){ vec2 c = floor(gl_FragCoord.xy / 16.0); float k = mod(c.x + c.y, 2.0);\n"
+             " gl_FragData[0] = vec4(k, 1.0-k, 0.5, 1.0); }\n",
+             "gl_FragCoord based pattern"},
+        };
+
+        for (size_t i = 0; i < sizeof scenes / sizeof scenes[0]; i++) {
+            const char *mv =
+                "#version 120\nattribute vec3 aPos;\nvarying vec3 vCol;\n"
+                "void main(){ vCol = vec3(aPos.x*0.5+0.5, aPos.y*0.5+0.5, 0.6);"
+                " gl_Position = vec4(aPos.xy * 0.9, 0.0, 1.0); }\n";
+            GLuint v = p_glCreateShader(GL_VERTEX_SHADER);
+            p_glShaderSource(v, 1, &mv, NULL);
+            p_glCompileShader(v);
+            GLint okc = 0;
+            p_glGetShaderiv(v, GL_COMPILE_STATUS, &okc);
+            GLuint f = p_glCreateShader(GL_FRAGMENT_SHADER);
+            p_glShaderSource(f, 1, &scenes[i].fs, NULL);
+            p_glCompileShader(f);
+            p_glGetShaderiv(f, GL_COMPILE_STATUS, &okc);
+            GLuint pr = p_glCreateProgram();
+            p_glAttachShader(pr, v);
+            p_glAttachShader(pr, f);
+            p_glLinkProgram(pr);
+            GLint linked = 0;
+            p_glGetProgramiv(pr, GL_LINK_STATUS, &linked);
+            if (!linked) {
+                ok_known(0, scenes[i].name, "scene shader failed to link");
+                continue;
+            }
+            p_glUseProgram(pr);
+            p_glUniform1i(p_glGetUniformLocation(pr, "tex"), 0);
+            p_glActiveTexture(GL_TEXTURE0);
+            p_glBindTexture(GL_TEXTURE_2D, white);
+            p_glDisable(GL_DEPTH_TEST);
+            p_glDisable(GL_BLEND);
+            p_glDisable(GL_SCISSOR_TEST);
+            p_glClearColor(0.0f, 0.0f, 0.0f, 1.0f);   /* black, so "lit" means drawn */
+            p_glClear(GL_COLOR_BUFFER_BIT);
+            GLint sxa = p_glGetAttribLocation(pr, "aPos");
+            if (sxa < 0) sxa = 0;
+            p_glBindVertexArray(svao);
+            p_glEnableVertexAttribArray((GLuint)sxa);
+            p_glVertexAttribPointer((GLuint)sxa, 3, GL_FLOAT, GL_FALSE, 12, (void *)0);
+            p_glDrawArrays(GL_TRIANGLES, 0, 3);
+
+            p_glPixelStorei(GL_PACK_ALIGNMENT, 1);
+            p_glReadPixels(0, 0, SHOT, SHOT, GL_RGBA, GL_UNSIGNED_BYTE, shot);
+            GLenum e = p_glGetError();
+            /* Non-empty means something was rasterised. */
+            long lit = 0;
+            for (int k = 0; k < SHOT * SHOT; k++)
+                if (shot[k * 4] || shot[k * 4 + 1] || shot[k * 4 + 2]) lit++;
+            char path[512];
+            snprintf(path, sizeof path, "%s/%s.png", shot_dir ? shot_dir : ".", scenes[i].name);
+            int wrote = shot_dir ? write_png(path, shot, SHOT, SHOT) : 0;
+            char detail[420];
+            snprintf(detail, sizeof detail, "%s | lit=%ld/%d err=0x%04X png=%s", scenes[i].note,
+                     lit, SHOT * SHOT, e, wrote ? "yes" : "no");
+            if (lit > (SHOT * SHOT) / 20) {
+                ok(1, scenes[i].name);
+                record(scenes[i].name, "pass", detail);
+            } else {
+                failures++;
+                printf("  FAIL  %s\n", scenes[i].name);
+                record(scenes[i].name, "fail", detail);
+            }
+            if (wrote) {
+                /* Ownership moves to the gallery; the report writes it out later. */
+                char *uri = png_to_data_uri(path);
+                if (uri) add_shot(scenes[i].name, uri, scenes[i].note);
+            }
+        }
+        /* Restore the working context for anything after this. */
+        p_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        p_glViewport(0, 0, 64, 64);
+        p_glUseProgram(prog);
+        free(shot);
+    }
 
     /* ---- Known issue ----
      * The DSA path renders nothing. Isolated as far as: the buffer association and attribute

@@ -46,6 +46,7 @@ jobs:
         run: |
           mkdir -p target/reports
           GLSMOKE_REPORT=target/reports/gl-smoke.html \
+          GLSMOKE_SHOT_DIR=target/reports/screenshots \
             ./tools/run-glsmoke.sh 2>&1 | tee target/reports/gl-smoke.log
 
       # A non-zero exit here fails the job on regressions. Known issues are reported as
@@ -56,7 +57,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gl-smoke-report
-          path: target/reports/
+          path: |
+            target/reports/gl-smoke.html
+            target/reports/gl-smoke.log
+            target/reports/screenshots/
           if-no-files-found: error
 
       - name: Summarise
@@ -69,6 +73,8 @@ jobs:
               echo "[Report](artifact) — gl-smoke-report"
               echo
               grep -oE '[0-9]+ checks[^<]*' target/reports/gl-smoke.html | head -1 || true
+              echo
+              ls target/reports/screenshots/ 2>/dev/null | sed 's/^/- screenshot: /' || true
             else
               echo "No report was produced; see the job log."
             fi

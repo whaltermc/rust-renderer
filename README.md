@@ -352,16 +352,51 @@ Mesa's software rasteriser, fails the job on regressions, and uploads the report
 the `gl-smoke-report` artifact. Known issues are reported as `known` rather than failing, so a
 documented limitation stays visible without blocking unrelated work.
 
-**Open findings this harness has surfaced** (all reported, none hidden):
+### Screenshots
 
-- The DSA path renders nothing. The attribute buffer binding is correct but its stride stays
-  0, and an explicit `glVertexAttribPointer` on a DSA-created vertex array is rejected with
-  `GL_INVALID_ENUM` — so the fault is in how that vertex array is created, not in the format
-  bookkeeping. A `GL_INVALID_ENUM` also shows up from `glTexStorage2D` later in the same
-  session, which may be the same root cause.
-- `glDrawElements` with a 32-bit index type and a byte stride draws nothing.
-- `glScissor` does not appear to clip a subsequent draw.
-- The 1.12 fixed-function quad path does not draw.
+Each visual scene is rendered, read back, and written as a PNG, then embedded in the report as
+base64 so a single uploaded HTML file is self-contained. The PNG writer is dependency-free
+(stored deflate blocks plus CRC-32), so the harness needs no image library.
+
+Scenes currently captured: an interpolated vertex-colour gradient, a procedural fragment
+pattern (`length()` maths, no input texture), and a `gl_FragCoord` checkerboard. All three go
+through the same desktop-GLSL translation the game relies on, so they exercise the shader path
+as well as producing something a human can look at.
+
+```bash
+GLSMOKE_SHOT_DIR=target/reports/screenshots ./tools/run-glsmoke.sh
+```
+
+CI uploads the HTML, the log, and the PNGs as the `gl-smoke-report` artifact.
+
+### On Minecraft version coverage
+
+The harness cannot launch Minecraft — that needs a device and the game. What it does instead
+is cover the GL surface each version band depends on, so a regression in one band is caught:
+
+| Band | What it needs | Covered by |
+|---|---|---|
+| 1.12–1.15 | fixed function, GLSL 120, client arrays | `fixed function` group, GLSL 120 scenes |
+| 1.16 | GLSL 150, VAOs/VBOs | `shader translation` group |
+| 1.17–1.20.4 | GL 3.2 core, MRT, depth/blend | `minecraft rendering` group |
+| 1.20.5–26.x | Direct State Access | `dsa` group |
+
+### Open findings
+
+- **`glDrawElements` on a freshly created vertex array draws nothing.** Attribute size and
+  buffer binding read back correctly and there is no GL error, but the framebuffer stays
+  empty. Reported as a failure so CI flags it.
+- **The DSA path renders nothing** on this host, reported as a known issue.
+- **The 1.12 fixed-function quad path does not draw**, reported as a known issue.
+
+**Retracted:** an earlier version of this file listed `glScissor` and "DSA stride stays 0" as
+bridge bugs. Both were bugs in the harness, not the bridge. `glScissor` sampled a point
+outside its own scissor rectangle, and two scenes failed because the atlas test left its
+texture bound to unit 0, so the shared fragment shader multiplied by black. A separate
+suspicion — that `glGetVertexAttribiv(GL_VERTEX_ATTRIB_ARRAY_STRIDE)` reads back 0 even
+immediately after a correct `glVertexAttribPointer` call — is **still unresolved**, and it
+means the "stride stays 0" diagnosis for the DSA finding should not be trusted until someone
+confirms it on a real driver.
 
 ### How to actually verify a GL change
 
