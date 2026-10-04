@@ -39,7 +39,9 @@ val pluginRendererConfig = buildJsonValue {
         // and POJAVEXEC_EGL falls back to system libEGL.so if relative dlopen fails.
         // MobileGL-style relative basename:
         // POJAVEXEC_EGL=librust_gl.so  SDL_EGL_LIBRARY=<pluginDir>/librust_gl.so
-        rendererEGLPath = "librust_gl.so"  // relative: SDL prefixes nativeLibDir; absolute causes double path,
+        // Relative basename only — Zalith sets SDL_EGL_LIBRARY = "$nativeLibPath/$eglName".
+        // An absolute eglName gets doubled and dlopen fails.
+        rendererEGLPath = "librust_gl.so",
 
         dlopenLibPaths = emptyList(),
 
