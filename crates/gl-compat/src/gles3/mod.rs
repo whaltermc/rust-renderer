@@ -1,4 +1,4 @@
-//! Device capability probe: what this GPU actually supports.
+//! Direct OpenGL ES 3 surface: the device capability probe: what this GPU actually supports.
 //!
 //! Everything here is measured once from the driver rather than assumed, and the decisions
 //! that depend on a feature (which compatibility aliases may be advertised, whether

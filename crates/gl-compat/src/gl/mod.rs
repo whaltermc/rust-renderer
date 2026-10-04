@@ -1,13 +1,20 @@
-//! OpenGL entry points, split by the version that introduced them.
+//! The desktop-GL compatibility surface.
 //!
-//! The surface used to be one undifferentiated list in `lib.rs`, which made it impossible to
-//! tell what a given name required or who owned it. Each submodule owns the calls its version
-//! introduced, and each publishes an `EXPORTS` manifest that a test checks: a module cannot
-//! claim a name that does not resolve to a real implementation, which is the failure that let
-//! `glLightModeliv` silently become a no-op.
+//! Entry points are grouped by API family, the way the layer actually thinks:
 //!
-//! Moved here so far: 1.0 (immediate mode, matrices, fog, lighting, texture environment) and
-//! 1.1 (display lists). The 1.2-2.0 and 3.x/4.x moves follow.
+//!   `gl`    this module -- the desktop-GL compatibility surface (GL 1.0-4.5 spellings)
+//!   `gles3` the direct OpenGL ES surface this translates onto
+//!   `egl`   the context and symbol-resolution shims
+//!   `khr`   `GL_ARB_*` / `GL_EXT_*` / `GL_KHR_*` extension spellings
+//!
+//! Within the GL surface the submodules are still by introducing version, so a name can also be
+//! traced to what requires it. Each publishes an `EXPORTS` manifest that a test checks: a
+//! module cannot claim a name that does not resolve to a real implementation, which is the
+//! failure that let `glLightModeliv` silently become a no-op.
+//!
+//! Submodules so far: 1.0 (immediate mode, matrices, fog, lighting, texture environment) and
+//! 1.1 (display lists). 1.2-2.0 and 3.x/4.x follow; gl33.rs, dsa.rs, dsa_named.rs,
+//! fixed_func.rs, immediate.rs and ff_draw.rs are all this family and are still flat here.
 
 /// Re-exported so the version modules can generate entry points without importing the macro
 /// from the parent of their parent.

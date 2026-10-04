@@ -4,7 +4,7 @@
 //! be traced to the version that requires it. `EXPORTS` is asserted by a test, so a module
 //! cannot claim a name that does not resolve to a real implementation.
 
-use crate::aliases::announce_missing;
+use crate::khr::announce_missing;
 use crate::driver_fn_cached;
 use crate::gl_passthrough as passthrough;
 use std::sync::atomic::{AtomicU32, Ordering};

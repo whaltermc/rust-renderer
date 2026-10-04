@@ -16,7 +16,14 @@
 //! Nothing here is a silent no-op. Names ES genuinely lacks are exported so a `dlsym`
 //! resolves them, and they announce themselves once so dependence is visible.
 
-use super::*;
+//! Part of the API-family layout: `gl` is the desktop-GL compatibility surface, `gles3` the
+//! direct ES surface, `egl` the context shims, and this module the extension spellings --
+//! `GL_ARB_*` / `GL_EXT_*` / `GL_KHR_*` names, which are almost always a modern call under a
+//! historical name. OptiFine reaches for these directly, and an extension name that resolves
+//! to nothing is a null function pointer, so they are real exports rather than resolver-only
+//! entries.
+
+use crate::*;
 use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 
 /// Announces a name that has no OpenGL ES implementation, once.
@@ -212,3 +219,15 @@ mod tests {
         }
     }
 }
+
+/// Every extension spelling this module implements. A test asserts each resolves to a real
+/// implementation rather than the shared legacy no-op.
+pub const EXPORTS: &[&str] = &[
+    "glGenTexturesARB", "glBindTextureARB", "glDeleteTexturesARB", "glTexImage2DARB",
+    "glTexSubImage2DARB", "glTexParameteriARB", "glTexParameterfvARB", "glTexParameterivARB",
+    "glGetTexImageARB", "glActiveTextureARB", "glClientActiveTextureARB", "glGenerateMipmapEXT",
+    "glDeleteTexturesEXT", "glGenFramebuffersEXT", "glDeleteFramebuffersEXT",
+    "glBindFramebufferEXT", "glGenRenderbuffersEXT", "glDeleteRenderbuffersEXT",
+    "glBindRenderbufferEXT", "glRenderbufferStorageEXT", "glFramebufferRenderbufferEXT",
+    "glFramebufferTexture2DEXT", "glCheckFramebufferStatusEXT", "glBlitFramebufferEXT",
+];

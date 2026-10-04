@@ -570,17 +570,26 @@ GL_VERTEX_ATTRIB_ARRAY_STRIDE)` returns 0 even for an attribute that demonstrabl
 correctly, so stride cannot be used to diagnose anything here. That is why the harness no
 longer reports stride as data.
 
-### Entry points are split by the GL version that introduced them
+### Entry points are grouped by API family
 
-`crates/gl-compat/src/gl/` owns the surface per version rather than as one undifferentiated
-list, so a name can be traced to the version that requires it. `gl::v1_0` (immediate mode,
-matrix stack, fog, lighting, texture environment) and `gl::v1_1` (display lists) are moved so
-far; 1.2-2.0 and 3.x/4.x follow.
+`crates/gl-compat/src/` is organised the way the layer actually thinks, rather than as one
+undifferentiated list:
 
-Each module publishes an `EXPORTS` manifest, and two tests hold it honest: every claimed name
-must resolve to something that is **not** the shared legacy no-op, and a name must belong to
-exactly one version. That is the invariant whose absence let `glLightModeliv` sit in the
-resolver's stub table looking handled while every call was silently discarded.
+| module | surface |
+|---|---|
+| `gl` | the desktop-GL compatibility surface, submodelled by introducing version |
+| `gles3` | the direct OpenGL ES surface this translates onto, including the capability probe |
+| `khr` | `GL_ARB_*` / `GL_EXT_*` / `GL_KHR_*` extension spellings |
+| `egl` | context and symbol-resolution shims -- **still flat in `lib.rs`, not yet extracted** |
+
+`gl33.rs`, `dsa.rs`, `dsa_named.rs`, `fixed_func.rs`, `immediate.rs` and `ff_draw.rs` all belong
+to the `gl` family and are still flat; only `gl::v1_0` (immediate mode, matrix stack, fog,
+lighting, texture environment) and `gl::v1_1` (display lists) are extracted.
+
+Each module publishes an `EXPORTS` manifest and tests hold it honest: every claimed name must
+resolve to something that is **not** the shared legacy no-op, and a name must belong to exactly
+one version. That is the invariant whose absence let `glLightModeliv` sit in the resolver's
+stub table looking handled while every call was silently discarded.
 
 ### DSA / named-object entry points (`dsa_named.rs`)
 

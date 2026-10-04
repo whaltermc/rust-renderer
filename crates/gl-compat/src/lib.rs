@@ -11,8 +11,8 @@
 
 #[macro_use]
 mod gl;
-mod aliases;
-mod caps;
+mod gles3;
+mod khr;
 mod dsa;
 mod dsa_named;
 mod ff_draw;
@@ -638,12 +638,12 @@ pub unsafe extern "C" fn glGetIntegerv(pname: u32, data: *mut i32) {
 
 /// Extensions this layer adds on top of the driver, filtered by what the device supports.
 ///
-/// The list is computed from [`caps::probe`] rather than fixed, so a device without a
+/// The list is computed from [`gles3::probe`] rather than fixed, so a device without a
 /// feature is not told it has one. Only advertise an alias whose entry points we actually
 /// export, or whose semantics are backed by GLES 3.x or by an implementation in
 /// gl-compat.
 fn compat_extensions() -> Vec<&'static [u8]> {
-    caps::supported_aliases(caps::caps())
+    gles3::supported_aliases(gles3::caps())
 }
 
 const GL_NUM_EXTENSIONS: u32 = 0x821D;
@@ -732,7 +732,7 @@ fn merged_extensions() -> Vec<Vec<u8>> {
             ));
         }
     }
-    if !caps::caps().valid {
+    if !gles3::caps().valid {
         static WARNED: AtomicBool = AtomicBool::new(false);
         if !WARNED.swap(true, Ordering::Relaxed) {
             log("[GLCompat] capability probe failed (no context?): only ES 3.0 core aliases advertised");
@@ -1057,7 +1057,7 @@ pub unsafe extern "C" fn glTexSubImage2D(
 /// usable value is capped by `GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT`. Deciding once keeps the
 /// four `glTexParameter*` wrappers from each re-deriving it.
 fn anisotropy_supported() -> bool {
-    caps::caps().has(b"GL_EXT_texture_filter_anisotropic\0") && caps::caps().max_anisotropy > 1
+    gles3::caps().has(b"GL_EXT_texture_filter_anisotropic\0") && gles3::caps().max_anisotropy > 1
 }
 
 /// Translates a texture pname using the probed capabilities.
@@ -1071,11 +1071,11 @@ pub unsafe extern "C" fn glTexParameteri(t: u32, p: u32, v: i32) {
         return; // desktop-only pname — drop silently
     };
     let is_wrap = matches!(p2, 0x2802 | 0x2803 | 0x8072);
-    if is_wrap && v == format_translate::GL_CLAMP_TO_BORDER && !caps::caps().has_border_clamp() {
+    if is_wrap && v == format_translate::GL_CLAMP_TO_BORDER && !gles3::caps().has_border_clamp() {
         log("[GLCompat] GL_CLAMP_TO_BORDER → clamp-to-edge (driver lacks EXT_texture_border_clamp)");
     }
     // Without the border-clamp extension, CLAMP_TO_BORDER is an invalid enum in ES.
-    let v2 = if is_wrap && !caps::caps().has_border_clamp() {
+    let v2 = if is_wrap && !gles3::caps().has_border_clamp() {
         format_translate::map_wrap(v)
     } else if is_wrap {
         v
@@ -1186,7 +1186,7 @@ pub unsafe extern "C" fn glDrawBuffers(n: i32, b: *const u32) {
         errors().set(GL_INVALID_VALUE);
         return;
     }
-    let max = caps::caps().max_draw_buffers;
+    let max = gles3::caps().max_draw_buffers;
     let mut n = n;
     if max > 0 && n > max {
         static ONCE: AtomicBool = AtomicBool::new(false);
@@ -2469,7 +2469,7 @@ mod tests {
         // Whatever we did advertise must have a backing entry point, and every always-on
         // alias must be advertised even with no context.
         for ext in ADVERTISED_ENTRY_POINTS {
-            let is_always_on = caps::supported_aliases(&caps::Caps {
+            let is_always_on = gles3::supported_aliases(&gles3::Caps {
                 valid: true,
                 ..Default::default()
             })
