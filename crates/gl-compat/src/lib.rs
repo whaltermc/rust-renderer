@@ -326,18 +326,35 @@ unsafe fn unpack_default() -> bool {
     v == [0, 0, 0]
 }
 
-/// For 8-bit BGRA uploads returns an RGBA copy; None means "use the caller's data as is".
-unsafe fn bgra_to_rgba_upload(w: i32, h: i32, f: u32, ty: u32, d: *const c_void) -> Option<Vec<u8>> {
-    if d.is_null() || w <= 0 || h <= 0 || !format_translate::is_bgra8(f, ty) {
+/// For BGRA/BGR uploads returns a converted RGB(A) copy; None means use caller data as-is.
+unsafe fn convert_pixel_upload(w: i32, h: i32, f: u32, ty: u32, d: *const c_void) -> Option<(u32, u32, Vec<u8>)> {
+    if d.is_null() || w <= 0 || h <= 0 {
         return None;
     }
     if !unpack_default() {
-        log("[GLCompat] BGRA upload with non-default unpack state: passed through unconverted");
+        if format_translate::is_bgra8(f, ty) || format_translate::is_bgr8(f, ty) {
+            log("[GLCompat] BGR(A) upload with non-default unpack state: passed through");
+        }
         return None;
     }
     let n = (w as usize) * (h as usize);
-    let src = std::slice::from_raw_parts(d as *const u8, n * 4);
-    Some(format_translate::swizzle_bgra_to_rgba(src, n))
+    if format_translate::is_bgra8(f, ty) {
+        let src = std::slice::from_raw_parts(d as *const u8, n * 4);
+        return Some((
+            format_translate::GL_RGBA,
+            format_translate::GL_UNSIGNED_BYTE,
+            format_translate::swizzle_bgra_to_rgba(src, n),
+        ));
+    }
+    if format_translate::is_bgr8(f, ty) {
+        let src = std::slice::from_raw_parts(d as *const u8, n * 3);
+        return Some((
+            format_translate::GL_RGB,
+            format_translate::GL_UNSIGNED_BYTE,
+            format_translate::swizzle_bgr_to_rgb(src, n),
+        ));
+    }
+    None
 }
 
 #[no_mangle]
@@ -345,10 +362,10 @@ pub unsafe extern "C" fn glTexImage2D(
     t: u32, l: i32, ifmt: i32, w: i32, h: i32, b: i32, f: u32, ty: u32, d: *const c_void,
 ) {
     let ifmt2 = format_translate::map_internal_format(ifmt, f, ty);
-    let swz = bgra_to_rgba_upload(w, h, f, ty, d);
-    let (f2, ty2, ptr) = match &swz {
-        Some(v) => (format_translate::GL_RGBA, format_translate::GL_UNSIGNED_BYTE, v.as_ptr() as *const c_void),
-        None => (f, ty, d),
+    let conv = convert_pixel_upload(w, h, f, ty, d);
+    let (f2, ty2, ptr) = match &conv {
+        Some((nf, nty, v)) => (*nf, *nty, v.as_ptr() as *const c_void),
+        None => (format_translate::map_external_format(f), ty, d),
     };
     type F = unsafe extern "C" fn(u32, i32, i32, i32, i32, i32, u32, u32, *const c_void);
     match driver_fn::<F>("glTexImage2D") {
@@ -361,10 +378,10 @@ pub unsafe extern "C" fn glTexImage2D(
 pub unsafe extern "C" fn glTexSubImage2D(
     t: u32, l: i32, x: i32, y: i32, w: i32, h: i32, f: u32, ty: u32, d: *const c_void,
 ) {
-    let swz = bgra_to_rgba_upload(w, h, f, ty, d);
-    let (f2, ty2, ptr) = match &swz {
-        Some(v) => (format_translate::GL_RGBA, format_translate::GL_UNSIGNED_BYTE, v.as_ptr() as *const c_void),
-        None => (f, ty, d),
+    let conv = convert_pixel_upload(w, h, f, ty, d);
+    let (f2, ty2, ptr) = match &conv {
+        Some((nf, nty, v)) => (*nf, *nty, v.as_ptr() as *const c_void),
+        None => (format_translate::map_external_format(f), ty, d),
     };
     type F = unsafe extern "C" fn(u32, i32, i32, i32, i32, i32, u32, u32, *const c_void);
     match driver_fn::<F>("glTexSubImage2D") {
@@ -632,7 +649,7 @@ forward_all! {
     glValidateProgram(p: u32);
     glGetUniformfv(p: u32, loc: i32, v: *mut f32);
     glGetUniformiv(p: u32, loc: i32, v: *mut i32);
-    glTransformFeedbackVaryings(p: u32, count: i32, varyings: *const *const c_char, bufferMode: u32);
+    glTransformFeedbackVaryings(p: u32, count: i32, varyings: *const *const c_char, buffer_mode: u32);
     glBeginTransformFeedback(mode: u32);
     glEndTransformFeedback();
     glBindTransformFeedback(t: u32, id: u32);
@@ -828,6 +845,7 @@ struct EglLib {
     wait_native: usize,
     query_context: usize,
     query_api: usize,
+    #[allow(dead_code)]
     get_current_context_api: usize,
 }
 

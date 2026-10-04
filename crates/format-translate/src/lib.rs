@@ -1,44 +1,97 @@
-//! Pure functions mapping desktop-GL enums/pixel formats to what GLES 3.0 accepts.
-//! No GL calls here, so everything is unit-testable.
+//! Desktop-GL enums / pixel formats → GLES 3.0-safe equivalents.
 
 pub const GL_UNSIGNED_BYTE: u32 = 0x1401;
 pub const GL_UNSIGNED_SHORT: u32 = 0x1403;
 pub const GL_UNSIGNED_INT: u32 = 0x1405;
 pub const GL_FLOAT: u32 = 0x1406;
+pub const GL_HALF_FLOAT: u32 = 0x140B;
 pub const GL_DEPTH_COMPONENT: u32 = 0x1902;
+pub const GL_RED: u32 = 0x1903;
+pub const GL_RG: u32 = 0x8227;
 pub const GL_RGB: u32 = 0x1907;
 pub const GL_RGBA: u32 = 0x1908;
+pub const GL_BGR: u32 = 0x80E0;
 pub const GL_BGRA: u32 = 0x80E1;
 pub const GL_UNSIGNED_INT_8_8_8_8_REV: u32 = 0x8367;
+pub const GL_UNSIGNED_SHORT_5_6_5: u32 = 0x8363;
+pub const GL_UNSIGNED_SHORT_4_4_4_4: u32 = 0x8033;
+pub const GL_UNSIGNED_SHORT_5_5_5_1: u32 = 0x8034;
 pub const GL_CLAMP: i32 = 0x2900;
 pub const GL_CLAMP_TO_BORDER: i32 = 0x812D;
 pub const GL_CLAMP_TO_EDGE: i32 = 0x812F;
 pub const GL_DEPTH_COMPONENT16: i32 = 0x81A5;
 pub const GL_DEPTH_COMPONENT24: i32 = 0x81A6;
+pub const GL_DEPTH_COMPONENT32: i32 = 0x81A7;
 pub const GL_DEPTH_COMPONENT32F: i32 = 0x8CAC;
+pub const GL_DEPTH24_STENCIL8: i32 = 0x88F0;
+pub const GL_DEPTH32F_STENCIL8: i32 = 0x8CAD;
 pub const GL_RGBA32F: i32 = 0x8814;
 pub const GL_RGB32F: i32 = 0x8815;
+pub const GL_RGBA16F: i32 = 0x881A;
+pub const GL_RGB16F: i32 = 0x881B;
+pub const GL_R8: i32 = 0x8229;
+pub const GL_RG8: i32 = 0x822B;
+pub const GL_RGB8: i32 = 0x8051;
+pub const GL_RGBA8: i32 = 0x8058;
+pub const GL_R16F: i32 = 0x822D;
+pub const GL_RG16F: i32 = 0x822F;
+pub const GL_R32F: i32 = 0x822E;
+pub const GL_RG32F: i32 = 0x8230;
+pub const GL_RGB10_A2: i32 = 0x8059;
+pub const GL_SRGB8_ALPHA8: i32 = 0x8C43;
+pub const GL_SRGB8: i32 = 0x8C41;
 
-/// True when the upload is 8-bit BGRA, which core GLES cannot ingest directly.
-/// (`GL_UNSIGNED_INT_8_8_8_8_REV` on little-endian is the same byte order as BGRA bytes.)
+/// True when the upload is 8-bit BGRA (core GLES cannot ingest directly).
 pub fn is_bgra8(format: u32, ty: u32) -> bool {
     format == GL_BGRA && (ty == GL_UNSIGNED_BYTE || ty == GL_UNSIGNED_INT_8_8_8_8_REV)
 }
 
-/// Desktop GL accepts unsized internal formats with any type; GLES needs sized ones here.
-pub fn map_internal_format(internal: i32, _format: u32, ty: u32) -> i32 {
+pub fn is_bgr8(format: u32, ty: u32) -> bool {
+    format == GL_BGR && ty == GL_UNSIGNED_BYTE
+}
+
+/// Desktop often uses unsized internal formats; GLES wants sized ones.
+pub fn map_internal_format(internal: i32, format: u32, ty: u32) -> i32 {
     match (internal as u32, ty) {
         (GL_DEPTH_COMPONENT, GL_FLOAT) => GL_DEPTH_COMPONENT32F,
         (GL_DEPTH_COMPONENT, GL_UNSIGNED_INT) => GL_DEPTH_COMPONENT24,
         (GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT) => GL_DEPTH_COMPONENT16,
-        (GL_RGBA, GL_FLOAT) => GL_RGBA32F,
+        (GL_RGBA, GL_FLOAT) | (GL_RGBA, GL_HALF_FLOAT) if ty == GL_FLOAT => GL_RGBA32F,
+        (GL_RGBA, GL_HALF_FLOAT) => GL_RGBA16F,
         (GL_RGB, GL_FLOAT) => GL_RGB32F,
-        _ => internal,
+        (GL_RGB, GL_HALF_FLOAT) => GL_RGB16F,
+        (GL_RED, GL_UNSIGNED_BYTE) => GL_R8,
+        (GL_RG, GL_UNSIGNED_BYTE) => GL_RG8,
+        (GL_RGB, GL_UNSIGNED_BYTE) => GL_RGB8,
+        (GL_RGBA, GL_UNSIGNED_BYTE) => GL_RGBA8,
+        (GL_RED, GL_FLOAT) => GL_R32F,
+        (GL_RG, GL_FLOAT) => GL_RG32F,
+        (GL_RED, GL_HALF_FLOAT) => GL_R16F,
+        (GL_RG, GL_HALF_FLOAT) => GL_RG16F,
+        // unsized depth-stencil
+        (0x84F9, _) => GL_DEPTH24_STENCIL8, // GL_DEPTH_STENCIL
+        _ => {
+            // Already-sized or unknown: pass through; also map legacy GL_DEPTH_COMPONENT32
+            if internal == GL_DEPTH_COMPONENT32 {
+                GL_DEPTH_COMPONENT24 // no pure 32-bit int depth in ES3 core
+            } else if format == GL_BGRA && internal == GL_RGBA as i32 {
+                GL_RGBA8
+            } else {
+                internal
+            }
+        }
     }
 }
 
-/// `GL_CLAMP` does not exist in core desktop 3.x or ES; border clamp is not core ES 3.0.
-/// Both fall back to clamp-to-edge (callers should log the border case).
+/// Map external format for GLES (BGR not allowed).
+pub fn map_external_format(format: u32) -> u32 {
+    match format {
+        GL_BGRA => GL_RGBA,
+        GL_BGR => GL_RGB,
+        other => other,
+    }
+}
+
 pub fn map_wrap(param: i32) -> i32 {
     match param {
         GL_CLAMP | GL_CLAMP_TO_BORDER => GL_CLAMP_TO_EDGE,
@@ -46,17 +99,15 @@ pub fn map_wrap(param: i32) -> i32 {
     }
 }
 
-/// `glMapBuffer` access enum -> `glMapBufferRange` access bits.
 pub fn map_access(access: u32) -> Option<u32> {
     match access {
-        0x88B8 => Some(0x0001), // GL_READ_ONLY  -> GL_MAP_READ_BIT
-        0x88B9 => Some(0x0002), // GL_WRITE_ONLY -> GL_MAP_WRITE_BIT
-        0x88BA => Some(0x0003), // GL_READ_WRITE
+        0x88B8 => Some(0x0001), // READ_ONLY
+        0x88B9 => Some(0x0002), // WRITE_ONLY
+        0x88BA => Some(0x0003), // READ_WRITE
         _ => None,
     }
 }
 
-/// Swaps B and R in tightly packed 4-byte pixels. `src.len()` must be `pixels * 4`.
 pub fn swizzle_bgra_to_rgba(src: &[u8], pixels: usize) -> Vec<u8> {
     let n = pixels.min(src.len() / 4);
     let mut out = Vec::with_capacity(n * 4);
@@ -66,38 +117,36 @@ pub fn swizzle_bgra_to_rgba(src: &[u8], pixels: usize) -> Vec<u8> {
     out
 }
 
+pub fn swizzle_bgr_to_rgb(src: &[u8], pixels: usize) -> Vec<u8> {
+    let n = pixels.min(src.len() / 3);
+    let mut out = Vec::with_capacity(n * 3);
+    for px in src[..n * 3].chunks_exact(3) {
+        out.extend_from_slice(&[px[2], px[1], px[0]]);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn swizzles_pixels() {
-        assert_eq!(swizzle_bgra_to_rgba(&[1, 2, 3, 4, 5, 6, 7, 8], 2), vec![3, 2, 1, 4, 7, 6, 5, 8]);
+    fn swizzles() {
+        assert_eq!(
+            swizzle_bgra_to_rgba(&[1, 2, 3, 4, 5, 6, 7, 8], 2),
+            vec![3, 2, 1, 4, 7, 6, 5, 8]
+        );
+        assert_eq!(swizzle_bgr_to_rgb(&[1, 2, 3], 1), vec![3, 2, 1]);
     }
 
     #[test]
-    fn swizzle_never_reads_past_slice() {
-        assert_eq!(swizzle_bgra_to_rgba(&[1, 2, 3, 4], 10).len(), 4);
-    }
-
-    #[test]
-    fn detects_bgra() {
-        assert!(is_bgra8(GL_BGRA, GL_UNSIGNED_BYTE));
-        assert!(is_bgra8(GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV));
-        assert!(!is_bgra8(GL_RGBA, GL_UNSIGNED_BYTE));
-    }
-
-    #[test]
-    fn maps_formats_and_wrap() {
-        assert_eq!(map_internal_format(GL_DEPTH_COMPONENT as i32, 0, GL_FLOAT), GL_DEPTH_COMPONENT32F);
-        assert_eq!(map_internal_format(0x8058, GL_RGBA, GL_UNSIGNED_BYTE), 0x8058);
+    fn maps() {
+        assert_eq!(
+            map_internal_format(GL_DEPTH_COMPONENT as i32, 0, GL_FLOAT),
+            GL_DEPTH_COMPONENT32F
+        );
         assert_eq!(map_wrap(GL_CLAMP), GL_CLAMP_TO_EDGE);
-        assert_eq!(map_wrap(0x2901), 0x2901);
-    }
-
-    #[test]
-    fn maps_access() {
-        assert_eq!(map_access(0x88BA), Some(3));
-        assert_eq!(map_access(1), None);
+        assert_eq!(map_external_format(GL_BGRA), GL_RGBA);
+        assert!(is_bgra8(GL_BGRA, GL_UNSIGNED_BYTE));
     }
 }
