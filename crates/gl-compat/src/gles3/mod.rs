@@ -19,7 +19,7 @@ macro_rules! ext {
 
 /// Limits and features read from the driver at startup.
 #[derive(Clone, Debug, Default)]
-pub struct Caps {
+pub struct GlesCapabilities {
     pub es_major: u32,
     pub es_minor: u32,
     pub extensions: HashSet<Vec<u8>>,
@@ -41,7 +41,7 @@ pub struct Caps {
     pub valid: bool,
 }
 
-impl Caps {
+impl GlesCapabilities {
     pub fn has(&self, name: &[u8]) -> bool {
         self.extensions.contains(name)
     }
@@ -91,10 +91,10 @@ const GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS: u32 = 0x8B4D;
 const GL_MAX_UNIFORM_BLOCK_SIZE: u32 = 0x8A30;
 const GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT: u32 = 0x84FF;
 
-/// Reads extensions and limits from the current context. Returns an invalid `Caps` when no
+/// Reads extensions and limits from the current context. Returns an invalid `GlesCapabilities` when no
 /// context is current, so callers can fall back rather than trust empty answers.
-pub fn probe() -> Caps {
-    let mut caps = Caps::default();
+pub fn probe() -> GlesCapabilities {
+    let mut caps = GlesCapabilities::default();
 
     let Some(get_string) = driver_fn_cached::<unsafe extern "C" fn(u32) -> *const u8>("glGetString")
     else {
@@ -177,9 +177,9 @@ pub fn probe() -> Caps {
 }
 
 /// Cached result of [`probe`]. Safe to call before a context exists: it returns an invalid
-/// `Caps` in that case, and the next call after a context exists re-probes.
-pub fn caps() -> &'static Caps {
-    static CAPS: std::sync::OnceLock<Caps> = std::sync::OnceLock::new();
+/// `GlesCapabilities` in that case, and the next call after a context exists re-probes.
+pub fn caps() -> &'static GlesCapabilities {
+    static CAPS: std::sync::OnceLock<GlesCapabilities> = std::sync::OnceLock::new();
     CAPS.get_or_init(probe)
 }
 
@@ -197,7 +197,7 @@ static GENERATION: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::
 /// Advertising an alias whose backing feature is missing is the bug this prevents: the
 /// client enables a fast path, calls an entry point, and gets a driver error instead of the
 /// behaviour it asked for.
-pub fn supported_aliases(c: &Caps) -> Vec<&'static [u8]> {
+pub fn supported_aliases(c: &GlesCapabilities) -> Vec<&'static [u8]> {
     let mut out: Vec<&'static [u8]> = Vec::new();
     // Always available in ES 3.0 core, or backed by this crate rather than the driver.
     const CORE: [&[u8]; 15] = [
@@ -256,8 +256,8 @@ use std::sync::atomic::Ordering;
 mod tests {
     use super::*;
 
-    fn caps_with(extensions: &[&[u8]], major: u32, minor: u32, aniso: i32) -> Caps {
-        Caps {
+    fn caps_with(extensions: &[&[u8]], major: u32, minor: u32, aniso: i32) -> GlesCapabilities {
+        GlesCapabilities {
             valid: true,
             es_major: major,
             es_minor: minor,
@@ -268,7 +268,7 @@ mod tests {
     }
 
     /// Alias names as plain strings, with the NUL the driver format carries removed.
-    fn advertised(c: &Caps) -> Vec<String> {
+    fn advertised(c: &GlesCapabilities) -> Vec<String> {
         supported_aliases(c)
             .iter()
             .map(|e| String::from_utf8_lossy(e.strip_suffix(&[0u8]).unwrap_or(e)).into_owned())

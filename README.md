@@ -580,11 +580,17 @@ undifferentiated list:
 | `gl` | the desktop-GL compatibility surface, submodelled by introducing version |
 | `gles3` | the direct OpenGL ES surface this translates onto, including the capability probe |
 | `khr` | `GL_ARB_*` / `GL_EXT_*` / `GL_KHR_*` extension spellings |
-| `egl` | context and symbol-resolution shims -- **still flat in `lib.rs`, not yet extracted** |
+| `egl` | context and symbol-resolution shims -- **still inside `lib.rs`, not yet extracted** |
 
-`gl33.rs`, `dsa.rs`, `dsa_named.rs`, `fixed_func.rs`, `immediate.rs` and `ff_draw.rs` all belong
-to the `gl` family and are still flat; only `gl::v1_0` (immediate mode, matrix stack, fog,
-lighting, texture environment) and `gl::v1_1` (display lists) are extracted.
+The GL family is `gl/{v1_0, v1_1, v3_3}` plus `vertex_state.rs`, `named_objects.rs`,
+`fixed_func.rs`, `fixed_draw.rs` and `immediate.rs`.
+
+| module | what it is |
+|---|---|
+| `vertex_state` | vertex array / attribute format / buffer association, and the MSAA depth substitution |
+| `named_objects` | the GL 4.5 named-object entry points (`glCreateTextures`, `glNamedFramebuffer*`, …) |
+| `fixed_func` / `fixed_draw` | fixed-function state, and the quad-to-triangle draw emulation |
+| `immediate` | immediate-mode state |
 
 Each module publishes an `EXPORTS` manifest and tests hold it honest: every claimed name must
 resolve to something that is **not** the shared legacy no-op, and a name must belong to exactly

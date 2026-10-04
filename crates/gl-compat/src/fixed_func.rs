@@ -75,7 +75,7 @@ struct ClientArray {
     buffer: u32,
 }
 
-struct FfState {
+struct FixedFuncState {
     mode: u32, // current matrix mode
     modelview: Vec<Mat4>,
     projection: Vec<Mat4>,
@@ -110,7 +110,7 @@ struct FfState {
     proxy_h: i32,
 }
 
-impl FfState {
+impl FixedFuncState {
     fn new() -> Self {
         Self {
             mode: GL_MODELVIEW,
@@ -164,12 +164,12 @@ impl FfState {
     }
 }
 
-static FF: Mutex<Option<FfState>> = Mutex::new(None);
+static FF: Mutex<Option<FixedFuncState>> = Mutex::new(None);
 
-fn with_ff<R>(f: impl FnOnce(&mut FfState) -> R) -> R {
+fn with_ff<R>(f: impl FnOnce(&mut FixedFuncState) -> R) -> R {
     let mut g = FF.lock().unwrap_or_else(|e| e.into_inner());
     if g.is_none() {
-        *g = Some(FfState::new());
+        *g = Some(FixedFuncState::new());
     }
     f(g.as_mut().unwrap())
 }
@@ -593,7 +593,7 @@ pub fn set_active_texture(texture: u32) {
 }
 
 /// Texture coordinate array of unit 1 or 2.
-pub fn texcoord_unit(unit: usize) -> ArraySnap {
+pub fn texcoord_unit(unit: usize) -> ArraySnapshot {
     with_ff(|s| match unit {
         1 => snap(&s.texcoord_x[0]),
         2 => snap(&s.texcoord_x[1]),
@@ -624,7 +624,7 @@ pub fn modelview_matrix() -> [f32; 16] {
 
 /// Fog as the shader needs it. `mode`: 1 = linear, 2 = exp, 3 = exp2.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FogSnap {
+pub struct FogSnapshot {
     pub mode: i32,
     pub start: f32,
     pub end: f32,
@@ -633,7 +633,7 @@ pub struct FogSnap {
 }
 
 /// `None` when fog is disabled or the mode is not one fixed-function fog defines.
-pub fn fog() -> Option<FogSnap> {
+pub fn fog() -> Option<FogSnapshot> {
     with_ff(|s| {
         if !s.fog_enabled {
             return None;
@@ -644,7 +644,7 @@ pub fn fog() -> Option<FogSnap> {
             0x0801 => 3, // GL_EXP2
             _ => return None,
         };
-        Some(FogSnap {
+        Some(FogSnapshot {
             mode,
             start: s.fog_start,
             end: s.fog_end,
@@ -773,7 +773,7 @@ pub fn legacy_cap_enabled(cap: u32) -> bool {
 
 /// Read-only copy of a client array for the draw emulation.
 #[derive(Clone, Copy, Default)]
-pub struct ArraySnap {
+pub struct ArraySnapshot {
     pub size: i32,
     pub ty: u32,
     pub stride: i32,
@@ -782,12 +782,12 @@ pub struct ArraySnap {
     pub buffer: u32,
 }
 
-fn snap(a: &ClientArray) -> ArraySnap {
-    ArraySnap { size: a.size, ty: a.ty, stride: a.stride, ptr: a.ptr, enabled: a.enabled, buffer: a.buffer }
+fn snap(a: &ClientArray) -> ArraySnapshot {
+    ArraySnapshot { size: a.size, ty: a.ty, stride: a.stride, ptr: a.ptr, enabled: a.enabled, buffer: a.buffer }
 }
 
 /// (vertex, color, texcoord) arrays.
-pub fn arrays() -> (ArraySnap, ArraySnap, ArraySnap) {
+pub fn arrays() -> (ArraySnapshot, ArraySnapshot, ArraySnapshot) {
     with_ff(|s| (snap(&s.vertex), snap(&s.color), snap(&s.texcoord)))
 }
 

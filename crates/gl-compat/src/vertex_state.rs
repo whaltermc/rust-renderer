@@ -915,7 +915,7 @@ mod tests {
         let _guard = table_guard();
         unsafe { glCreateBuffers(0, std::ptr::null_mut()) };
         assert_ne!(unsafe { errors().take() }, 0);
-        unsafe { super::dsa_named::glCreateTextures(0x0DE1, 0, std::ptr::null_mut()) };
+        unsafe { super::named_objects::glCreateTextures(0x0DE1, 0, std::ptr::null_mut()) };
         assert_ne!(unsafe { errors().take() }, 0);
         unsafe { glCreateVertexArrays(-1, std::ptr::null_mut()) };
         assert_ne!(unsafe { errors().take() }, 0);

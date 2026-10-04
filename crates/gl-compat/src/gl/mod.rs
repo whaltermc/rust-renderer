@@ -38,6 +38,7 @@ macro_rules! gl_passthrough {
 
 pub mod v1_0;
 pub mod v1_1;
+pub mod v3_3;
 
 /// Every name the GL 1.x modules claim, concatenated.
 pub fn exports() -> Vec<&'static str> {

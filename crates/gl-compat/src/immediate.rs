@@ -4,7 +4,7 @@
 //! which does not export them, so every call was dropped (after a single log line) and
 //! anything the game drew this way was simply missing. Here the vertices are collected on the
 //! CPU and `glEnd` draws them through the same path as client-array draws
-//! ([`crate::ff_draw::try_draw_arrays`]), so quads, texturing, the alpha test, fog and the
+//! ([`crate::fixed_draw::try_draw_arrays`]), so quads, texturing, the alpha test, fog and the
 //! matrix stack all behave the same way.
 //!
 //! Limits: a draw made while a shader program is bound is not emulated (the same limit as
@@ -21,7 +21,7 @@ const GL_TRIANGLE_FAN: u32 = 0x0006;
 const GL_TEXTURE0: u32 = 0x84C0;
 
 #[derive(Default)]
-struct Imm {
+struct ImmediateState {
     active: bool,
     mode: u32,
     /// Current texture coordinate (`glTexCoord*`), applied to each following vertex.
@@ -34,11 +34,11 @@ struct Imm {
     uvs: Vec<f32>, // s, t per vertex
 }
 
-static IMM: Mutex<Option<Imm>> = Mutex::new(None);
+static IMM: Mutex<Option<ImmediateState>> = Mutex::new(None);
 
-fn with_imm<R>(f: impl FnOnce(&mut Imm) -> R) -> R {
+fn with_imm<R>(f: impl FnOnce(&mut ImmediateState) -> R) -> R {
     let mut g = IMM.lock().unwrap_or_else(|e| e.into_inner());
-    f(g.get_or_insert_with(Imm::default))
+    f(g.get_or_insert_with(ImmediateState::default))
 }
 
 /// ES has no `GL_QUAD_STRIP` or `GL_POLYGON`; both have an exact triangle equivalent.
@@ -98,7 +98,7 @@ pub unsafe extern "C" fn end() {
     let uv_ptr = if uv_used { Some(uvs.as_ptr()) } else { None };
     let saved = fixed_func::push_arrays(pos.as_ptr(), col.as_ptr(), uv_ptr);
     // SAFETY: `pos`, `col` and `uvs` outlive the draw; `n` never exceeds what they hold.
-    let handled = crate::ff_draw::try_draw_arrays(es_mode(mode), 0, n as i32);
+    let handled = crate::fixed_draw::try_draw_arrays(es_mode(mode), 0, n as i32);
     fixed_func::pop_arrays(saved);
     if !handled {
         crate::log("[Immediate] glEnd: draw not emulated (a shader program is bound or the FF path is unavailable)");

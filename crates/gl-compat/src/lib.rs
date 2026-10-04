@@ -10,15 +10,19 @@
 //! missing some desktop-only APIs). Expect crash/black-screen on unhandled paths.
 
 #[macro_use]
+// Entry points are grouped by API family -- the desktop-GL compatibility surface, the ES
+// surface underneath it, and extension spellings. See `gl/mod.rs` for the full map.
 mod gl;
 mod gles3;
 mod khr;
-mod dsa;
-mod dsa_named;
-mod ff_draw;
-mod immediate;
+
+// The GL compatibility surface, still flat: vertex/attribute association and MSAA
+// substitution, the GL 4.5 named-object entry points, and the fixed-function path.
+mod vertex_state;
+mod named_objects;
 mod fixed_func;
-mod gl33;
+mod fixed_draw;
+mod immediate;
 
 use renderer_core::{Backend, BackendKind, Config, GlErrorState};
 use std::ffi::{c_char, c_void, CStr, CString};
@@ -238,7 +242,7 @@ fn backend() -> Option<&'static dyn Backend> {
             log(&format!("[Renderer] API: {}", i.api_version));
             let c = b.capabilities();
             log(&format!(
-                "[Renderer] Caps: ES {}.{}, {} extensions, max texture {}, {} draw buffers",
+                "[Renderer] GlesCapabilities: ES {}.{}, {} extensions, max texture {}, {} draw buffers",
                 c.es_major, c.es_minor, c.extensions.len(), c.max_texture_size, c.max_draw_buffers
             ));
             let _ = BACKEND.set(b);
@@ -966,7 +970,7 @@ pub unsafe extern "C" fn glBindBuffer(t: u32, b: u32) {
     } else if t == 0x8893 /* GL_ELEMENT_ARRAY_BUFFER */ {
         // GLES buffer names are per-target, so a buffer created via glCreateBuffers only has
         // storage on the target it was first filled on. Materialise it on this target too.
-        dsa::note_buffer_target(b, t);
+        vertex_state::note_buffer_target(b, t);
     }
     match driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindBuffer") {
         Some(f) => f(t, b),
@@ -982,7 +986,7 @@ pub unsafe extern "C" fn glFramebufferTexture2D(t: u32, a: u32, tt: u32, tex: u3
     const GL_RENDERBUFFER: u32 = 0x8D41;
     const GL_FRAMEBUFFER: u32 = 0x8D40;
     if tt == GL_TEXTURE_2D_MULTISAMPLE && matches!(a, 0x8D00 | 0x8D20 | 0x821A) {
-        if let Some(rbo) = dsa_named::msaa_substitute_for(tex) {
+        if let Some(rbo) = named_objects::msaa_substitute_for(tex) {
             if let Some(f) =
                 driver_fn_cached::<unsafe extern "C" fn(u32, u32, u32, u32)>(
                     "glFramebufferRenderbuffer",
@@ -1491,7 +1495,7 @@ forward_all! {
 #[no_mangle]
 pub unsafe extern "C" fn glDrawArrays(mode: u32, first: i32, count: i32) {
     // Fixed-function draw (no shader program bound): emulate with our own program.
-    if ff_draw::try_draw_arrays(mode, first, count) {
+    if fixed_draw::try_draw_arrays(mode, first, count) {
         return;
     }
     let mode = fixed_func::map_draw_mode(mode);
@@ -1856,110 +1860,110 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glBufferSubData" => glBufferSubData as *const c_void,
         b"glDeleteBuffers" => glDeleteBuffers as *const c_void,
         b"glBindBuffer" => glBindBuffer as *const c_void,
-        b"glDrawRangeElementsBaseVertex" => gl33::glDrawRangeElementsBaseVertex as *const c_void,
+        b"glDrawRangeElementsBaseVertex" => gl::v3_3::glDrawRangeElementsBaseVertex as *const c_void,
         // Direct State Access (GL 4.5 / ARB_DSA), emulated in dsa.rs
-        b"glCreateBuffers" => dsa::glCreateBuffers as *const c_void,
-        b"glCreateVertexArrays" => dsa::glCreateVertexArrays as *const c_void,
-        b"glNamedBufferData" => dsa::glNamedBufferData as *const c_void,
-        b"glNamedBufferStorage" => dsa::glNamedBufferStorage as *const c_void,
-        b"glNamedBufferSubData" => dsa::glNamedBufferSubData as *const c_void,
-        b"glGetNamedBufferSubData" => dsa::glGetNamedBufferSubData as *const c_void,
-        b"glGetNamedBufferParameteriv" => dsa::glGetNamedBufferParameteriv as *const c_void,
-        b"glVertexArrayVertexBuffer" => dsa::glVertexArrayVertexBuffer as *const c_void,
-        b"glVertexArrayElementBuffer" => dsa::glVertexArrayElementBuffer as *const c_void,
-        b"glVertexArrayAttribFormat" => dsa::glVertexArrayAttribFormat as *const c_void,
-        b"glVertexArrayAttribIFormat" => dsa::glVertexArrayAttribIFormat as *const c_void,
-        b"glVertexArrayAttribLFormat" => dsa::glVertexArrayAttribLFormat as *const c_void,
-        b"glVertexArrayBindingDivisor" => dsa::glVertexArrayBindingDivisor as *const c_void,
+        b"glCreateBuffers" => vertex_state::glCreateBuffers as *const c_void,
+        b"glCreateVertexArrays" => vertex_state::glCreateVertexArrays as *const c_void,
+        b"glNamedBufferData" => vertex_state::glNamedBufferData as *const c_void,
+        b"glNamedBufferStorage" => vertex_state::glNamedBufferStorage as *const c_void,
+        b"glNamedBufferSubData" => vertex_state::glNamedBufferSubData as *const c_void,
+        b"glGetNamedBufferSubData" => vertex_state::glGetNamedBufferSubData as *const c_void,
+        b"glGetNamedBufferParameteriv" => vertex_state::glGetNamedBufferParameteriv as *const c_void,
+        b"glVertexArrayVertexBuffer" => vertex_state::glVertexArrayVertexBuffer as *const c_void,
+        b"glVertexArrayElementBuffer" => vertex_state::glVertexArrayElementBuffer as *const c_void,
+        b"glVertexArrayAttribFormat" => vertex_state::glVertexArrayAttribFormat as *const c_void,
+        b"glVertexArrayAttribIFormat" => vertex_state::glVertexArrayAttribIFormat as *const c_void,
+        b"glVertexArrayAttribLFormat" => vertex_state::glVertexArrayAttribLFormat as *const c_void,
+        b"glVertexArrayBindingDivisor" => vertex_state::glVertexArrayBindingDivisor as *const c_void,
         // Named-object (DSA) spellings, emulated in dsa_named.rs
-        b"glCreateTextures" => dsa_named::glCreateTextures as *const c_void,
-        b"glCreateFramebuffers" => dsa_named::glCreateFramebuffers as *const c_void,
-        b"glCreateRenderbuffers" => dsa_named::glCreateRenderbuffers as *const c_void,
-        b"glCreateSamplers" => dsa_named::glCreateSamplers as *const c_void,
-        b"glCreateQueries" => dsa_named::glCreateQueries as *const c_void,
-        b"glTextureParameteri" => dsa_named::glTextureParameteri as *const c_void,
-        b"glTextureParameterf" => dsa_named::glTextureParameterf as *const c_void,
-        b"glTextureParameteriv" => dsa_named::glTextureParameteriv as *const c_void,
-        b"glTextureParameterfv" => dsa_named::glTextureParameterfv as *const c_void,
-        b"glTextureParameterIiv" => dsa_named::glTextureParameterIiv as *const c_void,
-        b"glTextureParameterIuiv" => dsa_named::glTextureParameterIuiv as *const c_void,
-        b"glGenerateTextureMipmap" => dsa_named::glGenerateTextureMipmap as *const c_void,
-        b"glGetTextureParameterIiv" => dsa_named::glGetTextureParameterIiv as *const c_void,
-        b"glGetTextureParameterIuiv" => dsa_named::glGetTextureParameterIuiv as *const c_void,
-        b"glGetTextureLevelParameterfv" => dsa_named::glGetTextureLevelParameterfv as *const c_void,
-        b"glGetCompressedTextureImage" => dsa_named::glGetCompressedTextureImage as *const c_void,
-        b"glNamedFramebufferTexture" => dsa_named::glNamedFramebufferTexture as *const c_void,
-        b"glNamedFramebufferTextureLayer" => dsa_named::glNamedFramebufferTextureLayer as *const c_void,
-        b"glNamedFramebufferRenderbuffer" => dsa_named::glNamedFramebufferRenderbuffer as *const c_void,
-        b"glNamedFramebufferDrawBuffer" => dsa_named::glNamedFramebufferDrawBuffer as *const c_void,
-        b"glNamedFramebufferDrawBuffers" => dsa_named::glNamedFramebufferDrawBuffers as *const c_void,
-        b"glNamedFramebufferReadBuffer" => dsa_named::glNamedFramebufferReadBuffer as *const c_void,
-        b"glCheckNamedFramebufferStatus" => dsa_named::glCheckNamedFramebufferStatus as *const c_void,
-        b"glGetNamedFramebufferAttachmentParameteriv" => dsa_named::glGetNamedFramebufferAttachmentParameteriv as *const c_void,
-        b"glClearNamedFramebufferiv" => dsa_named::glClearNamedFramebufferiv as *const c_void,
-        b"glClearNamedFramebufferuiv" => dsa_named::glClearNamedFramebufferuiv as *const c_void,
-        b"glClearNamedFramebufferfv" => dsa_named::glClearNamedFramebufferfv as *const c_void,
-        b"glClearNamedFramebufferfi" => dsa_named::glClearNamedFramebufferfi as *const c_void,
-        b"glNamedRenderbufferStorage" => dsa_named::glNamedRenderbufferStorage as *const c_void,
-        b"glNamedRenderbufferStorageMultisample" => dsa_named::glNamedRenderbufferStorageMultisample as *const c_void,
-        b"glGetNamedRenderbufferParameteriv" => dsa_named::glGetNamedRenderbufferParameteriv as *const c_void,
-        b"glMapNamedBuffer" => dsa_named::glMapNamedBuffer as *const c_void,
-        b"glMapNamedBufferRange" => dsa_named::glMapNamedBufferRange as *const c_void,
-        b"glUnmapNamedBuffer" => dsa_named::glUnmapNamedBuffer as *const c_void,
-        b"glFlushMappedNamedBufferRange" => dsa_named::glFlushMappedNamedBufferRange as *const c_void,
-        b"glGetNamedBufferPointerv" => dsa_named::glGetNamedBufferPointerv as *const c_void,
-        b"glGetNamedBufferParameteri64v" => dsa_named::glGetNamedBufferParameteri64v as *const c_void,
-        b"glCopyNamedBufferSubData" => dsa_named::glCopyNamedBufferSubData as *const c_void,
-        b"glDrawArraysInstancedARB" => dsa_named::glDrawArraysInstancedARB as *const c_void,
-        b"glDrawElementsInstancedARB" => dsa_named::glDrawElementsInstancedARB as *const c_void,
-        b"glVertexAttribDivisorARB" => dsa_named::glVertexAttribDivisorARB as *const c_void,
-        b"glBindTextures" => dsa_named::glBindTextures as *const c_void,
-        b"glBindSamplers" => dsa_named::glBindSamplers as *const c_void,
-        b"glBindBuffersBase" => dsa_named::glBindBuffersBase as *const c_void,
-        b"glBindBuffersRange" => dsa_named::glBindBuffersRange as *const c_void,
-        b"glBindVertexBuffers" => dsa_named::glBindVertexBuffers as *const c_void,
-        b"glVertexArrayVertexBuffers" => dsa_named::glVertexArrayVertexBuffers as *const c_void,
-        b"glGetVertexArrayiv" => dsa_named::glGetVertexArrayiv as *const c_void,
-        b"glGetVertexArrayIndexediv" => dsa_named::glGetVertexArrayIndexediv as *const c_void,
-        b"glGetVertexArrayIndexed64iv" => dsa_named::glGetVertexArrayIndexed64iv as *const c_void,
-        b"glTextureStorage1D" => dsa_named::glTextureStorage1D as *const c_void,
-        b"glTextureSubImage1D" => dsa_named::glTextureSubImage1D as *const c_void,
-        b"glCompressedTextureSubImage1D" => dsa_named::glCompressedTextureSubImage1D as *const c_void,
-        b"glCopyTextureSubImage1D" => dsa_named::glCopyTextureSubImage1D as *const c_void,
-        b"glTextureBuffer" => dsa_named::glTextureBuffer as *const c_void,
-        b"glNamedFramebufferTextureMultiviewOVR" => dsa_named::glNamedFramebufferTextureMultiviewOVR as *const c_void,
-        b"glGetProgramResourceLocationIndex" => dsa_named::glGetProgramResourceLocationIndex as *const c_void,
-        b"glTexStorage2DMultisample" => dsa_named::glTexStorage2DMultisample as *const c_void,
-        b"glTexStorage3DMultisample" => dsa_named::glTexStorage3DMultisample as *const c_void,
-        b"glTextureStorage2DMultisample" => dsa_named::glTextureStorage2DMultisample as *const c_void,
-        b"glVertexArrayAttribStride" => dsa::glVertexArrayAttribStride as *const c_void,
-        b"glVertexAttribStride" => dsa::glVertexAttribStride as *const c_void,
-        b"glGetVertexArrayAttribStride" => dsa::glGetVertexArrayAttribStride as *const c_void,
-        b"glGetVertexAttribStride" => dsa::glGetVertexAttribStride as *const c_void,
-        b"glVertexArrayAttribBinding" => dsa::glVertexArrayAttribBinding as *const c_void,
-        b"glBindVertexBuffer" => dsa::glBindVertexBuffer as *const c_void,
-        b"glEnableVertexArrayAttrib" => dsa::glEnableVertexArrayAttrib as *const c_void,
-        b"glDisableVertexArrayAttrib" => dsa::glDisableVertexArrayAttrib as *const c_void,
-        b"glTextureStorage2D" => dsa::glTextureStorage2D as *const c_void,
-        b"glTextureStorage3D" => dsa::glTextureStorage3D as *const c_void,
-        b"glTextureSubImage2D" => dsa::glTextureSubImage2D as *const c_void,
-        b"glTextureSubImage3D" => dsa::glTextureSubImage3D as *const c_void,
-        b"glMemoryBarrier" => dsa::glMemoryBarrier as *const c_void,
-        b"glMemoryBarrierByRegion" => dsa::glMemoryBarrierByRegion as *const c_void,
-        b"glObjectLabel" => dsa::glObjectLabel as *const c_void,
-        b"glObjectPtrLabel" => dsa::glObjectPtrLabel as *const c_void,
-        b"glPushDebugGroup" => dsa::glPushDebugGroup as *const c_void,
-        b"glPopDebugGroup" => dsa::glPopDebugGroup as *const c_void,
-        b"glDebugMessageCallback" => dsa::glDebugMessageCallback as *const c_void,
-        b"glDebugMessageCallbackARB" => dsa::glDebugMessageCallbackARB as *const c_void,
-        b"glDebugMessageControl" => dsa_named::glDebugMessageControl as *const c_void,
-        b"glDebugMessageControlARB" => dsa_named::glDebugMessageControlARB as *const c_void,
-        b"glBindImageTexture" => dsa_named::glBindImageTexture as *const c_void,
-        b"glMultiDrawElementsBaseVertex" => dsa_named::glMultiDrawElementsBaseVertex as *const c_void,
-        b"glGetGraphicsResetStatus" => dsa::glGetGraphicsResetStatus as *const c_void,
-        b"glMultiDrawArraysIndirect" => dsa::glMultiDrawArraysIndirect as *const c_void,
-        b"glMultiDrawElementsIndirect" => dsa::glMultiDrawElementsIndirect as *const c_void,
-        b"glDispatchCompute" => dsa::glDispatchCompute as *const c_void,
+        b"glCreateTextures" => named_objects::glCreateTextures as *const c_void,
+        b"glCreateFramebuffers" => named_objects::glCreateFramebuffers as *const c_void,
+        b"glCreateRenderbuffers" => named_objects::glCreateRenderbuffers as *const c_void,
+        b"glCreateSamplers" => named_objects::glCreateSamplers as *const c_void,
+        b"glCreateQueries" => named_objects::glCreateQueries as *const c_void,
+        b"glTextureParameteri" => named_objects::glTextureParameteri as *const c_void,
+        b"glTextureParameterf" => named_objects::glTextureParameterf as *const c_void,
+        b"glTextureParameteriv" => named_objects::glTextureParameteriv as *const c_void,
+        b"glTextureParameterfv" => named_objects::glTextureParameterfv as *const c_void,
+        b"glTextureParameterIiv" => named_objects::glTextureParameterIiv as *const c_void,
+        b"glTextureParameterIuiv" => named_objects::glTextureParameterIuiv as *const c_void,
+        b"glGenerateTextureMipmap" => named_objects::glGenerateTextureMipmap as *const c_void,
+        b"glGetTextureParameterIiv" => named_objects::glGetTextureParameterIiv as *const c_void,
+        b"glGetTextureParameterIuiv" => named_objects::glGetTextureParameterIuiv as *const c_void,
+        b"glGetTextureLevelParameterfv" => named_objects::glGetTextureLevelParameterfv as *const c_void,
+        b"glGetCompressedTextureImage" => named_objects::glGetCompressedTextureImage as *const c_void,
+        b"glNamedFramebufferTexture" => named_objects::glNamedFramebufferTexture as *const c_void,
+        b"glNamedFramebufferTextureLayer" => named_objects::glNamedFramebufferTextureLayer as *const c_void,
+        b"glNamedFramebufferRenderbuffer" => named_objects::glNamedFramebufferRenderbuffer as *const c_void,
+        b"glNamedFramebufferDrawBuffer" => named_objects::glNamedFramebufferDrawBuffer as *const c_void,
+        b"glNamedFramebufferDrawBuffers" => named_objects::glNamedFramebufferDrawBuffers as *const c_void,
+        b"glNamedFramebufferReadBuffer" => named_objects::glNamedFramebufferReadBuffer as *const c_void,
+        b"glCheckNamedFramebufferStatus" => named_objects::glCheckNamedFramebufferStatus as *const c_void,
+        b"glGetNamedFramebufferAttachmentParameteriv" => named_objects::glGetNamedFramebufferAttachmentParameteriv as *const c_void,
+        b"glClearNamedFramebufferiv" => named_objects::glClearNamedFramebufferiv as *const c_void,
+        b"glClearNamedFramebufferuiv" => named_objects::glClearNamedFramebufferuiv as *const c_void,
+        b"glClearNamedFramebufferfv" => named_objects::glClearNamedFramebufferfv as *const c_void,
+        b"glClearNamedFramebufferfi" => named_objects::glClearNamedFramebufferfi as *const c_void,
+        b"glNamedRenderbufferStorage" => named_objects::glNamedRenderbufferStorage as *const c_void,
+        b"glNamedRenderbufferStorageMultisample" => named_objects::glNamedRenderbufferStorageMultisample as *const c_void,
+        b"glGetNamedRenderbufferParameteriv" => named_objects::glGetNamedRenderbufferParameteriv as *const c_void,
+        b"glMapNamedBuffer" => named_objects::glMapNamedBuffer as *const c_void,
+        b"glMapNamedBufferRange" => named_objects::glMapNamedBufferRange as *const c_void,
+        b"glUnmapNamedBuffer" => named_objects::glUnmapNamedBuffer as *const c_void,
+        b"glFlushMappedNamedBufferRange" => named_objects::glFlushMappedNamedBufferRange as *const c_void,
+        b"glGetNamedBufferPointerv" => named_objects::glGetNamedBufferPointerv as *const c_void,
+        b"glGetNamedBufferParameteri64v" => named_objects::glGetNamedBufferParameteri64v as *const c_void,
+        b"glCopyNamedBufferSubData" => named_objects::glCopyNamedBufferSubData as *const c_void,
+        b"glDrawArraysInstancedARB" => named_objects::glDrawArraysInstancedARB as *const c_void,
+        b"glDrawElementsInstancedARB" => named_objects::glDrawElementsInstancedARB as *const c_void,
+        b"glVertexAttribDivisorARB" => named_objects::glVertexAttribDivisorARB as *const c_void,
+        b"glBindTextures" => named_objects::glBindTextures as *const c_void,
+        b"glBindSamplers" => named_objects::glBindSamplers as *const c_void,
+        b"glBindBuffersBase" => named_objects::glBindBuffersBase as *const c_void,
+        b"glBindBuffersRange" => named_objects::glBindBuffersRange as *const c_void,
+        b"glBindVertexBuffers" => named_objects::glBindVertexBuffers as *const c_void,
+        b"glVertexArrayVertexBuffers" => named_objects::glVertexArrayVertexBuffers as *const c_void,
+        b"glGetVertexArrayiv" => named_objects::glGetVertexArrayiv as *const c_void,
+        b"glGetVertexArrayIndexediv" => named_objects::glGetVertexArrayIndexediv as *const c_void,
+        b"glGetVertexArrayIndexed64iv" => named_objects::glGetVertexArrayIndexed64iv as *const c_void,
+        b"glTextureStorage1D" => named_objects::glTextureStorage1D as *const c_void,
+        b"glTextureSubImage1D" => named_objects::glTextureSubImage1D as *const c_void,
+        b"glCompressedTextureSubImage1D" => named_objects::glCompressedTextureSubImage1D as *const c_void,
+        b"glCopyTextureSubImage1D" => named_objects::glCopyTextureSubImage1D as *const c_void,
+        b"glTextureBuffer" => named_objects::glTextureBuffer as *const c_void,
+        b"glNamedFramebufferTextureMultiviewOVR" => named_objects::glNamedFramebufferTextureMultiviewOVR as *const c_void,
+        b"glGetProgramResourceLocationIndex" => named_objects::glGetProgramResourceLocationIndex as *const c_void,
+        b"glTexStorage2DMultisample" => named_objects::glTexStorage2DMultisample as *const c_void,
+        b"glTexStorage3DMultisample" => named_objects::glTexStorage3DMultisample as *const c_void,
+        b"glTextureStorage2DMultisample" => named_objects::glTextureStorage2DMultisample as *const c_void,
+        b"glVertexArrayAttribStride" => vertex_state::glVertexArrayAttribStride as *const c_void,
+        b"glVertexAttribStride" => vertex_state::glVertexAttribStride as *const c_void,
+        b"glGetVertexArrayAttribStride" => vertex_state::glGetVertexArrayAttribStride as *const c_void,
+        b"glGetVertexAttribStride" => vertex_state::glGetVertexAttribStride as *const c_void,
+        b"glVertexArrayAttribBinding" => vertex_state::glVertexArrayAttribBinding as *const c_void,
+        b"glBindVertexBuffer" => vertex_state::glBindVertexBuffer as *const c_void,
+        b"glEnableVertexArrayAttrib" => vertex_state::glEnableVertexArrayAttrib as *const c_void,
+        b"glDisableVertexArrayAttrib" => vertex_state::glDisableVertexArrayAttrib as *const c_void,
+        b"glTextureStorage2D" => vertex_state::glTextureStorage2D as *const c_void,
+        b"glTextureStorage3D" => vertex_state::glTextureStorage3D as *const c_void,
+        b"glTextureSubImage2D" => vertex_state::glTextureSubImage2D as *const c_void,
+        b"glTextureSubImage3D" => vertex_state::glTextureSubImage3D as *const c_void,
+        b"glMemoryBarrier" => vertex_state::glMemoryBarrier as *const c_void,
+        b"glMemoryBarrierByRegion" => vertex_state::glMemoryBarrierByRegion as *const c_void,
+        b"glObjectLabel" => vertex_state::glObjectLabel as *const c_void,
+        b"glObjectPtrLabel" => vertex_state::glObjectPtrLabel as *const c_void,
+        b"glPushDebugGroup" => vertex_state::glPushDebugGroup as *const c_void,
+        b"glPopDebugGroup" => vertex_state::glPopDebugGroup as *const c_void,
+        b"glDebugMessageCallback" => vertex_state::glDebugMessageCallback as *const c_void,
+        b"glDebugMessageCallbackARB" => vertex_state::glDebugMessageCallbackARB as *const c_void,
+        b"glDebugMessageControl" => named_objects::glDebugMessageControl as *const c_void,
+        b"glDebugMessageControlARB" => named_objects::glDebugMessageControlARB as *const c_void,
+        b"glBindImageTexture" => named_objects::glBindImageTexture as *const c_void,
+        b"glMultiDrawElementsBaseVertex" => named_objects::glMultiDrawElementsBaseVertex as *const c_void,
+        b"glGetGraphicsResetStatus" => vertex_state::glGetGraphicsResetStatus as *const c_void,
+        b"glMultiDrawArraysIndirect" => vertex_state::glMultiDrawArraysIndirect as *const c_void,
+        b"glMultiDrawElementsIndirect" => vertex_state::glMultiDrawElementsIndirect as *const c_void,
+        b"glDispatchCompute" => vertex_state::glDispatchCompute as *const c_void,
         b"glPixelStorei" => glPixelStorei as *const c_void,
         b"glPolygonMode" => glPolygonMode as *const c_void,
         b"glXGetProcAddress" | b"glXGetProcAddressARB" | b"glGetProcAddress" => {
@@ -2044,7 +2048,7 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
             if !imm.is_null() {
                 return imm;
             }
-            let compat = gl33::resolve(n);
+            let compat = gl::v3_3::resolve(n);
             if !compat.is_null() {
                 return compat;
             }
@@ -2248,12 +2252,12 @@ fn warn_once(name: &'static str) {
 // No DT_NEEDED on libEGL (avoids linker/constructor fights in the game process).
 // =============================================================================
 
-struct SysEgl {
+struct SystemEgl {
     lib: libloading::Library,
 }
 
-fn sys_egl() -> Option<&'static SysEgl> {
-    static EGL: OnceLock<Option<SysEgl>> = OnceLock::new();
+fn sys_egl() -> Option<&'static SystemEgl> {
+    static EGL: OnceLock<Option<SystemEgl>> = OnceLock::new();
     EGL.get_or_init(|| {
         let paths = [
             "/system/lib64/libEGL.so",
@@ -2263,7 +2267,7 @@ fn sys_egl() -> Option<&'static SysEgl> {
         for path in paths {
             if let Ok(lib) = unsafe { libloading::Library::new(path) } {
                 log(&format!("[EGL] loaded system EGL from {path}"));
-                return Some(SysEgl { lib });
+                return Some(SystemEgl { lib });
             }
         }
         log("[EGL] FAILED to load system libEGL.so");
@@ -2469,7 +2473,7 @@ mod tests {
         // Whatever we did advertise must have a backing entry point, and every always-on
         // alias must be advertised even with no context.
         for ext in ADVERTISED_ENTRY_POINTS {
-            let is_always_on = gles3::supported_aliases(&gles3::Caps {
+            let is_always_on = gles3::supported_aliases(&gles3::GlesCapabilities {
                 valid: true,
                 ..Default::default()
             })

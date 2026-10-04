@@ -11,7 +11,7 @@
 //!
 //! Draws made while a program is bound (1.17+) are never touched.
 
-use crate::fixed_func::{self, ArraySnap};
+use crate::fixed_func::{self, ArraySnapshot};
 use renderer_core::{Backend, BufferId, ProgramId, VertexArrayId};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -243,7 +243,7 @@ fn build(be: &dyn Backend) -> Option<Gpu> {
 
 /// Picks the unit that carries the lightmap: unit 2 when it has both a UV array and texturing
 /// enabled (1.15/1.16, where unit 1 is the entity overlay), otherwise unit 1 (1.12-1.14).
-fn lightmap_unit(arrays: impl Fn(usize) -> ArraySnap, enabled: impl Fn(usize) -> bool) -> Option<usize> {
+fn lightmap_unit(arrays: impl Fn(usize) -> ArraySnapshot, enabled: impl Fn(usize) -> bool) -> Option<usize> {
     [2usize, 1usize]
         .into_iter()
         .find(|&u| arrays(u).enabled && enabled(u))
@@ -259,7 +259,7 @@ fn type_size(ty: u32) -> usize {
 
 /// Points attribute `idx` at array `a`, rebased so vertex `first` becomes vertex 0.
 /// Returns false if the array is unusable (caller then uses a constant value).
-fn setup_attrib(be: &dyn Backend, idx: u32, a: &ArraySnap, vbo: BufferId, first: i32, count: i32, normalized: bool) -> bool {
+fn setup_attrib(be: &dyn Backend, idx: u32, a: &ArraySnapshot, vbo: BufferId, first: i32, count: i32, normalized: bool) -> bool {
     if !a.enabled || a.size <= 0 || a.size > 4 {
         return false;
     }
@@ -481,8 +481,8 @@ pub unsafe fn try_draw_arrays(mode: u32, first: i32, count: i32) -> bool {
 mod tests {
     use super::*;
 
-    fn arr(enabled: bool) -> ArraySnap {
-        ArraySnap { enabled, ..ArraySnap::default() }
+    fn arr(enabled: bool) -> ArraySnapshot {
+        ArraySnapshot { enabled, ..ArraySnapshot::default() }
     }
 
     #[test]
