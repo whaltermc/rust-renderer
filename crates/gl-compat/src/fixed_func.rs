@@ -71,6 +71,8 @@ struct ClientArray {
     stride: i32,
     ptr: usize,
     enabled: bool,
+    /// GL_ARRAY_BUFFER bound when the pointer was set (0 = client memory).
+    buffer: u32,
 }
 
 struct FfState {
@@ -313,7 +315,11 @@ pub extern "C" fn gl_enable_client_state(cap: u32) {
     with_ff(|s| match cap {
         GL_VERTEX_ARRAY => s.vertex.enabled = true,
         GL_COLOR_ARRAY => s.color.enabled = true,
-        GL_TEXTURE_COORD_ARRAY => s.texcoord.enabled = true,
+        GL_TEXTURE_COORD_ARRAY => {
+            if s.client_active_texture == 0 {
+                s.texcoord.enabled = true;
+            }
+        }
         GL_NORMAL_ARRAY => s.normal.enabled = true,
         _ => {}
     });
@@ -323,13 +329,18 @@ pub extern "C" fn gl_disable_client_state(cap: u32) {
     with_ff(|s| match cap {
         GL_VERTEX_ARRAY => s.vertex.enabled = false,
         GL_COLOR_ARRAY => s.color.enabled = false,
-        GL_TEXTURE_COORD_ARRAY => s.texcoord.enabled = false,
+        GL_TEXTURE_COORD_ARRAY => {
+            if s.client_active_texture == 0 {
+                s.texcoord.enabled = false;
+            }
+        }
         GL_NORMAL_ARRAY => s.normal.enabled = false,
         _ => {}
     });
 }
 
-fn set_array(a: &mut ClientArray, size: i32, ty: u32, stride: i32, ptr: *const c_void) {
+fn set_array(a: &mut ClientArray, size: i32, ty: u32, stride: i32, ptr: *const c_void, buffer: u32) {
+    a.buffer = buffer;
     a.size = size;
     a.ty = ty;
     a.stride = stride;
@@ -337,19 +348,29 @@ fn set_array(a: &mut ClientArray, size: i32, ty: u32, stride: i32, ptr: *const c
 }
 
 pub extern "C" fn gl_vertex_pointer(size: i32, ty: u32, stride: i32, ptr: *const c_void) {
-    with_ff(|s| set_array(&mut s.vertex, size, ty, stride, ptr));
+    // SAFETY: only queries driver state.
+    let buf = unsafe { crate::current_array_buffer() };
+    with_ff(|s| set_array(&mut s.vertex, size, ty, stride, ptr, buf));
 }
 
 pub extern "C" fn gl_color_pointer(size: i32, ty: u32, stride: i32, ptr: *const c_void) {
-    with_ff(|s| set_array(&mut s.color, size, ty, stride, ptr));
+    let buf = unsafe { crate::current_array_buffer() };
+    with_ff(|s| set_array(&mut s.color, size, ty, stride, ptr, buf));
 }
 
 pub extern "C" fn gl_tex_coord_pointer(size: i32, ty: u32, stride: i32, ptr: *const c_void) {
-    with_ff(|s| set_array(&mut s.texcoord, size, ty, stride, ptr));
+    // Only texture unit 0 is emulated; unit 1 (lightmap) must not overwrite the base UVs.
+    let buf = unsafe { crate::current_array_buffer() };
+    with_ff(|s| {
+        if s.client_active_texture == 0 {
+            set_array(&mut s.texcoord, size, ty, stride, ptr, buf)
+        }
+    });
 }
 
 pub extern "C" fn gl_normal_pointer(ty: u32, stride: i32, ptr: *const c_void) {
-    with_ff(|s| set_array(&mut s.normal, 3, ty, stride, ptr));
+    let buf = unsafe { crate::current_array_buffer() };
+    with_ff(|s| set_array(&mut s.normal, 3, ty, stride, ptr, buf));
 }
 
 pub extern "C" fn gl_client_active_texture(texture: u32) {
@@ -505,4 +526,28 @@ pub fn handle_cap(cap: u32, on: bool) -> bool {
 
 pub fn legacy_cap_enabled(cap: u32) -> bool {
     with_ff(|s| s.legacy_caps.contains(&cap))
+}
+
+/// Read-only copy of a client array for the draw emulation.
+#[derive(Clone, Copy, Default)]
+pub struct ArraySnap {
+    pub size: i32,
+    pub ty: u32,
+    pub stride: i32,
+    pub ptr: usize,
+    pub enabled: bool,
+    pub buffer: u32,
+}
+
+fn snap(a: &ClientArray) -> ArraySnap {
+    ArraySnap { size: a.size, ty: a.ty, stride: a.stride, ptr: a.ptr, enabled: a.enabled, buffer: a.buffer }
+}
+
+/// (vertex, color, texcoord) arrays.
+pub fn arrays() -> (ArraySnap, ArraySnap, ArraySnap) {
+    with_ff(|s| (snap(&s.vertex), snap(&s.color), snap(&s.texcoord)))
+}
+
+pub fn alpha() -> (u32, f32) {
+    with_ff(|s| s.alpha_func)
 }

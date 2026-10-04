@@ -9,6 +9,7 @@
 //! This is still incomplete for full Minecraft parity (no Vulkan, limited shader rewrite,
 //! missing some desktop-only APIs). Expect crash/black-screen on unhandled paths.
 
+mod ff_draw;
 mod fixed_func;
 
 use renderer_core::{Backend, BackendKind, Config, GlErrorState};
@@ -28,6 +29,15 @@ fn errors() -> &'static GlErrorState {
     ERRORS.get_or_init(GlErrorState::default)
 }
 
+/// Current GL_ARRAY_BUFFER binding (client-array pointers capture it, per GL semantics).
+pub(crate) unsafe fn current_array_buffer() -> u32 {
+    let mut v = 0i32;
+    if let Some(f) = driver_fn::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
+        f(0x8894, &mut v);
+    }
+    v.max(0) as u32
+}
+
 fn log(msg: &str) {
     #[cfg(target_os = "android")]
     {
@@ -40,6 +50,8 @@ fn log(msg: &str) {
             )
         });
         log::info!("{msg}");
+        // Also to stderr: the launcher captures it into the game log (no adb needed).
+        eprintln!("[RustRenderer] {msg}");
     }
     #[cfg(not(target_os = "android"))]
     eprintln!("[RustRenderer] {msg}");
@@ -882,6 +894,10 @@ forward_all! {
 
 #[no_mangle]
 pub unsafe extern "C" fn glDrawArrays(mode: u32, first: i32, count: i32) {
+    // Fixed-function draw (no shader program bound): emulate with our own program.
+    if ff_draw::try_draw_arrays(mode, first, count) {
+        return;
+    }
     let mode = fixed_func::map_draw_mode(mode);
     type F = unsafe extern "C" fn(u32, i32, i32);
     match driver_fn::<F>("glDrawArrays") {
