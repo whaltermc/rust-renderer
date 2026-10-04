@@ -79,6 +79,20 @@ fn strip_layout_key(line: &str, key: &str) -> String {
     out
 }
 
+/// Removes Mojang-only preprocessor lines that are not GLSL.
+fn strip_mojang_directives(src: &str) -> String {
+    src.lines()
+        .filter(|l| {
+            let t = l.trim_start();
+            !(t.starts_with("#moj_") || t.starts_with("#import") || t.starts_with("#include"))
+        })
+        .fold(String::new(), |mut acc, l| {
+            acc.push_str(l);
+            acc.push('\n');
+            acc
+        })
+}
+
 fn looks_like_fragment(src: &str) -> bool {
     src.contains("gl_FragColor")
         || src.contains("gl_FragData")
@@ -199,6 +213,7 @@ pub fn translate(src: &str) -> Result<String, String> {
 
     let (num, es) = version.unwrap_or((110, false));
     if es {
+        let src = strip_mojang_directives(src);
         // Already ES — still inject precision if missing (some drivers want it).
         if !src.contains("precision ") && num >= 300 {
             let mut out = String::new();
@@ -241,6 +256,14 @@ pub fn translate(src: &str) -> Result<String, String> {
         let t = line.trim_start();
 
         if t.starts_with("#version") {
+            continue;
+        }
+
+        // Mojang's preprocessor directives (#moj_import / #import / #moj_pack) are resolved by
+        // the game, but anything that reaches us unresolved is not valid GLSL and would fail
+        // the compile. Dropping an unknown directive is better than failing the shader, which
+        // aborts resource loading.
+        if t.starts_with("#moj_") || t.starts_with("#import") || t.starts_with("#include") {
             continue;
         }
 
@@ -353,6 +376,19 @@ mod tests {
         assert!(o.starts_with("#version 300 es\n"));
         assert!(!o.contains("binding"));
         assert!(o.contains("in vec3 p"));
+    }
+
+    #[test]
+    fn mojang_preprocessor_directives_are_dropped() {
+        // A shader that reaches us with these unresolved would fail to compile and abort
+        // resource loading, which is what leaves the Mojang splash on screen.
+        let o = translate(
+            "#version 410 core\n#moj_import <vsh_main>\nvoid main(){ gl_Position = vec4(0); }\n",
+        )
+        .unwrap();
+        assert!(!o.contains("#moj_import"), "got: {o}");
+        let es = translate("#version 300 es\n#moj_pack 1 0 f\nprecision highp float;\nvoid main(){}\n");
+        assert!(!es.unwrap().contains("#moj_pack"));
     }
 
     #[test]

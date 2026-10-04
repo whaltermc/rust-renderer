@@ -10,6 +10,7 @@
 //! missing some desktop-only APIs). Expect crash/black-screen on unhandled paths.
 
 mod caps;
+mod dsa;
 mod ff_draw;
 mod fixed_func;
 mod gl33;
@@ -369,19 +370,22 @@ pub(crate) fn driver_fn_cached<T: Copy>(name: &'static str) -> Option<T> {
     }
     // Resolve outside the lock: dlsym must not run while the cache is borrowed.
     let resolved = unsafe { driver_fn::<T>(name) };
-    let ptr: usize = match resolved {
-        Some(f) => {
-            // SAFETY: `driver_fn` already checked that T has pointer size, so this copies
-            // the function pointer's bits verbatim into a pointer-sized integer.
-            unsafe { std::mem::transmute_copy::<T, usize>(&f) }
-        }
-        None => 0,
+    let Some(f) = resolved else {
+        // Do NOT cache a miss. `eglGetProcAddress` can legitimately return null before a
+        // context exists, and caching that would leave the symbol permanently unresolvable
+        // for the rest of the process — which shows up much later as a version-specific
+        // failure, since modern Minecraft resolves far more extension entry points than the
+        // fixed-function path does.
+        return None;
     };
+    // SAFETY: `driver_fn` already checked that T has pointer size, so this copies the
+    // function pointer's bits verbatim into a pointer-sized integer.
+    let ptr: usize = unsafe { std::mem::transmute_copy::<T, usize>(&f) };
     let mut cache = DRIVER_CACHE.lock().unwrap_or_else(|e| e.into_inner());
     if !cache.iter().any(|(p, l, _)| *p == key.0 && *l == key.1) {
         cache.push((key.0, key.1, ptr));
     }
-    resolved
+    Some(f)
 }
 
 /// Resolve a GLES driver symbol by name. Safe to call before a context exists.
@@ -804,7 +808,7 @@ fn track_pixel_store(pname: u32, value: i32) {
 }
 
 /// For BGRA/BGR uploads returns a converted RGB(A) copy; None means use caller data as-is.
-unsafe fn convert_pixel_upload(w: i32, h: i32, f: u32, ty: u32, d: *const c_void) -> Option<(u32, u32, Vec<u8>)> {
+pub(crate) unsafe fn convert_pixel_upload(w: i32, h: i32, f: u32, ty: u32, d: *const c_void) -> Option<(u32, u32, Vec<u8>)> {
     if d.is_null() || w <= 0 || h <= 0 {
         return None;
     }
@@ -852,6 +856,10 @@ pub unsafe extern "C" fn glPixelStorei(n: u32, v: i32) {
 pub unsafe extern "C" fn glBindBuffer(t: u32, b: u32) {
     if t == 0x8892 /* GL_ARRAY_BUFFER */ {
         set_array_buffer_binding(b);
+    } else if t == 0x8893 /* GL_ELEMENT_ARRAY_BUFFER */ {
+        // GLES buffer names are per-target, so a buffer created via glCreateBuffers only has
+        // storage on the target it was first filled on. Materialise it on this target too.
+        dsa::note_buffer_target(b, t);
     }
     match driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindBuffer") {
         Some(f) => f(t, b),
@@ -1580,6 +1588,43 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glBufferData" => glBufferData as *const c_void,
         b"glBufferSubData" => glBufferSubData as *const c_void,
         b"glDeleteBuffers" => glDeleteBuffers as *const c_void,
+        b"glBindBuffer" => glBindBuffer as *const c_void,
+        // Direct State Access (GL 4.5 / ARB_DSA), emulated in dsa.rs
+        b"glCreateBuffers" => dsa::glCreateBuffers as *const c_void,
+        b"glCreateTextures" => dsa::glCreateTextures as *const c_void,
+        b"glCreateVertexArrays" => dsa::glCreateVertexArrays as *const c_void,
+        b"glNamedBufferData" => dsa::glNamedBufferData as *const c_void,
+        b"glNamedBufferStorage" => dsa::glNamedBufferStorage as *const c_void,
+        b"glNamedBufferSubData" => dsa::glNamedBufferSubData as *const c_void,
+        b"glGetNamedBufferSubData" => dsa::glGetNamedBufferSubData as *const c_void,
+        b"glGetNamedBufferParameteriv" => dsa::glGetNamedBufferParameteriv as *const c_void,
+        b"glVertexArrayVertexBuffer" => dsa::glVertexArrayVertexBuffer as *const c_void,
+        b"glVertexArrayElementBuffer" => dsa::glVertexArrayElementBuffer as *const c_void,
+        b"glVertexArrayAttribFormat" => dsa::glVertexArrayAttribFormat as *const c_void,
+        b"glVertexArrayAttribIFormat" => dsa::glVertexArrayAttribIFormat as *const c_void,
+        b"glVertexArrayAttribLFormat" => dsa::glVertexArrayAttribLFormat as *const c_void,
+        b"glVertexArrayBindingDivisor" => dsa::glVertexArrayBindingDivisor as *const c_void,
+        b"glEnableVertexArrayAttrib" => dsa::glEnableVertexArrayAttrib as *const c_void,
+        b"glDisableVertexArrayAttrib" => dsa::glDisableVertexArrayAttrib as *const c_void,
+        b"glTextureStorage2D" => dsa::glTextureStorage2D as *const c_void,
+        b"glTextureStorage3D" => dsa::glTextureStorage3D as *const c_void,
+        b"glTextureSubImage2D" => dsa::glTextureSubImage2D as *const c_void,
+        b"glTextureSubImage3D" => dsa::glTextureSubImage3D as *const c_void,
+        b"glTextureParameteri" => dsa::glTextureParameteri as *const c_void,
+        b"glTextureParameterf" => dsa::glTextureParameterf as *const c_void,
+        b"glMemoryBarrier" => dsa::glMemoryBarrier as *const c_void,
+        b"glMemoryBarrierByRegion" => dsa::glMemoryBarrierByRegion as *const c_void,
+        b"glObjectLabel" => dsa::glObjectLabel as *const c_void,
+        b"glObjectPtrLabel" => dsa::glObjectPtrLabel as *const c_void,
+        b"glPushDebugGroup" => dsa::glPushDebugGroup as *const c_void,
+        b"glPopDebugGroup" => dsa::glPopDebugGroup as *const c_void,
+        b"glDebugMessageCallback" => dsa::glDebugMessageCallback as *const c_void,
+        b"glDebugMessageCallbackARB" => dsa::glDebugMessageCallbackARB as *const c_void,
+        b"glGetGraphicsResetStatus" => dsa::glGetGraphicsResetStatus as *const c_void,
+        b"glMultiDrawArraysIndirect" => dsa::glMultiDrawArraysIndirect as *const c_void,
+        b"glMultiDrawElementsIndirect" => dsa::glMultiDrawElementsIndirect as *const c_void,
+        b"glDispatchCompute" => dsa::glDispatchCompute as *const c_void,
+        b"glPixelStorei" => glPixelStorei as *const c_void,
         b"glPolygonMode" => glPolygonMode as *const c_void,
         b"glXGetProcAddress" | b"glXGetProcAddressARB" | b"glGetProcAddress" => {
             glXGetProcAddress as *const c_void
@@ -2104,6 +2149,29 @@ mod tests {
         driver_fn_cached::<unsafe extern "C" fn(u32)>("glCullFace");
         clear_driver_cache();
         assert!(DRIVER_CACHE.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn every_exported_gl_symbol_is_reachable_through_the_resolver() {
+        // LWJGL resolves GL functions with eglGetProcAddress, which routes through
+        // resolve_proc. A `#[no_mangle]` function missing from every resolver table is
+        // exported but unreachable, so LWJGL binds null and the call faults. Hand-written
+        // wrappers converted out of `forward_all!` are exactly how that happens: the macro
+        // generates the resolver entry, and a replacement must add its own.
+        const HAND_WRITTEN: &[&str] = &[
+            "glGetError", "glGetString", "glGetStringi", "glGetIntegerv", "glClearColor",
+            "glClear", "glViewport", "glEnable", "glDisable", "glDepthRange", "glClearDepth",
+            "glTexParameteri", "glTexParameterf", "glTexParameteriv", "glTexParameterfv",
+            "glPixelStorei", "glBindBuffer", "glRenderbufferStorage", "glBufferStorage",
+            "glBufferData", "glBufferSubData", "glDeleteBuffers", "glDrawArrays",
+            "glShaderSource", "glDrawBuffer", "glMapBuffer", "glPolygonMode",
+        ];
+        for name in HAND_WRITTEN {
+            assert!(
+                !resolve_proc(name.as_bytes()).is_null(),
+                "{name} is exported but unreachable via eglGetProcAddress"
+            );
+        }
     }
 
     #[test]
