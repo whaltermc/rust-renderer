@@ -748,7 +748,6 @@ forward_all! {
     glStencilMask(m: u32);
     glStencilOp(a: u32, b: u32, c: u32);
     glTexImage3D(t: u32, l: i32, ifmt: i32, w: i32, h: i32, dp: i32, b: i32, f: u32, ty: u32, d: *const c_void);
-    glTexParameterf(t: u32, p: u32, v: f32);
     glUniform1f(l: i32, a: f32);
     glUniform2f(l: i32, a: f32, b: f32);
     glUniform3f(l: i32, a: f32, b: f32, c: f32);

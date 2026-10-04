@@ -17,11 +17,11 @@ const GL_TEXTURE_COORD_ARRAY: u32 = 0x8078;
 const GL_NORMAL_ARRAY: u32 = 0x8075;
 const GL_FLOAT: u32 = 0x1406;
 const GL_UNSIGNED_BYTE: u32 = 0x1401;
-const GL_TRIANGLES: u32 = 0x0004;
+pub const GL_TRIANGLES: u32 = 0x0004;
 const GL_TRIANGLE_STRIP: u32 = 0x0005;
 const GL_TRIANGLE_FAN: u32 = 0x0006;
-const GL_QUADS: u32 = 0x0007; // desktop only — expand to triangles
-const GL_PROXY_TEXTURE_2D: u32 = 0x8514;
+pub const GL_QUADS: u32 = 0x0007; // desktop only — expand to triangles
+pub const GL_PROXY_TEXTURE_2D: u32 = 0x8514;
 const GL_TEXTURE_2D: u32 = 0x0DE1;
 const GL_MAX_TEXTURE_SIZE: u32 = 0x0D33;
 const GL_TEXTURE_WIDTH: u32 = 0x1000;
@@ -454,7 +454,3 @@ pub fn current_color() -> [f32; 4] {
     with_ff(|s| s.color4)
 }
 
-// Re-export constants needed by lib.rs
-pub use self::{
-    GL_PROXY_TEXTURE_2D, GL_TEXTURE_2D, GL_MAX_TEXTURE_SIZE, GL_QUADS, GL_TRIANGLES,
-};
