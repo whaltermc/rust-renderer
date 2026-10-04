@@ -37,7 +37,9 @@ val pluginRendererConfig = buildJsonValue {
         // If eglName is already absolute, the path is doubled and dlopen fails.
         // Relative "librust_gl.so" → correct pluginDir/librust_gl.so for SDL,
         // and POJAVEXEC_EGL falls back to system libEGL.so if relative dlopen fails.
-        rendererEGLPath = nativePath("librust_gl.so"),
+        // MobileGL-style relative basename:
+        // POJAVEXEC_EGL=librust_gl.so  SDL_EGL_LIBRARY=<pluginDir>/librust_gl.so
+        rendererEGLPath = "librust_gl.so",
 
         dlopenLibPaths = emptyList(),
 
@@ -73,8 +75,8 @@ android {
         minSdk = 26
         targetSdk = 34
 
-        versionCode = 10
-        versionName = "0.1.9"
+        versionCode = 11
+        versionName = "0.1.10"
 
         resValue(
             "string",

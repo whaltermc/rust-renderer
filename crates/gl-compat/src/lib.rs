@@ -13,9 +13,6 @@ use renderer_core::{Backend, BackendKind, Config, GlErrorState};
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::sync::{Mutex, OnceLock};
 
-#[cfg(target_os = "android")]
-#[link(name = "log")]
-extern "C" {}
 
 const GL_INVALID_VALUE: u32 = 0x0501;
 const GL_INVALID_OPERATION: u32 = 0x0502;
@@ -762,128 +759,115 @@ pub extern "C" fn glGetProcAddress(name: *const c_char) -> *const c_void {
 }
 
 
+
 // =============================================================================
-// EGL — link system libEGL at build time (Android NDK). Avoids dlopen namespace
-// issues. egl_loader resolves these via eglGetProcAddress from this .so.
+// EGL forwarding — MobileGL-style: same .so is the EGL provider for the launcher.
+// We dlopen system libEGL once and re-export every entry the egl_loader needs.
+// No DT_NEEDED on libEGL (avoids linker/constructor fights in the game process).
 // =============================================================================
 
-#[cfg(target_os = "android")]
-#[link(name = "EGL")]
-extern "C" {
-    fn eglGetDisplay(display_id: *mut c_void) -> *mut c_void;
-    fn eglInitialize(dpy: *mut c_void, major: *mut i32, minor: *mut i32) -> u32;
-    fn eglTerminate(dpy: *mut c_void) -> u32;
-    fn eglGetConfigs(dpy: *mut c_void, configs: *mut *mut c_void, config_size: i32, num: *mut i32) -> u32;
-    fn eglChooseConfig(dpy: *mut c_void, attrib: *const i32, configs: *mut *mut c_void, config_size: i32, num: *mut i32) -> u32;
-    fn eglGetConfigAttrib(dpy: *mut c_void, config: *mut c_void, attr: i32, value: *mut i32) -> u32;
-    fn eglCreateWindowSurface(dpy: *mut c_void, config: *mut c_void, win: *mut c_void, attrib: *const i32) -> *mut c_void;
-    fn eglCreatePbufferSurface(dpy: *mut c_void, config: *mut c_void, attrib: *const i32) -> *mut c_void;
-    fn eglDestroySurface(dpy: *mut c_void, surface: *mut c_void) -> u32;
-    fn eglBindAPI(api: u32) -> u32;
-    fn eglCreateContext(dpy: *mut c_void, config: *mut c_void, share: *mut c_void, attrib: *const i32) -> *mut c_void;
-    fn eglDestroyContext(dpy: *mut c_void, ctx: *mut c_void) -> u32;
-    fn eglMakeCurrent(dpy: *mut c_void, draw: *mut c_void, read: *mut c_void, ctx: *mut c_void) -> u32;
-    fn eglGetCurrentContext() -> *mut c_void;
-    fn eglGetCurrentDisplay() -> *mut c_void;
-    fn eglGetCurrentSurface(readdraw: i32) -> *mut c_void;
-    fn eglQuerySurface(dpy: *mut c_void, surface: *mut c_void, attr: i32, value: *mut i32) -> u32;
-    fn eglSwapBuffers(dpy: *mut c_void, surface: *mut c_void) -> u32;
-    fn eglSwapInterval(dpy: *mut c_void, interval: i32) -> u32;
-    fn eglQueryString(dpy: *mut c_void, name: i32) -> *const u8;
-    fn eglGetError() -> u32;
-    fn eglReleaseThread() -> u32;
-    fn eglBindTexImage(dpy: *mut c_void, surface: *mut c_void, buffer: i32) -> u32;
-    fn eglReleaseTexImage(dpy: *mut c_void, surface: *mut c_void, buffer: i32) -> u32;
-    fn eglSurfaceAttrib(dpy: *mut c_void, surface: *mut c_void, attr: i32, value: i32) -> u32;
-    fn eglWaitClient() -> u32;
-    fn eglWaitGL() -> u32;
-    fn eglWaitNative(engine: i32) -> u32;
-    fn eglQueryContext(dpy: *mut c_void, ctx: *mut c_void, attr: i32, value: *mut i32) -> u32;
-    fn eglQueryAPI() -> u32;
+use std::sync::OnceLock;
+
+struct SysEgl {
+    lib: libloading::Library,
 }
 
-// On non-Android hosts, provide stubs so the crate still typechecks.
-#[cfg(not(target_os = "android"))]
-mod egl_stubs {
-    use std::ffi::{c_char, c_void};
-    #[no_mangle] pub unsafe extern "C" fn eglGetDisplay(_: *mut c_void) -> *mut c_void { std::ptr::null_mut() }
-    #[no_mangle] pub unsafe extern "C" fn eglInitialize(_: *mut c_void, _: *mut i32, _: *mut i32) -> u32 { 0 }
-    #[no_mangle] pub unsafe extern "C" fn eglTerminate(_: *mut c_void) -> u32 { 0 }
-    #[no_mangle] pub unsafe extern "C" fn eglGetConfigs(_: *mut c_void, _: *mut *mut c_void, _: i32, _: *mut i32) -> u32 { 0 }
-    #[no_mangle] pub unsafe extern "C" fn eglChooseConfig(_: *mut c_void, _: *const i32, _: *mut *mut c_void, _: i32, _: *mut i32) -> u32 { 0 }
-    #[no_mangle] pub unsafe extern "C" fn eglGetConfigAttrib(_: *mut c_void, _: *mut c_void, _: i32, _: *mut i32) -> u32 { 0 }
-    #[no_mangle] pub unsafe extern "C" fn eglCreateWindowSurface(_: *mut c_void, _: *mut c_void, _: *mut c_void, _: *const i32) -> *mut c_void { std::ptr::null_mut() }
-    #[no_mangle] pub unsafe extern "C" fn eglCreatePbufferSurface(_: *mut c_void, _: *mut c_void, _: *const i32) -> *mut c_void { std::ptr::null_mut() }
-    #[no_mangle] pub unsafe extern "C" fn eglDestroySurface(_: *mut c_void, _: *mut c_void) -> u32 { 0 }
-    #[no_mangle] pub unsafe extern "C" fn eglBindAPI(_: u32) -> u32 { 0 }
-    #[no_mangle] pub unsafe extern "C" fn eglCreateContext(_: *mut c_void, _: *mut c_void, _: *mut c_void, _: *const i32) -> *mut c_void { std::ptr::null_mut() }
-    #[no_mangle] pub unsafe extern "C" fn eglDestroyContext(_: *mut c_void, _: *mut c_void) -> u32 { 0 }
-    #[no_mangle] pub unsafe extern "C" fn eglMakeCurrent(_: *mut c_void, _: *mut c_void, _: *mut c_void, _: *mut c_void) -> u32 { 0 }
-    #[no_mangle] pub unsafe extern "C" fn eglGetCurrentContext() -> *mut c_void { std::ptr::null_mut() }
-    #[no_mangle] pub unsafe extern "C" fn eglGetCurrentDisplay() -> *mut c_void { std::ptr::null_mut() }
-    #[no_mangle] pub unsafe extern "C" fn eglGetCurrentSurface(_: i32) -> *mut c_void { std::ptr::null_mut() }
-    #[no_mangle] pub unsafe extern "C" fn eglQuerySurface(_: *mut c_void, _: *mut c_void, _: i32, _: *mut i32) -> u32 { 0 }
-    #[no_mangle] pub unsafe extern "C" fn eglSwapBuffers(_: *mut c_void, _: *mut c_void) -> u32 { 0 }
-    #[no_mangle] pub unsafe extern "C" fn eglSwapInterval(_: *mut c_void, _: i32) -> u32 { 0 }
-    #[no_mangle] pub unsafe extern "C" fn eglQueryString(_: *mut c_void, _: i32) -> *const u8 { std::ptr::null() }
-    #[no_mangle] pub unsafe extern "C" fn eglGetError() -> u32 { 0 }
-    #[no_mangle] pub unsafe extern "C" fn eglReleaseThread() -> u32 { 0 }
-    #[no_mangle] pub unsafe extern "C" fn eglBindTexImage(_: *mut c_void, _: *mut c_void, _: i32) -> u32 { 0 }
-    #[no_mangle] pub unsafe extern "C" fn eglReleaseTexImage(_: *mut c_void, _: *mut c_void, _: i32) -> u32 { 0 }
-    #[no_mangle] pub unsafe extern "C" fn eglSurfaceAttrib(_: *mut c_void, _: *mut c_void, _: i32, _: i32) -> u32 { 0 }
-    #[no_mangle] pub unsafe extern "C" fn eglWaitClient() -> u32 { 0 }
-    #[no_mangle] pub unsafe extern "C" fn eglWaitGL() -> u32 { 0 }
-    #[no_mangle] pub unsafe extern "C" fn eglWaitNative(_: i32) -> u32 { 0 }
-    #[no_mangle] pub unsafe extern "C" fn eglQueryContext(_: *mut c_void, _: *mut c_void, _: i32, _: *mut i32) -> u32 { 0 }
-    #[no_mangle] pub unsafe extern "C" fn eglQueryAPI() -> u32 { 0 }
-    
+fn sys_egl() -> Option<&'static SysEgl> {
+    static EGL: OnceLock<Option<SysEgl>> = OnceLock::new();
+    EGL.get_or_init(|| {
+        let paths = [
+            "/system/lib64/libEGL.so",
+            "/vendor/lib64/libEGL.so",
+            "libEGL.so",
+        ];
+        for path in paths {
+            if let Ok(lib) = unsafe { libloading::Library::new(path) } {
+                log(&format!("[EGL] loaded system EGL from {path}"));
+                return Some(SysEgl { lib });
+            }
+        }
+        log("[EGL] FAILED to load system libEGL.so");
+        None
+    })
+    .as_ref()
 }
-#[cfg(not(target_os = "android"))]
-use egl_stubs::*;
 
-// eglGetProcAddress: prefer our GL exports, then system EGL extensions.
-// Note: on Android the real eglGetProcAddress is linked above; we wrap it.
+fn egl_sym<T>(name: &[u8]) -> Option<T>
+where
+    T: Copy,
+{
+    let e = sys_egl()?;
+    let s: libloading::Symbol<T> = unsafe { e.lib.get(name).ok()? };
+    Some(*s)
+}
+
+macro_rules! egl_export {
+    ($name:ident ( $($arg:ident : $ty:ty),* ) -> $ret:ty) => {
+        #[no_mangle]
+        pub unsafe extern "C" fn $name($($arg : $ty),*) -> $ret {
+            type F = unsafe extern "C" fn($($ty),*) -> $ret;
+            let n = concat!(stringify!($name), "\0");
+            match egl_sym::<F>(n.as_bytes()) {
+                Some(f) => f($($arg),*),
+                None => {
+                    // Safe zero defaults for pointer / int returns
+                    #[allow(unused_assignments, unused_mut)]
+                    let mut z: $ret = unsafe { std::mem::zeroed() };
+                    z
+                }
+            }
+        }
+    };
+    // void-ish already covered by -> type
+}
+
+// Core EGL 1.4 used by pojov egl_loader / glfwstub
+egl_export!(eglGetDisplay(display_id: *mut c_void) -> *mut c_void);
+egl_export!(eglInitialize(dpy: *mut c_void, major: *mut i32, minor: *mut i32) -> u32);
+egl_export!(eglTerminate(dpy: *mut c_void) -> u32);
+egl_export!(eglGetConfigs(dpy: *mut c_void, configs: *mut *mut c_void, config_size: i32, num: *mut i32) -> u32);
+egl_export!(eglChooseConfig(dpy: *mut c_void, attrib: *const i32, configs: *mut *mut c_void, config_size: i32, num: *mut i32) -> u32);
+egl_export!(eglGetConfigAttrib(dpy: *mut c_void, config: *mut c_void, attr: i32, value: *mut i32) -> u32);
+egl_export!(eglCreateWindowSurface(dpy: *mut c_void, config: *mut c_void, win: *mut c_void, attrib: *const i32) -> *mut c_void);
+egl_export!(eglCreatePbufferSurface(dpy: *mut c_void, config: *mut c_void, attrib: *const i32) -> *mut c_void);
+egl_export!(eglDestroySurface(dpy: *mut c_void, surface: *mut c_void) -> u32);
+egl_export!(eglBindAPI(api: u32) -> u32);
+egl_export!(eglCreateContext(dpy: *mut c_void, config: *mut c_void, share: *mut c_void, attrib: *const i32) -> *mut c_void);
+egl_export!(eglDestroyContext(dpy: *mut c_void, ctx: *mut c_void) -> u32);
+egl_export!(eglMakeCurrent(dpy: *mut c_void, draw: *mut c_void, read: *mut c_void, ctx: *mut c_void) -> u32);
+egl_export!(eglGetCurrentContext() -> *mut c_void);
+egl_export!(eglGetCurrentDisplay() -> *mut c_void);
+egl_export!(eglGetCurrentSurface(readdraw: i32) -> *mut c_void);
+egl_export!(eglQuerySurface(dpy: *mut c_void, surface: *mut c_void, attr: i32, value: *mut i32) -> u32);
+egl_export!(eglSwapBuffers(dpy: *mut c_void, surface: *mut c_void) -> u32);
+egl_export!(eglSwapInterval(dpy: *mut c_void, interval: i32) -> u32);
+egl_export!(eglQueryString(dpy: *mut c_void, name: i32) -> *const u8);
+egl_export!(eglGetError() -> u32);
+egl_export!(eglReleaseThread() -> u32);
+egl_export!(eglBindTexImage(dpy: *mut c_void, surface: *mut c_void, buffer: i32) -> u32);
+egl_export!(eglReleaseTexImage(dpy: *mut c_void, surface: *mut c_void, buffer: i32) -> u32);
+egl_export!(eglSurfaceAttrib(dpy: *mut c_void, surface: *mut c_void, attr: i32, value: i32) -> u32);
+egl_export!(eglWaitClient() -> u32);
+egl_export!(eglWaitGL() -> u32);
+egl_export!(eglWaitNative(engine: i32) -> u32);
+egl_export!(eglQueryContext(dpy: *mut c_void, ctx: *mut c_void, attr: i32, value: *mut i32) -> u32);
+egl_export!(eglQueryAPI() -> u32);
+
+/// eglGetProcAddress: our GL symbols first, then system EGL.
 #[no_mangle]
 pub unsafe extern "C" fn eglGetProcAddress(name: *const c_char) -> *const c_void {
     if name.is_null() {
         return std::ptr::null();
     }
     let n = unsafe { CStr::from_ptr(name) }.to_bytes();
-    // Our GL + EGL symbols first.
     let ours = resolve_proc(n);
     if !ours.is_null() {
         return ours;
     }
-    // System EGL extension lookup.
-    #[cfg(target_os = "android")]
-    {
-        // Call the real linked symbol under a different path to avoid recursion:
-        // We linked eglGetProcAddress from libEGL — but we also #[no_mangle] export
-        // our own with the same name, which overrides. Use dlsym on libEGL instead.
-        use std::sync::OnceLock;
-        static REAL: OnceLock<usize> = OnceLock::new();
-        let addr = *REAL.get_or_init(|| {
-            let lib = libloading::Library::new("/system/lib64/libEGL.so")
-                .or_else(|_| libloading::Library::new("/vendor/lib64/libEGL.so"))
-                .or_else(|_| libloading::Library::new("libEGL.so"));
-            match lib {
-                Ok(l) => {
-                    let ptr = match unsafe { l.get::<unsafe extern "C" fn()>(b"eglGetProcAddress\0") } {
-                        Ok(s) => *s as usize,
-                        Err(_) => 0,
-                    };
-                    // Keep library mapped for process lifetime.
-                    std::mem::forget(l);
-                    ptr
-                }
-                Err(_) => 0,
-            }
-        });
-        if addr != 0 {
-            type F = unsafe extern "C" fn(*const c_char) -> *const c_void;
-            let f: F = std::mem::transmute(addr);
-            return f(name);
-        }
+    // System extension lookup
+    type F = unsafe extern "C" fn(*const c_char) -> *const c_void;
+    match egl_sym::<F>(b"eglGetProcAddress\0") {
+        Some(f) => f(name),
+        None => std::ptr::null(),
     }
-    std::ptr::null()
 }
