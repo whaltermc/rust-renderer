@@ -9,8 +9,8 @@ renderer plugin APK.
 |---|---|
 | Plugin APK (V2, MAIN activity) | ready — install and pick **Rust Renderer** |
 | `renderer-core` | Backend trait, config, error state, unit tests |
-| `gles-backend` | Full resource Backend over system GLES 3.0+ (dlopen) |
-| `vulkan-backend` | **Device discovery only** — loads `libvulkan`, enumerates and picks a physical device, creates a device + graphics queue, reports real info/limits. Cannot render (see below) |
+| `backend::gles` | Full resource Backend over system GLES 3.0+ (dlopen) |
+| `backend::vulkan` | **Device discovery only** — loads `libvulkan`, enumerates and picks a physical device, creates a device + graphics queue, reports real info/limits. Cannot render (see below) |
 | `gl-compat` `librust_gl.so` | GLES 3.x backend + OpenGL 3.3 compatibility entry-point layer + legacy fixed-function shims |
 | Shader translate | Version rewrite, precision, texture2D→texture, gl_FragColor, attribute/varying |
 | Format translate | BGRA swizzle, depth internal formats, clamp-to-border, BGRA8→RGBA8 storage |
@@ -96,7 +96,7 @@ Verified by running it, on this machine:
 - `cargo check --workspace` / `cargo test --workspace` — 33 unit tests pass.
 - `cargo build -p gl-compat --release` links; `nm -D` shows **352 exported `gl*` entry points**
   with **no duplicate symbols**.
-- `cargo run -p vulkan-backend --example probe` runs and reports a precise reason when no
+- `cargo run -p backend --example probe` runs and reports a precise reason when no
   Vulkan loader is present.
 
 **Not** verified, because this environment has no Android NDK, no device, no Vulkan driver
@@ -222,7 +222,7 @@ and memory sizing are the parts any real Vulkan backend needs first.
 To check what a device reports:
 
 ```bash
-cargo run -p vulkan-backend --example probe   # exits 1 when no loader is present
+cargo run -p backend --example probe   # exits 1 when no loader is present
 ```
 
 ## Compatibility shims (gl-compat)
@@ -569,6 +569,16 @@ importantly, the stride reading was a **measurement artifact**: `glGetVertexAttr
 GL_VERTEX_ATTRIB_ARRAY_STRIDE)` returns 0 even for an attribute that demonstrably renders
 correctly, so stride cannot be used to diagnose anything here. That is why the harness no
 longer reports stride as data.
+
+### Backends are one module with two implementations
+
+`crates/backend/` holds both, as `gles` and `vulkan`. They shared the `Backend` trait and the
+`libloading` dependency and isolated nothing from each other, so the split was costing a
+dependency edge and two import paths:
+
+- `backend::gles::GlesBackend` — the real ES driver underneath the translation layer
+- `backend::vulkan::VulkanBackend` — device discovery and reporting; `can_render()` is `false`,
+  so selection never chooses it to draw
 
 ### How the game identifies this renderer
 

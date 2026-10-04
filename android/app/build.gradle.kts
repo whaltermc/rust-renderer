@@ -78,7 +78,7 @@ val pluginRendererConfig = buildJsonValue {
             // Renderer options. Each setting is declared exactly once: the previous build
             // sent RENDERER_BACKEND both as a fixed env var and as a selectable under a
             // different key, which is what made the backend appear twice in the list.
-            // `vulkan` and `hybrid` cannot render the game yet (see vulkan-backend docs) and
+            // `vulkan` and `hybrid` cannot render the game yet (see backend::vulkan) and
             // the code logs why, then stays on GLES.
             selectable(
                 key = "RENDERER_BACKEND",

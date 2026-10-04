@@ -8,9 +8,8 @@ name = "rust_gl"
 crate-type = ["cdylib"]
 
 [dependencies]
+backend = { path = "../backend" }
 renderer-core = { path = "../renderer-core" }
-gles-backend = { path = "../gles-backend" }
-vulkan-backend = { path = "../vulkan-backend" }
 shader-translate = { path = "../shader-translate" }
 format-translate = { path = "../format-translate" }
 libloading = "0.8"

@@ -158,7 +158,7 @@ fn backend() -> Option<&'static dyn Backend> {
         cfg.backend.as_str()
     ));
 
-    let gles = || match gles_backend::GlesBackend::new() {
+    let gles = || match backend::GlesBackend::new() {
         Ok(b) => Some(Box::new(b) as Box<dyn Backend>),
         Err(e) => {
             log(&format!("[GLES] {e}"));
@@ -175,7 +175,7 @@ fn backend() -> Option<&'static dyn Backend> {
         BackendKind::Auto | BackendKind::Vulkan | BackendKind::Hybrid
     );
     let probed = if wants_vulkan {
-        match vulkan_backend::probe() {
+        match backend::probe_vulkan() {
             Ok(b) => {
                 let i = b.device_info();
                 log(&format!("[Vulkan] found {} — {}", i.renderer, i.api_version));

@@ -12,7 +12,7 @@
 
 fn main() {
     println!("probing Vulkan...");
-    match vulkan_backend::probe() {
+    match backend::vulkan::probe() {
         Ok(backend) => {
             let info = backend.device_info();
             println!("  vendor    : {}", info.vendor);
