@@ -44,6 +44,25 @@ Both multisample paths are now covered by the harness (`minecraft depth attachme
 the non-DSA `createTexture` path and the DSA path, the latter asserting a **complete**
 framebuffer.
 
+### The follow-up `0x0502`: depth formats paired with a type ES rejects
+
+With `RENDERER_TRACE_GL=1` the next device log named the call exactly:
+`glGenTextures -> glBindTexture -> glTexParameteri ×3 -> glTexImage2D`, raising
+`GL_INVALID_OPERATION`.
+
+Minecraft allocates the window depth attachment as
+`glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, w, h, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL)`.
+That desktop triple is **not valid in ES 3.0**: a sized depth internal format must be paired
+with a matching type, and `GL_DEPTH_COMPONENT24` requires `GL_UNSIGNED_INT`. The bridge
+mapped only the internal format and passed the type through, so the driver refused the
+allocation and the error became "OpenGL error 1282" in
+`WindowFramebuffer.createDepthAttachment`.
+
+`format_translate::map_upload_format` now maps the whole triple — internal format, format and
+type — so a sized depth format is paired with a type ES accepts. Both the multisample and the
+single-sample depth paths are reproduced in the harness, so this specific regression is caught
+without a device.
+
 ### What has actually been verified
 
 Verified by running it, on this machine:

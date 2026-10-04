@@ -1006,7 +1006,11 @@ pub unsafe extern "C" fn glTexImage2D(
     if fixed_func::handle_proxy_tex_image(t, w, h, max_tex) {
         return;
     }
-    let ifmt2 = format_translate::map_internal_format(ifmt, f, ty);
+    // The whole format triple has to be mapped, not just the internal format: ES requires a
+    // sized depth internal format to be paired with a matching type.
+    let (ifmt2, f2, ty2) = format_translate::map_upload_format(ifmt, f, ty);
+    let f = f2;
+    let ty = ty2;
     let conv = convert_pixel_upload(w, h, f, ty, d);
     let (f2, ty2, ptr) = match &conv {
         Some((nf, nty, v)) => (*nf, *nty, v.as_ptr() as *const c_void),

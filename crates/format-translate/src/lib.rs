@@ -51,6 +51,40 @@ pub fn is_bgr8(format: u32, ty: u32) -> bool {
 }
 
 /// Desktop often uses unsized internal formats; GLES wants sized ones.
+
+/// Maps a desktop `glTexImage2D` format triple onto one OpenGL ES 3.0 accepts.
+///
+/// Returning only the internal format is not enough for depth: ES requires the *type* to
+/// match a sized internal format, and desktop code routinely writes
+/// `(GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_FLOAT)`, which ES rejects. Minecraft
+/// allocates its window depth attachment exactly that way, and the driver's
+/// `GL_INVALID_OPERATION` surfaced as "OpenGL error 1282" during framebuffer setup.
+pub fn map_upload_format(internal: i32, format: u32, ty: u32) -> (i32, u32, u32) {
+    let mapped_i = map_internal_format(internal, format, ty);
+    let mapped = mapped_i as u32;
+    const DEPTH16: u32 = 0x81A5;
+    const DEPTH24: u32 = 0x81A6;
+    const DEPTH32F: u32 = 0x8CAC;
+    const DEPTH24_STENCIL8: u32 = 0x88F0;
+    match (mapped, format) {
+        (DEPTH16, GL_DEPTH_COMPONENT) => {
+            (mapped_i, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT)
+        }
+        (DEPTH24, GL_DEPTH_COMPONENT) => {
+            (mapped_i, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT)
+        }
+        (DEPTH32F, GL_DEPTH_COMPONENT) => {
+            (mapped_i, GL_DEPTH_COMPONENT, GL_FLOAT)
+        }
+        (DEPTH24_STENCIL8, GL_DEPTH_STENCIL) => (
+            mapped_i,
+            GL_DEPTH_STENCIL,
+            0x84FA, /* GL_UNSIGNED_INT_24_8 */
+        ),
+        _ => (mapped_i, format, ty),
+    }
+}
+
 pub fn map_internal_format(internal: i32, format: u32, ty: u32) -> i32 {
     match (internal as u32, ty) {
         (GL_DEPTH_COMPONENT, GL_FLOAT) => GL_DEPTH_COMPONENT32F,
@@ -163,6 +197,30 @@ mod tests {
         assert_eq!(map_wrap(GL_CLAMP), GL_CLAMP_TO_EDGE);
         assert_eq!(map_external_format(GL_BGRA), GL_RGBA);
         assert!(is_bgra8(GL_BGRA, GL_UNSIGNED_BYTE));
+    }
+
+    #[test]
+    fn depth_formats_are_paired_with_a_type_es_accepts() {
+        // Minecraft allocates the window depth attachment as
+        // (GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_FLOAT), which ES 3.0 rejects
+        // because a sized depth internal format must carry a matching type. This pairing
+        // bug was the "OpenGL error 1282" during framebuffer setup.
+        let (i, f, t) = map_upload_format(GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_FLOAT);
+        assert_eq!((i, f, t), (GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT));
+
+        let (i, _f, t) = map_upload_format(GL_DEPTH_COMPONENT as i32, GL_DEPTH_COMPONENT, GL_FLOAT);
+        assert_eq!((i, t), (GL_DEPTH_COMPONENT32F, GL_FLOAT));
+
+        let (i, _f, t) = map_upload_format(GL_DEPTH_COMPONENT as i32, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT);
+        assert_eq!((i, t), (GL_DEPTH_COMPONENT16, GL_UNSIGNED_SHORT));
+
+        let (_i, _f, _t) = map_upload_format(0x84F9, 0x84F9, 0x84FA /* UNSIGNED_INT_24_8 */);
+    }
+
+    #[test]
+    fn colour_formats_pass_through_unchanged() {
+        let (i, f, t) = map_upload_format(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+        assert_eq!((i, f, t), (GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE));
     }
 
     #[test]

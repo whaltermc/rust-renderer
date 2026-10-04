@@ -431,6 +431,7 @@ DECL(void, glDrawArrays, (GLenum, GLint, GLsizei))
 DECL(void, glDrawElements, (GLenum, GLsizei, GLenum, const void *))
 DECL(void, glPixelStorei, (GLenum, GLint))
 DECL(void, glTexStorage2DMultisample, (GLenum, GLint, GLenum, GLsizei, GLsizei))
+DECL(void, glTexImage2D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *))
 DECL(void, glTexParameteri, (GLenum, GLenum, GLint))
 DECL(void, glCreateTextures, (GLenum, GLsizei, GLuint *))
 DECL(void, glTextureStorage2DMultisample, (GLuint, GLint, GLenum, GLsizei, GLsizei))
@@ -512,6 +513,7 @@ static int load_all(void) {
     LOAD(void, glDrawElements, (GLenum, GLsizei, GLenum, const void *))
     LOAD(void, glPixelStorei, (GLenum, GLint))
     LOAD(void, glTexStorage2DMultisample, (GLenum, GLint, GLenum, GLsizei, GLsizei))
+    LOAD(void, glTexImage2D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *))
     LOAD(void, glTexParameteri, (GLenum, GLenum, GLint))
     LOAD(void, glCreateTextures, (GLenum, GLsizei, GLuint *))
     LOAD(void, glTextureStorage2DMultisample, (GLuint, GLint, GLenum, GLsizei, GLsizei))
@@ -1350,6 +1352,41 @@ int main(int argc, char **argv) {
             record("gles msaa representations", "pass", d2);
             printf("  %s\n", d2);
             (void)t;
+        }
+
+
+        /* 5. The device trace showed Minecraft's failing call is glTexImage2D, not the
+         * multisample path: gen -> bind -> texParameteri x3 -> texImage2D. A depth
+         * attachment is allocated with the desktop-style sized internalformat plus
+         * format/type, which ES 3.0 does not accept verbatim. */
+        {
+            char d3[400];
+            struct { const char *n; GLenum e; } t[4];
+            int k = 0;
+            GLuint dt = 0;
+            p_glGenTextures(1, &dt);
+            t[k].n = "glGenTextures"; t[k].e = p_glGetError(); k++;
+            p_glBindTexture(GL_TEXTURE_2D, dt);
+            t[k].n = "glBindTexture"; t[k].e = p_glGetError(); k++;
+            p_glTexParameteri(GL_TEXTURE_2D, 0x813D /* MAX_LEVEL */, 0);
+            t[k].n = "glTexParameteri(MAX_LEVEL)"; t[k].e = p_glGetError(); k++;
+            p_glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, 16, 16, 0,
+                           GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+            t[k].n = "texImage2D(DEPTH_COMPONENT24, DEPTH_COMPONENT, FLOAT)";
+            t[k].e = p_glGetError(); k++;
+            p_glBindTexture(GL_TEXTURE_2D, 0);
+
+            int bad = -1;
+            for (int i = 0; i < k; i++) if (t[i].e != GL_NO_ERROR && bad < 0) bad = i;
+            snprintf(d3, sizeof d3, "%s -> 0x%04X", t[bad < 0 ? 0 : bad].n,
+                     t[bad < 0 ? 0 : bad].e);
+            record("mc depth texImage2D allocation", bad < 0 ? "pass" : "fail", d3);
+            if (bad < 0) {
+                ok(1, "MC-style depth texImage2D allocation (GL_DEPTH_COMPONENT24)");
+            } else {
+                failures++;
+                printf("  FAIL  MC-style depth texImage2D: %s -> 0x%04X\n", t[bad].n, t[bad].e);
+            }
         }
 
         p_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
