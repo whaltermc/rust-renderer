@@ -217,7 +217,7 @@ const GL_SHADING_LANGUAGE_VERSION: u32 = 0x8B8C;
 const GL_MAJOR_VERSION: u32 = 0x821B;
 const GL_MINOR_VERSION: u32 = 0x821C;
 
-static SPOOF_VERSION: &[u8] = b"3.3 (Core Profile) RustRenderer GLES passthrough\0";
+static SPOOF_VERSION: &[u8] = b"3.3 (Compatibility Profile) RustRenderer GLES passthrough\0";
 static SPOOF_GLSL: &[u8] = b"3.30\0";
 
 /// OPT-IN, EXPERIMENTAL: `RENDERER_SPOOF_GL=1` makes the renderer claim OpenGL 3.3 core.
@@ -399,7 +399,7 @@ pub unsafe extern "C" fn glGetIntegerv(pname: u32, data: *mut i32) {
         match pname {
             GL_MAJOR_VERSION => { *data = 3; return; }
             GL_MINOR_VERSION => { *data = 3; return; }
-            0x9126 => { *data = 0x0001; return; } // GL_CONTEXT_PROFILE_MASK = CORE_BIT
+            0x9126 => { *data = 0x0002; return; } // GL_CONTEXT_PROFILE_MASK = COMPATIBILITY_BIT
             GL_NUM_EXTENSIONS => {
                 // Prefer driver count; otherwise our advertised list length.
                 if let Some(f) = driver_fn::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
@@ -1316,9 +1316,27 @@ pub extern "C" fn wglGetProcAddress(name: *const c_char) -> *const c_void {
 #[no_mangle] pub extern "C" fn glColor4f(r: f32, g: f32, b: f32, a: f32) { fixed_func::gl_color4f(r, g, b, a); }
 #[no_mangle] pub extern "C" fn glColor3f(r: f32, g: f32, b: f32) { fixed_func::gl_color3f(r, g, b); }
 #[no_mangle] pub extern "C" fn glAlphaFunc(func: u32, ref_v: f32) { fixed_func::gl_alpha_func(func, ref_v); }
-#[no_mangle] pub extern "C" fn glFogf(pname: u32, param: f32) { fixed_func::gl_fogf(pname, param); }
-#[no_mangle] pub extern "C" fn glFogi(pname: u32, param: i32) { fixed_func::gl_fogi(pname, param); }
-#[no_mangle] pub unsafe extern "C" fn glFogfv(pname: u32, params: *const f32) { fixed_func::gl_fogfv(pname, params); }
+#[no_mangle]
+#[export_name = "glFogf"]
+#[inline(never)]
+pub extern "C" fn glFogf(pname: u32, param: f32) { fixed_func::gl_fogf(pname, param); }
+#[no_mangle]
+#[export_name = "glFogi"]
+#[inline(never)]
+pub extern "C" fn glFogi(pname: u32, param: i32) { fixed_func::gl_fogi(pname, param); }
+#[no_mangle]
+#[export_name = "glFogfv"]
+#[inline(never)]
+pub unsafe extern "C" fn glFogfv(pname: u32, params: *const f32) { fixed_func::gl_fogfv(pname, params); }
+
+#[no_mangle]
+#[export_name = "glFogiv"]
+#[inline(never)]
+pub unsafe extern "C" fn glFogiv(pname: u32, params: *const i32) {
+    let _ = (pname, params);
+}
+
+
 #[no_mangle] pub extern "C" fn glShadeModel(mode: u32) { fixed_func::gl_shade_model(mode); }
 #[no_mangle] pub extern "C" fn glTexEnvf(target: u32, pname: u32, param: f32) { fixed_func::gl_tex_envf(target, pname, param); }
 #[no_mangle] pub extern "C" fn glTexEnvi(target: u32, pname: u32, param: i32) { fixed_func::gl_tex_envi(target, pname, param); }
