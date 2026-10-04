@@ -49,7 +49,21 @@ val pluginRendererConfig = buildJsonValue {
             // Real backend is GLES 3.x passthrough — do NOT claim Mesa/Zink/GL 4.6.
             normal("LIBGL_ES", "3")
             // Our glGetString spoof (see gl-compat) reports 3.3 / GLSL 330.
-            normal("JAVA_TOOL_OPTIONS", "-Dorg.lwjgl.util.NoChecks=true")
+            // LWJGL pointer checks. `NoChecks=true` (default) is needed for the 1.16 null fog
+            // buffer, but turns any call to an unresolved GL function into a native
+            // `SIGSEGV pc=0x0`. Pick `NoChecks=false` when diagnosing such a crash: the game
+            // then throws a Java exception that names the exact GL/AL function.
+            // Declared once, as a selectable, so it does not show up twice.
+            selectable(
+                key = "JAVA_TOOL_OPTIONS",
+                items = RendererConfig.EnvItems(
+                    defaultValue = "-Dorg.lwjgl.util.NoChecks=true",
+                    values = listOf(
+                        "-Dorg.lwjgl.util.NoChecks=true",
+                        "-Dorg.lwjgl.util.NoChecks=false"
+                    )
+                )
+            )
 
             // Override Zalith defaults that otherwise inject Mesa 4.6 + zink for
             // non-GL4ES renderers. Those contradict GLES passthrough and confuse
