@@ -387,6 +387,38 @@ shader against a real compiler, and the DSA vertex-array path 1.20.5+ uses. A sh
 fails to compile, a state call that no-ops, or a mis-bound attribute shows up as wrong pixels
 rather than as a black screen much later.
 
+### Trace coverage against real Minecraft captures
+
+`tools/trace-coverage.sh` measures entry-point coverage against genuine Minecraft apitrace
+captures, from the MobileGL fixture set (1.17, 1.21.1, and others). It fetches each fixture
+through the Git LFS batch API -- the repository stores LFS pointers, so a plain raw download
+returns a 133-byte text file -- parses it with `apitrace dump`, and diffs the `gl*` functions a
+real run calls against what `librust_gl.so` exports.
+
+```bash
+sudo apt-get install -y apitrace
+./tools/trace-coverage.sh                       # default fixtures
+./tools/trace-coverage.sh <fixture.tgz> ...     # specific ones
+```
+
+This is not frame-accurate replay: MobileGL's `mobilegl_trace_replay` is hard-wired to
+MobileGL's own renderer via `--mobilegl-library`, and a GLX/EGL display server is needed to
+replay at all. What the traces *do* give is the call stream, and a name a real run calls that
+the library does not export is a null function pointer for any client that resolves by dlsym --
+exactly how 1.16.5 died. That is measurable without a display.
+
+It found three real gaps that device logs had not yet surfaced: `glDebugMessageControl`,
+`glBindImageTexture`, and `glMultiDrawElementsBaseVertex`. Coverage is now:
+
+| Trace | Distinct `gl*` calls | Exported |
+|---|---|---|
+| Minecraft 1.17 (main menu) | 54 | 100% |
+| Minecraft 1.21.1 (NeoForge, world) | 102 | 100% |
+
+The step runs in the `gl-smoke` workflow, uploads `trace-coverage.log`, and fails the job on
+any unexported entry point. It fails loudly rather than passing when no trace could be checked,
+so a fetch or parse problem can never read as success.
+
 ### Testing Minecraft rendering
 
 The harness has a group of scenarios that mirror what the vanilla renderer actually does,

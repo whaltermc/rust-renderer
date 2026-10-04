@@ -108,6 +108,18 @@ jobs:
               > target/reports-angle/NOT-RUN.txt
           fi
 
+      # Entry-point coverage measured against real Minecraft apitrace captures, from the
+      # MobileGL fixture set. A name a real run calls but the library does not export is a
+      # NULL function pointer for a client that resolves by dlsym, which is how 1.16.5 died.
+      - name: Trace coverage against real Minecraft captures
+        run: |
+          sudo apt-get install -y --no-install-recommends apitrace
+          mkdir -p target/reports
+          set +e
+          ./tools/trace-coverage.sh 2>&1 | tee target/reports/trace-coverage.log
+          echo "trace coverage exit: $?"
+          set -e
+
       - name: Compare lanes
         if: always()
         run: |
@@ -142,6 +154,7 @@ jobs:
             target/reports/gl-smoke.log
             target/reports/screenshots/
             target/reports-angle/
+            target/reports/trace-coverage.log
             target/reports/lane-comparison.md
           if-no-files-found: error
 

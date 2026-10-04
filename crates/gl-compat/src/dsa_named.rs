@@ -1110,6 +1110,103 @@ pub unsafe extern "C" fn glGetProgramResourceLocationIndex(
     0xFFFF_FFFF
 }
 
+/// Debug-message filtering. This layer produces no debug output, so there is nothing to
+/// filter; the call has to be accepted because a trace of real Minecraft 1.17 shows it being
+/// called on start-up, and an unresolved name is a null function pointer.
+#[no_mangle]
+pub unsafe extern "C" fn glDebugMessageControl(
+    _source: u32,
+    _type_: u32,
+    _severity: u32,
+    _count: i32,
+    _ids: *const u32,
+    _enabled: u8,
+) {
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glDebugMessageControlARB(
+    _source: u32,
+    _type_: u32,
+    _severity: u32,
+    _count: i32,
+    _ids: *const u32,
+    _enabled: u8,
+) {
+}
+
+/// Image texture binding. Found missing from a real Minecraft 1.21.1 trace.
+#[no_mangle]
+pub unsafe extern "C" fn glBindImageTexture(
+    unit: u32,
+    texture: u32,
+    level: i32,
+    layered: i32,
+    layer: i32,
+    access: i32,
+    format: u32,
+) {
+    match driver_fn_cached::<unsafe extern "C" fn(u32, u32, i32, i32, i32, i32, u32)>(
+        "glBindImageTexture",
+    ) {
+        Some(f) => f(unit, texture, level, layered, layer, access, format),
+        None => mark_error_site("glBindImageTexture"),
+    }
+}
+
+/// Multi-draw with a base vertex. Found missing from a real Minecraft 1.21.1 trace.
+///
+/// ES 3.2 provides this directly. Where it is absent the fallback is exact rather than
+/// approximate: the per-draw index pointer advances by the index size, and each draw carries
+/// the same base vertex.
+#[no_mangle]
+pub unsafe extern "C" fn glMultiDrawElementsBaseVertex(
+    mode: u32,
+    count: i32,
+    ty: u32,
+    indices: *const c_void,
+    base_vertex: i32,
+    primcount: i32,
+) {
+    if primcount <= 0 {
+        return;
+    }
+    if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, i32, u32, *const c_void, i32, i32)>(
+        "glMultiDrawElementsBaseVertex",
+    ) {
+        return f(mode, count, ty, indices, base_vertex, primcount);
+    }
+    if let Some(draw) =
+        driver_fn_cached::<unsafe extern "C" fn(u32, i32, u32, *const c_void, i32)>(
+            "glDrawElementsBaseVertex",
+        )
+    {
+        let stride = match ty {
+            0x1401 => 1isize,
+            0x1403 => 2,
+            0x1405 => 4,
+            _ => {
+                mark_error_site("glMultiDrawElementsBaseVertex");
+                errors().set(0x0500);
+                return;
+            }
+        };
+        let base = indices as usize;
+        for i in 0..primcount as isize {
+            draw(
+                mode,
+                count,
+                ty,
+                base.wrapping_add((i * stride) as usize) as *const c_void,
+                base_vertex,
+            );
+        }
+        return;
+    }
+    mark_error_site("glMultiDrawElementsBaseVertex");
+    errors().set(0x0502);
+}
+
 /// Names registered in the resolver, so the reachability test can check them.
 pub const EXPORTS: &[&str] = &[
     "glCreateTextures", "glCreateFramebuffers", "glCreateRenderbuffers",
@@ -1130,7 +1227,8 @@ pub const EXPORTS: &[&str] = &[
     "glGetVertexArrayiv", "glGetVertexArrayIndexediv", "glGetVertexArrayIndexed64iv",
     "glTextureStorage1D", "glTextureSubImage1D", "glCompressedTextureSubImage1D",
     "glCopyTextureSubImage1D", "glTextureBuffer", "glNamedFramebufferTextureMultiviewOVR",
-    "glGetProgramResourceLocationIndex",
+    "glGetProgramResourceLocationIndex", "glDebugMessageControl", "glDebugMessageControlARB",
+    "glBindImageTexture", "glMultiDrawElementsBaseVertex",
     "glTexStorage2DMultisample", "glTexStorage3DMultisample", "glTextureStorage2DMultisample",
 ];
 
