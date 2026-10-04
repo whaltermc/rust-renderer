@@ -13,6 +13,7 @@ gles-backend = { path = "../gles-backend" }
 vulkan-backend = { path = "../vulkan-backend" }
 shader-translate = { path = "../shader-translate" }
 format-translate = { path = "../format-translate" }
+libloading = "0.8"
 
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.14"
