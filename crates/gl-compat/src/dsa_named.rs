@@ -77,9 +77,94 @@ pub fn mark_error_site(site: &str) {
     }
 }
 
+
+/// Multisample textures that had to be emulated with a renderbuffer: texture name ->
+/// renderbuffer name.
+///
+/// ES 3.x cannot express a multisample *depth* texture: `glTexImage2DMultisample` takes a
+/// colour-renderable internal format, and asking for `GL_DEPTH_COMPONENT24` with
+/// `GL_TEXTURE_2D_MULTISAMPLE` raises `GL_INVALID_OPERATION`. A multisample depth attachment
+/// in ES is a multisample *renderbuffer*, so that is what gets allocated instead, and the
+/// later `glFramebufferTexture2D(GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D_MULTISAMPLE, tex, 0)` is
+/// redirected to `glFramebufferRenderbuffer`.
+///
+/// The same fallback covers drivers that do not implement multisample textures at all: the
+/// real allocation is attempted first and the renderbuffer path is used only if it fails.
+static MSAA_SUBSTITUTE: Mutex<Vec<(u32, u32)>> = Mutex::new(Vec::new());
+
+const GL_DEPTH_ATTACHMENT: u32 = 0x8D00;
+const GL_STENCIL_ATTACHMENT: u32 = 0x8D20;
+const GL_DEPTH_STENCIL_ATTACHMENT: u32 = 0x821A;
+const GL_TEXTURE_2D_MULTISAMPLE: u32 = 0x9100;
+
+fn is_depth_or_stencil(fmt: u32) -> bool {
+    matches!(
+        fmt,
+        0x81A5 /* GL_DEPTH_COMPONENT16 */
+            | 0x81A6 /* GL_DEPTH_COMPONENT24 */
+            | 0x8CAC /* GL_DEPTH_COMPONENT32F */
+            | 0x8CAD /* GL_DEPTH24_STENCIL8 */
+            | 0x8CDF /* GL_DEPTH32F_STENCIL8 */
+    )
+}
+
+fn record_msaa_substitute(tex: u32, rbo: u32) {
+    let mut v = MSAA_SUBSTITUTE.lock().unwrap_or_else(|e| e.into_inner());
+    match v.iter_mut().find(|(t, _)| *t == tex) {
+        Some(e) => e.1 = rbo,
+        None => v.push((tex, rbo)),
+    }
+}
+
+pub(crate) fn msaa_substitute_for(tex: u32) -> Option<u32> {
+    MSAA_SUBSTITUTE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .find(|(t, _)| *t == tex)
+        .map(|(_, r)| *r)
+}
+
+/// Allocates a multisample renderbuffer holding the same depth/stencil storage the texture
+/// could not, and records the substitution so the attach can use it.
+unsafe fn allocate_msaa_renderbuffer(samples: i32, fmt: u32, w: i32, h: i32) -> Option<u32> {
+    let gen = driver_fn_cached::<unsafe extern "C" fn(i32, *mut u32)>("glGenRenderbuffers")?;
+    let bind = driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindRenderbuffer")?;
+    let store = driver_fn_cached::<unsafe extern "C" fn(u32, i32, u32, i32, i32)>(
+        "glRenderbufferStorageMultisample",
+    )?;
+    let mut rbo = 0u32;
+    gen(1, &mut rbo);
+    bind(GL_RENDERBUFFER, rbo);
+    store(GL_RENDERBUFFER, samples, fmt, w, h);
+    let err = errors().take();
+    bind(GL_RENDERBUFFER, 0);
+    if err != 0 {
+        log(&format!(
+            "[dsa] multisample {fmt:#06x} failed as both texture and renderbuffer (0x{err:04X})"
+        ));
+        return None;
+    }
+    Some(rbo)
+}
+
+/// Texture targets that can be passed to `glBindTexture`.
+///
+/// The multisample *types* (GL_TEXTURE_2D_MULTISAMPLE, GL_TEXTURE_3D_MULTISAMPLE) are not in
+/// this list: they name a texture kind, not a binding point, and binding one raises
+/// GL_INVALID_ENUM. Their storage is allocated by `glTexStorage*Multisample` instead.
+fn is_bindable_texture_target(t: u32) -> bool {
+    matches!(t, 0x0DE1 /* 2D */ | 0x806F /* 3D */ | 0x8513 /* CUBE_MAP */
+        | 0x8C1A /* 2D_ARRAY */ | 0x9009 /* CUBE_MAP_ARRAY */ | 0x84F5 /* 1D */
+        | 0x84F6 /* 1D_ARRAY */ | 0x84F7 /* RECT */ | 0x8C18 /* 3D_ARRAY */)
+}
+
 /// Binds a named texture to the target it belongs to. Returns the target.
 unsafe fn bind_tex(id: u32) -> u32 {
     let target = texture_target(id);
+    if !is_bindable_texture_target(target) {
+        return target;
+    }
     if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindTexture") {
         f(target, id);
     }
@@ -140,12 +225,16 @@ pub unsafe extern "C" fn glCreateTextures(target: u32, n: i32, ids: *mut u32) {
         }
     }
     // Materialise each name on its target right away: ES texture names are per-target, so
-    // without this the name is unusable under the target the game asked for.
-    if let Some(bind) = driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindTexture") {
-        for i in 0..n as usize {
-            let id = *ids.add(i);
-            bind(target, id);
-            record_texture(id, target);
+    // without this the name is unusable under the target the game asked for. Multisample
+    // types are recorded but never bound -- they are not valid glBindTexture targets.
+    for i in 0..n as usize {
+        record_texture(*ids.add(i), target);
+    }
+    if is_bindable_texture_target(target) {
+        if let Some(bind) = driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindTexture") {
+            for i in 0..n as usize {
+                bind(target, *ids.add(i));
+            }
         }
     }
 }
@@ -669,8 +758,11 @@ pub unsafe extern "C" fn glBindTextures(first: u32, count: i32, textures: *const
         if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32)>("glActiveTexture") {
             f(0x84C0 + first + i);
         }
+        let t = texture_target(*textures.add(i as usize));
         if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindTexture") {
-            f(texture_target(*textures.add(i as usize)), *textures.add(i as usize));
+            if is_bindable_texture_target(t) {
+                f(t, *textures.add(i as usize));
+            }
         } else {
             mark_error_site("glBindTextures");
             errors().set(0x0502);
@@ -883,40 +975,83 @@ pub unsafe extern "C" fn glGetCompressedTextureImage(
     }
 }
 
-/// `glTexStorage2DMultisample` exists on desktop GL and is what Minecraft 1.20.5+ calls for
-/// the multisampled depth attachment in `WindowFramebuffer.createDepthAttachment`. GLES has
-/// no `*TexStorage*Multisample`, but `glTexImage2DMultisample` with a null data pointer is
-/// the same thing: allocate immutable multisample storage, uninitialised.
+/// `glTexStorage2DMultisample`, the call Minecraft 1.20.5+ makes for the multisampled depth
+/// attachment in `WindowFramebuffer.createDepthAttachment`.
+///
+/// ES 3.x has no `*TexStorage*Multisample` at all, and its `glTexImage2DMultisample` only
+/// accepts colour-renderable formats, so a depth request raises `GL_INVALID_OPERATION`. Depth
+/// MSAA in ES is expressed with a multisample renderbuffer, so that is allocated instead and
+/// `glFramebufferTexture2D` is redirected to it. Colour requests try the real texture first,
+/// so a driver that does support them still gets one.
 #[no_mangle]
 pub unsafe extern "C" fn glTexStorage2DMultisample(
     target: u32, samples: i32, internalformat: u32, w: i32, h: i32,
 ) {
-    let ifmt = format_translate::map_internal_format(internalformat as i32, 0, 0) as u32;
-    if let Some(f) = driver_fn_cached::<
-        unsafe extern "C" fn(u32, i32, u32, i32, i32, i32),
-    >("glTexImage2DMultisample")
-    {
-        f(target, samples, ifmt, w, h, 0);
-    } else {
-        mark_error_site("glTexStorage2DMultisample");
-        errors().set(0x0502);
-    }
+    msaa_storage(target, 0, samples, internalformat, w, h);
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn glTexStorage3DMultisample(
     target: u32, samples: i32, internalformat: u32, w: i32, h: i32, d: i32,
 ) {
-    let ifmt = format_translate::map_internal_format(internalformat as i32, 0, 0) as u32;
-    if let Some(f) = driver_fn_cached::<
-        unsafe extern "C" fn(u32, i32, u32, i32, i32, i32, i32),
-    >("glTexImage3DMultisample")
-    {
-        f(target, samples, ifmt, w, h, d, 0);
+    let _ = d;
+    msaa_storage(target, 0, samples, internalformat, w, h);
+}
+
+/// The DSA form takes the texture name directly, because a multisample texture is never
+/// bound.
+#[no_mangle]
+pub unsafe extern "C" fn glTextureStorage2DMultisample(
+    id: u32, samples: i32, internalformat: u32, w: i32, h: i32,
+) {
+    msaa_storage(GL_TEXTURE_2D_MULTISAMPLE, id, samples, internalformat, w, h);
+}
+
+unsafe fn msaa_storage(
+    target: u32, id: u32, samples: i32, internalformat: u32, w: i32, h: i32,
+) {
+    let fmt = format_translate::map_internal_format(internalformat as i32, 0, 0) as u32;
+    let already = if id != 0 {
+        id
     } else {
-        mark_error_site("glTexStorage3DMultisample");
-        errors().set(0x0502);
+        let mut bound = 0i32;
+        if let Some(get) = driver_fn_cached::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv")
+        {
+            get(
+                if target == GL_TEXTURE_2D_MULTISAMPLE { 0x9102 } else { 0x8069 },
+                &mut bound,
+            );
+        }
+        bound.max(0) as u32
+    };
+
+    if !is_depth_or_stencil(fmt) {
+        if let Some(f) = driver_fn_cached::<
+            unsafe extern "C" fn(u32, i32, u32, i32, i32, i32),
+        >("glTexImage2DMultisample")
+        {
+            f(target, samples, fmt, w, h, 0);
+            if errors().take() == 0 {
+                return;
+            }
+        } else {
+            mark_error_site("glTexStorage2DMultisample: glTexImage2DMultisample missing");
+            errors().set(0x0502);
+            return;
+        }
     }
+
+    // Depth/stencil, or a driver that rejected a multisample colour texture.
+    record_texture(already, target);
+    mark_error_site("glTexStorage2DMultisample");
+    let Some(rbo) = allocate_msaa_renderbuffer(samples, fmt, w, h) else {
+        errors().set(0x0502);
+        return;
+    };
+    record_msaa_substitute(already, rbo);
+    log(&format!(
+        "[dsa] multisample {fmt:#06x} served by renderbuffer {rbo} (texture {already}): ES has no multisample depth texture"
+    ));
 }
 
 /// 1D textures and texel buffers never existed in GLES 3.x.
@@ -996,7 +1131,7 @@ pub const EXPORTS: &[&str] = &[
     "glTextureStorage1D", "glTextureSubImage1D", "glCompressedTextureSubImage1D",
     "glCopyTextureSubImage1D", "glTextureBuffer", "glNamedFramebufferTextureMultiviewOVR",
     "glGetProgramResourceLocationIndex",
-    "glTexStorage2DMultisample", "glTexStorage3DMultisample",
+    "glTexStorage2DMultisample", "glTexStorage3DMultisample", "glTextureStorage2DMultisample",
 ];
 
 #[cfg(test)]
@@ -1011,6 +1146,47 @@ mod tests {
                 "{name} is exported but unreachable via eglGetProcAddress"
             );
         }
+    }
+
+    #[test]
+    fn depth_and_stencil_formats_take_the_renderbuffer_path() {
+        // ES has no multisample depth texture; these are the formats that must not be
+        // attempted as a texture.
+        for f in [0x81A5, 0x81A6, 0x8CAC, 0x8CAD, 0x8CDF] {
+            assert!(is_depth_or_stencil(f), "{f:#06x} should use a renderbuffer");
+        }
+        // Colour formats stay on the texture path.
+        for f in [0x8058 /* RGBA8 */, 0x8051 /* RGB8 */, 0x881A /* RGBA8I */] {
+            assert!(!is_depth_or_stencil(f), "{f:#06x} should stay a texture");
+        }
+    }
+
+    #[test]
+    fn multisample_types_are_never_used_as_bind_targets() {
+        // Binding these raises GL_INVALID_ENUM, which is how the DSA depth path failed
+        // before target tracking was fixed.
+        assert!(!is_bindable_texture_target(0x9100));
+        assert!(!is_bindable_texture_target(0x9112));
+        for t in [0x0DE1, 0x806F, 0x8513, 0x8C1A, 0x9009] {
+            assert!(is_bindable_texture_target(t), "{t:#06x} should be bindable");
+        }
+    }
+
+    #[test]
+    fn a_multisample_texture_still_remembers_its_type() {
+        MSAA_SUBSTITUTE.lock().unwrap().clear();
+        TEXTURES.lock().unwrap().clear();
+        record_texture(42, GL_TEXTURE_2D_MULTISAMPLE);
+        assert_eq!(texture_target(42), GL_TEXTURE_2D_MULTISAMPLE);
+    }
+
+    #[test]
+    fn substitutions_are_looked_up_by_texture_name() {
+        MSAA_SUBSTITUTE.lock().unwrap().clear();
+        assert_eq!(msaa_substitute_for(5), None);
+        record_msaa_substitute(5, 99);
+        assert_eq!(msaa_substitute_for(5), Some(99));
+        MSAA_SUBSTITUTE.lock().unwrap().clear();
     }
 
     #[test]

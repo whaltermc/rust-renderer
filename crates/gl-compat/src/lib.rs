@@ -437,6 +437,7 @@ fn clear_driver_cache() {
 
 /// Memoized [`driver_fn`]. Callers pass the same `'static` name every time.
 pub(crate) fn driver_fn_cached<T: Copy>(name: &'static str) -> Option<T> {
+    trace_call(name);
     let key = (name.as_ptr() as usize, name.len());
     {
         let cache = DRIVER_CACHE.lock().unwrap_or_else(|e| e.into_inner());
@@ -960,6 +961,33 @@ pub unsafe extern "C" fn glBindBuffer(t: u32, b: u32) {
     }
 }
 
+/// Attaches a texture, redirecting to the renderbuffer substitute when a multisample depth
+/// texture could not be represented in ES. See `dsa_named` for why that substitution exists.
+#[no_mangle]
+pub unsafe extern "C" fn glFramebufferTexture2D(t: u32, a: u32, tt: u32, tex: u32, l: i32) {
+    const GL_TEXTURE_2D_MULTISAMPLE: u32 = 0x9100;
+    const GL_RENDERBUFFER: u32 = 0x8D41;
+    const GL_FRAMEBUFFER: u32 = 0x8D40;
+    if tt == GL_TEXTURE_2D_MULTISAMPLE && matches!(a, 0x8D00 | 0x8D20 | 0x821A) {
+        if let Some(rbo) = dsa_named::msaa_substitute_for(tex) {
+            if let Some(f) =
+                driver_fn_cached::<unsafe extern "C" fn(u32, u32, u32, u32)>(
+                    "glFramebufferRenderbuffer",
+                )
+            {
+                f(GL_FRAMEBUFFER, a, GL_RENDERBUFFER, rbo);
+                return;
+            }
+        }
+    }
+    match driver_fn_cached::<unsafe extern "C" fn(u32, u32, u32, u32, i32)>(
+        "glFramebufferTexture2D",
+    ) {
+        Some(f) => f(t, a, tt, tex, l),
+        None => errors().set(GL_INVALID_OPERATION),
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn glRenderbufferStorage(t: u32, f: u32, w: i32, h: i32) {
     let f2 = format_translate::map_renderbuffer_internal_format(f);
@@ -1266,7 +1294,6 @@ forward_all! {
     glFinish();
     glFlush();
     glFramebufferRenderbuffer(t: u32, a: u32, rt: u32, r: u32);
-    glFramebufferTexture2D(t: u32, a: u32, tt: u32, tex: u32, l: i32);
     glFrontFace(m: u32);
     glGenBuffers(n: i32, b: *mut u32);
     glGenFramebuffers(n: i32, f: *mut u32);
@@ -1461,7 +1488,13 @@ pub unsafe extern "C" fn glDrawArrays(mode: u32, first: i32, count: i32) {
 
 
 fn resolve_legacy_stub(n: &[u8]) -> *const c_void {
-    // Fixed-pipeline / 1.x symbols LWJGL enumerates; safe to no-op.
+    // Fixed-pipeline / 1.x symbols LWJGL enumerates. The immediate-mode subset is emulated
+    // by ff_draw, so most of these are only reached when no program is bound; the remainder
+    // genuinely have no ES equivalent.
+    //
+    // Resolving to a callable stub is what keeps the process alive, but a *silent* stub is
+    // worse than an error: a caller that depends on the behaviour gets nothing and no clue.
+    // So the first resolution of each name is logged.
     const LEGACY: &[&[u8]] = &[
         b"glAccum", b"glAlphaFunc", b"glAreTexturesResident", b"glArrayElement",
         b"glBegin", b"glBitmap", b"glCallList", b"glCallLists", b"glClearAccum",
@@ -1882,6 +1915,7 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glGetProgramResourceLocationIndex" => dsa_named::glGetProgramResourceLocationIndex as *const c_void,
         b"glTexStorage2DMultisample" => dsa_named::glTexStorage2DMultisample as *const c_void,
         b"glTexStorage3DMultisample" => dsa_named::glTexStorage3DMultisample as *const c_void,
+        b"glTextureStorage2DMultisample" => dsa_named::glTextureStorage2DMultisample as *const c_void,
         b"glVertexArrayAttribStride" => dsa::glVertexArrayAttribStride as *const c_void,
         b"glVertexAttribStride" => dsa::glVertexAttribStride as *const c_void,
         b"glGetVertexArrayAttribStride" => dsa::glGetVertexArrayAttribStride as *const c_void,
@@ -1955,6 +1989,7 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glTexParameteriv" => glTexParameteriv as *const c_void,
         b"glTexParameterfv" => glTexParameterfv as *const c_void,
         b"glRenderbufferStorage" => glRenderbufferStorage as *const c_void,
+        b"glFramebufferTexture2D" => glFramebufferTexture2D as *const c_void,
         b"glFogColor" => fixed_func::glFogColor as *const c_void,
         b"glGetTexLevelParameteriv" => glGetTexLevelParameteriv as *const c_void,
         b"eglGetDisplay" => eglGetDisplay as *const c_void,

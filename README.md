@@ -17,47 +17,32 @@ renderer plugin APK.
 | OpenGL 3.3 core API surface | Complete against the GL 3.0–3.3 core function list; unsupported desktop-only features return real GL errors instead of lying |
 | Vulkan path | Device discovery + reporting; **no rendering path** |
 
-### Does it run on a device? No.
+### The 0x0502 during depth-attachment creation: root cause
 
-**Tested on hardware.** Two device reports so far, and both moved the failure later rather
-than persisting:
+`IllegalStateException: OpenGL error 1282` at `GlBackend.createTexture` ->
+`WindowFramebuffer.createDepthAttachment` is **reproduced and fixed**.
 
-1. 1.16.5 + OptiFine: `SIGSEGV` at `si_addr = NULL` in `GL11.glFogfv`. A missing entry point
-   resolved to null and LWJGL called it. Fixed by never returning null for a `gl*` name.
-2. 1.21.11 + Sodium/Iris: the game now boots, initialises, reports
-   `Mali-G77 MC9 / OpenGL ES 3.2 / 104 extensions`, and dies with a readable error:
-   `IllegalStateException: OpenGL error 1282` at `GlBackend.createTexture` →
-   `WindowFramebuffer.createDepthAttachment`. The log also named **62 unresolved entry
-   points**, nearly all named-object/DSA spellings.
+Minecraft creates the window's multisampled depth attachment as a multisample **texture**
+(`glTexStorage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, samples, GL_DEPTH_COMPONENT24, w, h)`).
+OpenGL ES cannot express that: `glTexImage2DMultisample` accepts only colour-renderable
+internal formats, so a depth request raises `GL_INVALID_OPERATION` in the driver. The bridge
+forwarded the request, so the driver's error reached the game unchanged.
 
-After the fix, report 3 (same device, same mod set) resolved **54 of those 62** entry points and
-failed at the *same* place with the same `1282` — and crucially **no `GL error site` line
-appeared**, which proves the error is raised by the **Mali driver**, not by this layer. Since
-Minecraft only ever reports the numeric code, there was no way to tell which call provoked it,
-so the bridge now keeps a ring buffer of the last 16 forwarded GL calls and dumps them when
-`glGetError` returns non-zero (`RENDERER_TRACE_GL=1`).
+Two bugs, both in the translation:
 
-Still open after report 3, and the next things to do:
+1. **No multisample depth representation.** Depth MSAA in ES is a multisample *renderbuffer*.
+   `glTexStorage2DMultisample` now allocates one, records the substitution, and
+   `glFramebufferTexture2D(GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D_MULTISAMPLE, tex, 0)` is
+   redirected to `glFramebufferRenderbuffer`. Colour requests still try a real texture first,
+   so a driver that supports them gets one.
+2. **`glCreateTextures` bound every name to the requested target.** The multisample *types*
+   (`GL_TEXTURE_2D_MULTISAMPLE`, `GL_TEXTURE_3D_MULTISAMPLE`) are texture kinds, not binding
+   points, so `glBindTexture` on one raises `GL_INVALID_ENUM`. Those are now recorded in the
+   target table but never bound.
 
-- 8 entry points remain unresolved (`glCopyTextureSubImage2D/3D`,
-  `glCompressedTextureSubImage2D/3D`, `glBlitNamedFramebuffer`, `glBindImageTextures`,
-  `glTransformFeedbackBufferBase/Range`).
-- **`glTexStorage2DMultisample` was missing entirely** — the call 1.20.5+ uses for the
-  multisampled depth attachment in `WindowFramebuffer.createDepthAttachment`, which is exactly
-  where this crash is. Now added, mapped onto `glTexImage2DMultisample` with null data, since
-  GLES has no `*TexStorage*Multisample`.
-- The `1282` itself is still unexplained. Turn on `RENDERER_TRACE_GL` and the next log will
-  name the call instead of the code.
-
-**None of this has been retested on a device.** Treat it as "the missing surface is filled in
-and the next failure will be diagnosable", not as "it runs". Treat the host harness results as necessary but *not* sufficient — they did
-not predict the device outcome, and they should not be read as evidence that the bridge works.
-
-The host suite runs against Mesa's llvmpipe software rasteriser. That catches translation and
-state bugs, but it cannot catch anything where a real driver differs from Mesa — and the paths
-that are broken are exactly those: DSA vertex arrays, freshly created vertex arrays, the
-fixed-function quad route, and scissored draws. Those all render or behave differently once a
-real vendor driver is involved, so a green host run is not evidence about a phone.
+Both multisample paths are now covered by the harness (`minecraft depth attachment` group):
+the non-DSA `createTexture` path and the DSA path, the latter asserting a **complete**
+framebuffer.
 
 ### What has actually been verified
 

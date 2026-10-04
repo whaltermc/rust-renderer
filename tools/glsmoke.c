@@ -430,11 +430,23 @@ DECL(void, glClear, (GLbitfield))
 DECL(void, glDrawArrays, (GLenum, GLint, GLsizei))
 DECL(void, glDrawElements, (GLenum, GLsizei, GLenum, const void *))
 DECL(void, glPixelStorei, (GLenum, GLint))
+DECL(void, glTexStorage2DMultisample, (GLenum, GLint, GLenum, GLsizei, GLsizei))
+DECL(void, glTexParameteri, (GLenum, GLenum, GLint))
+DECL(void, glCreateTextures, (GLenum, GLsizei, GLuint *))
+DECL(void, glTextureStorage2DMultisample, (GLuint, GLint, GLenum, GLsizei, GLsizei))
+DECL(void, glGenRenderbuffers, (GLsizei, GLuint *))
+DECL(void, glBindRenderbuffer, (GLenum, GLuint))
+DECL(void, glRenderbufferStorageMultisample, (GLenum, GLsizei, GLenum, GLsizei, GLsizei))
 DECL(void, glTexImage2D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *))
 DECL(void, glTexSubImage2D, (GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, const void *))
 DECL(void, glEnable, (GLenum))
 DECL(void, glDisable, (GLenum))
 DECL(void, glTexParameteri, (GLenum, GLenum, GLint))
+DECL(void, glCreateTextures, (GLenum, GLsizei, GLuint *))
+DECL(void, glTextureStorage2DMultisample, (GLuint, GLint, GLenum, GLsizei, GLsizei))
+DECL(void, glGenRenderbuffers, (GLsizei, GLuint *))
+DECL(void, glBindRenderbuffer, (GLenum, GLuint))
+DECL(void, glRenderbufferStorageMultisample, (GLenum, GLsizei, GLenum, GLsizei, GLsizei))
 DECL(void, glReadPixels, (GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void *))
 DECL(GLenum, glGetError, (void))
 DECL(const GLubyte *, glGetString, (GLenum))
@@ -499,11 +511,23 @@ static int load_all(void) {
     LOAD(void, glDrawArrays, (GLenum, GLint, GLsizei))
     LOAD(void, glDrawElements, (GLenum, GLsizei, GLenum, const void *))
     LOAD(void, glPixelStorei, (GLenum, GLint))
+    LOAD(void, glTexStorage2DMultisample, (GLenum, GLint, GLenum, GLsizei, GLsizei))
+    LOAD(void, glTexParameteri, (GLenum, GLenum, GLint))
+    LOAD(void, glCreateTextures, (GLenum, GLsizei, GLuint *))
+    LOAD(void, glTextureStorage2DMultisample, (GLuint, GLint, GLenum, GLsizei, GLsizei))
+    LOAD(void, glGenRenderbuffers, (GLsizei, GLuint *))
+    LOAD(void, glBindRenderbuffer, (GLenum, GLuint))
+    LOAD(void, glRenderbufferStorageMultisample, (GLenum, GLsizei, GLenum, GLsizei, GLsizei))
     LOAD(void, glTexImage2D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *))
     LOAD(void, glTexSubImage2D, (GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, const void *))
     LOAD(void, glEnable, (GLenum))
     LOAD(void, glDisable, (GLenum))
     LOAD(void, glTexParameteri, (GLenum, GLenum, GLint))
+    LOAD(void, glCreateTextures, (GLenum, GLsizei, GLuint *))
+    LOAD(void, glTextureStorage2DMultisample, (GLuint, GLint, GLenum, GLsizei, GLsizei))
+    LOAD(void, glGenRenderbuffers, (GLsizei, GLuint *))
+    LOAD(void, glBindRenderbuffer, (GLenum, GLuint))
+    LOAD(void, glRenderbufferStorageMultisample, (GLenum, GLsizei, GLenum, GLsizei, GLsizei))
     LOAD(void, glReadPixels, (GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void *))
     LOAD(GLenum, glGetError, (void))
     LOAD(const GLubyte *, glGetString, (GLenum))
@@ -1200,6 +1224,136 @@ int main(int argc, char **argv) {
         p_glViewport(0, 0, 64, 64);
         p_glUseProgram(prog);
         free(shot);
+    }
+
+
+    /* ---- Minecraft's depth-attachment sequence, reproduced step by step ----
+     * WindowFramebuffer.createDepthAttachment -> GlBackend.createTexture(multisample)
+     * is what raised "OpenGL error 1282" on device. Each call is checked on its own so the
+     * offending one is named rather than guessed at. */
+    cur_group = "minecraft depth attachment";
+    {
+        const int W = 64, H = 64;
+        const char *sname[12];
+        GLenum serr[12];
+        int nsteps = 0;
+        char d[512];
+
+        /* 1. the non-DSA form, which is what MC uses for a multisample depth attachment */
+        GLuint t1 = 0;
+        p_glGenTextures(1, &t1);
+        sname[nsteps] = "glGenTextures"; serr[nsteps] = p_glGetError(); nsteps++;
+        p_glBindTexture(GL_TEXTURE_2D, t1);
+        sname[nsteps] = "glBindTexture"; serr[nsteps] = p_glGetError(); nsteps++;
+        p_glTexParameteri(GL_TEXTURE_2D, 0x813D /* MAX_LEVEL */, 0);
+        sname[nsteps] = "glTexParameteri(MAX_LEVEL)"; serr[nsteps] = p_glGetError(); nsteps++;
+        p_glTexParameteri(GL_TEXTURE_2D, 0x2801 /* MIN_FILTER */, 0x2600 /* NEAREST */);
+        sname[nsteps] = "glTexParameteri(MIN_FILTER)"; serr[nsteps] = p_glGetError(); nsteps++;
+        p_glTexParameteri(GL_TEXTURE_2D, 0x2802 /* WRAP_S */, 0x812F /* CLAMP */);
+        sname[nsteps] = "glTexParameteri(WRAP_S)"; serr[nsteps] = p_glGetError(); nsteps++;
+        p_glTexStorage2DMultisample(GL_TEXTURE_2D, 4, GL_DEPTH_COMPONENT24, W, H);
+        sname[nsteps] = "glTexStorage2DMultisample(DEPTH24,4)";
+        serr[nsteps] = p_glGetError(); nsteps++;
+        p_glBindTexture(GL_TEXTURE_2D, 0);
+        sname[nsteps] = "glBindTexture(0)"; serr[nsteps] = p_glGetError(); nsteps++;
+
+        int first_bad = -1;
+        for (int i = 0; i < nsteps; i++)
+            if (serr[i] != GL_NO_ERROR && first_bad < 0) first_bad = i;
+        snprintf(d, sizeof d, "%d steps, first error 0x%04X: ", nsteps,
+                 first_bad < 0 ? 0 : serr[first_bad]);
+        for (int i = 0; i < nsteps; i++) {
+            char part[80];
+            snprintf(part, sizeof part, "%s=0x%04X  ", sname[i], serr[i]);
+            strncat(d, part, sizeof d - strlen(d) - 1);
+        }
+        if (first_bad < 0) {
+            ok(1, "non-DSA multisample depth texture (MC createTexture path)");
+            record("depth attachment steps", "pass", d);
+        } else {
+            failures++;
+            printf("  FAIL  non-DSA multisample depth texture: %s raised 0x%04X\n",
+                   sname[first_bad], serr[first_bad]);
+            record("non-DSA multisample depth texture (MC createTexture path)", "fail", d);
+        }
+
+        /* 2. The DSA multisample depth path, which is what 1.20.5+ actually takes:
+         * glCreateTextures(GL_TEXTURE_2D_MULTISAMPLE) -> glTexStorage2DMultisample ->
+         * glFramebufferTexture2D(GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D_MULTISAMPLE).
+         * GL_TEXTURE_2D_MULTISAMPLE is a texture *type*, not a bindable target, so this
+         * cannot be expressed without DSA. */
+        GLuint mfbo = 0, ms = 0;
+        p_glGenFramebuffers(1, &mfbo);
+        p_glBindFramebuffer(GL_FRAMEBUFFER, mfbo);
+        p_glCreateTextures(0x9100 /* GL_TEXTURE_2D_MULTISAMPLE */, 1, &ms);
+        GLenum e_create = p_glGetError();
+        p_glTextureStorage2DMultisample(ms, 4, GL_DEPTH_COMPONENT24, W, H);
+        GLenum e_store = p_glGetError();
+        p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, 0x9100, ms, 0);
+        GLenum e_attach = p_glGetError();
+        GLenum e_fbo = p_glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        snprintf(d, sizeof d, "create=0x%04X store=0x%04X attach=0x%04X fbo=0x%04X",
+                 e_create, e_store, e_attach, e_fbo);
+        if (e_store == GL_NO_ERROR && e_attach == GL_NO_ERROR && e_fbo == 0x8CD5) {
+            ok(1, "DSA multisample depth attachment gives a complete FBO");
+            record("dsa msaa depth fbo", "pass", d);
+        } else {
+            ok_known(0, "DSA multisample depth attachment gives a complete FBO", d);
+        }
+
+        /* 3. which sample counts this driver accepts for a multisample depth texture */
+        {
+            int maxs = 0;
+            p_glGetIntegerv(0x8D57 /* GL_MAX_SAMPLES */, &maxs);
+            char acc[256];
+            acc[0] = 0;
+            for (int samples = 1; samples <= 16; samples *= 2) {
+                GLuint probe = 0;
+                p_glCreateTextures(0x9100, 1, &probe);
+                p_glTextureStorage2DMultisample(probe, samples, GL_DEPTH_COMPONENT24, 16, 16);
+                GLenum se = p_glGetError();
+                char part[48];
+                snprintf(part, sizeof part, "%d:%s ", samples, se == GL_NO_ERROR ? "ok" : "no");
+                strncat(acc, part, sizeof acc - strlen(acc) - 1);
+            }
+            snprintf(d, sizeof d, "GL_MAX_SAMPLES=%d; depth24 MSAA accepts: %s", maxs, acc);
+            record("depth MSAA sample counts", "pass", d);
+            printf("  GL_MAX_SAMPLES=%d, depth24 MSAA accepts: %s\n", maxs, acc);
+        }
+
+        /* 4. Is a multisample *depth texture* even expressible in GLES, or is a multisample
+         * renderbuffer the only representation? This decides how the translation must work. */
+        {
+            char d2[400];
+            char t[400];
+            t[0] = 0;
+            /* colour multisample texture */
+            GLuint c1 = 0;
+            p_glCreateTextures(0x9100, 1, &c1);
+            p_glTextureStorage2DMultisample(c1, 4, 0x8058 /* RGBA8 */, 16, 16);
+            GLenum ce = p_glGetError();
+            /* depth multisample texture */
+            GLuint c2 = 0;
+            p_glCreateTextures(0x9100, 1, &c2);
+            p_glTextureStorage2DMultisample(c2, 4, GL_DEPTH_COMPONENT24, 16, 16);
+            GLenum de = p_glGetError();
+            /* depth multisample renderbuffer */
+            GLuint rb = 0;
+            p_glGenRenderbuffers(1, &rb);
+            p_glBindRenderbuffer(0x8D41 /* GL_RENDERBUFFER */, rb);
+            p_glRenderbufferStorageMultisample(0x8D41, 4, GL_DEPTH_COMPONENT24, 16, 16);
+            GLenum re = p_glGetError();
+            snprintf(d2, sizeof d2,
+                     "MSAA colour texture=0x%04X  MSAA depth texture=0x%04X  "
+                     "MSAA depth renderbuffer=0x%04X",
+                     ce, de, re);
+            record("gles msaa representations", "pass", d2);
+            printf("  %s\n", d2);
+            (void)t;
+        }
+
+        p_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        p_glViewport(0, 0, 64, 64);
     }
 
     /* ---- Known issue ----
