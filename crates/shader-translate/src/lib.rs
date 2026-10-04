@@ -1,0 +1,105 @@
+//! Text-level GLSL rewriting from desktop GLSL (1.10-3.30) to GLSL ES (1.00 / 3.00).
+//!
+//! This is NOT a full compiler. It fixes the version header and adds default precision.
+//! Anything it cannot handle is reported as an error instead of silently passing through.
+
+const PRECISION_300: &str = "precision highp float;\nprecision highp int;\n\
+precision highp sampler2D;\nprecision highp sampler3D;\nprecision highp samplerCube;\n\
+precision highp sampler2DArray;\nprecision highp isampler2D;\nprecision highp usampler2D;\n";
+const PRECISION_100: &str = "precision highp float;\nprecision highp int;\n";
+
+pub fn translate(src: &str) -> Result<String, String> {
+    let mut version: Option<(u32, bool)> = None;
+    for line in src.lines() {
+        let t = line.trim_start();
+        if let Some(rest) = t.strip_prefix("#version") {
+            let mut it = rest.split_whitespace();
+            let num = it.next().and_then(|n| n.parse::<u32>().ok());
+            let es = it.next().map_or(false, |w| w == "es");
+            if let Some(n) = num {
+                version = Some((n, es));
+            }
+            break;
+        }
+    }
+    // No #version means GLSL 1.10 by the spec.
+    let (num, es) = version.unwrap_or((110, false));
+    if es {
+        return Ok(src.to_string());
+    }
+    if num > 330 {
+        return Err(format!("GLSL {num} is not supported (maximum 330)"));
+    }
+    let (header, precision) = if num >= 130 {
+        ("#version 300 es", PRECISION_300)
+    } else {
+        ("#version 100", PRECISION_100)
+    };
+
+    let mut out = String::with_capacity(src.len() + 256);
+    out.push_str(header);
+    out.push('\n');
+    let mut inserted = false;
+    for line in src.lines() {
+        let t = line.trim_start();
+        if t.starts_with("#version") {
+            continue;
+        }
+        // Desktop-only extensions are invalid in ES.
+        if t.starts_with("#extension") && t.contains("GL_ARB_") {
+            continue;
+        }
+        if !inserted && !t.is_empty() && !t.starts_with('#') && !t.starts_with("//") {
+            out.push_str(precision);
+            inserted = true;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if !inserted {
+        out.push_str(precision);
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rewrites_core_150() {
+        let o = translate("#version 150 core\nin vec3 p;\nvoid main(){}\n").unwrap();
+        assert!(o.starts_with("#version 300 es\n"));
+        assert!(o.find("precision highp float;").unwrap() < o.find("in vec3 p;").unwrap());
+    }
+
+    #[test]
+    fn legacy_120_becomes_100() {
+        let o = translate("#version 120\nvarying vec2 uv;\nvoid main(){}\n").unwrap();
+        assert!(o.starts_with("#version 100\n"));
+        assert!(o.contains("varying vec2 uv;"));
+    }
+
+    #[test]
+    fn no_version_defaults_to_100() {
+        assert!(translate("void main(){}\n").unwrap().starts_with("#version 100\n"));
+    }
+
+    #[test]
+    fn es_source_untouched() {
+        let s = "#version 300 es\nvoid main(){}\n";
+        assert_eq!(translate(s).unwrap(), s);
+    }
+
+    #[test]
+    fn drops_arb_extension_and_keeps_defines_first() {
+        let o = translate("#version 150\n#extension GL_ARB_foo : enable\n#define X 1\nvoid main(){}\n").unwrap();
+        assert!(!o.contains("GL_ARB_foo"));
+        assert!(o.find("#define X").unwrap() < o.find("precision").unwrap());
+    }
+
+    #[test]
+    fn rejects_glsl_400() {
+        assert!(translate("#version 400\nvoid main(){}\n").is_err());
+    }
+}

@@ -4,6 +4,8 @@ members = [
     "crates/renderer-core",
     "crates/gles-backend",
     "crates/vulkan-backend",
+    "crates/shader-translate",
+    "crates/format-translate",
     "crates/gl-compat",
 ]
 

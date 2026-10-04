@@ -1,5 +1,6 @@
 //! Backend-independent renderer concepts. No GLES or Vulkan dependency here.
 
+use std::ffi::c_void;
 use std::fmt;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -48,11 +49,59 @@ pub struct DeviceInfo {
     pub glsl_version: String,
 }
 
+/// What the device actually supports, measured at init (never assumed).
+#[derive(Clone, Debug, Default)]
+pub struct Capabilities {
+    pub es_major: u32,
+    pub es_minor: u32,
+    pub extensions: Vec<String>,
+    pub max_texture_size: i32,
+    pub max_vertex_attribs: i32,
+    pub max_draw_buffers: i32,
+    pub max_color_attachments: i32,
+    pub max_texture_units: i32,
+    pub max_uniform_block_size: i32,
+    pub max_samples: i32,
+}
+
+impl Capabilities {
+    pub fn has_extension(&self, name: &str) -> bool {
+        self.extensions.iter().any(|e| e == name)
+    }
+    pub fn at_least(&self, major: u32, minor: u32) -> bool {
+        (self.es_major, self.es_minor) >= (major, minor)
+    }
+}
+
+/// Parses "OpenGL ES 3.2 V@..." into (3, 2).
+pub fn parse_es_version(s: &str) -> Option<(u32, u32)> {
+    let rest = s.strip_prefix("OpenGL ES ")?;
+    let v: String = rest.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+    let mut it = v.split('.');
+    let major = it.next()?.parse().ok()?;
+    let minor = it.next()?.parse().ok()?;
+    Some((major, minor))
+}
+
+pub fn gl_error_name(code: u32) -> &'static str {
+    match code {
+        0 => "GL_NO_ERROR",
+        0x0500 => "GL_INVALID_ENUM",
+        0x0501 => "GL_INVALID_VALUE",
+        0x0502 => "GL_INVALID_OPERATION",
+        0x0505 => "GL_OUT_OF_MEMORY",
+        0x0506 => "GL_INVALID_FRAMEBUFFER_OPERATION",
+        _ => "GL_UNKNOWN_ERROR",
+    }
+}
+
 #[derive(Debug)]
 pub enum BackendError {
     /// Not implemented / not available. Never silently succeeds.
     Unsupported(String),
     InitFailed(String),
+    /// A GL/Vulkan call failed; the string carries the operation and driver message.
+    Gl(String),
 }
 
 impl fmt::Display for BackendError {
@@ -60,25 +109,101 @@ impl fmt::Display for BackendError {
         match self {
             Self::Unsupported(s) => write!(f, "unsupported: {s}"),
             Self::InitFailed(s) => write!(f, "init failed: {s}"),
+            Self::Gl(s) => write!(f, "graphics error: {s}"),
         }
     }
 }
 impl std::error::Error for BackendError {}
 
-/// Phase 1 backend interface. Grows in Phase 2 (buffers, textures, shaders, pipelines...).
+macro_rules! handles {
+    ($($n:ident),* $(,)?) => {
+        $( #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub struct $n(pub u32); )*
+    };
+}
+handles!(BufferId, TextureId, ShaderId, ProgramId, VertexArrayId, FramebufferId);
+
+/// Resource-level backend interface (spec phase 2). Enum arguments are raw GL values for
+/// now; a Vulkan backend will translate them.
 pub trait Backend: Send + Sync {
     fn kind(&self) -> BackendKind;
     fn device_info(&self) -> &DeviceInfo;
+    fn capabilities(&self) -> &Capabilities;
 
+    // --- frame / state ---
     fn clear_color(&self, r: f32, g: f32, b: f32, a: f32);
     fn clear(&self, mask: u32);
     fn viewport(&self, x: i32, y: i32, w: i32, h: i32);
+    fn scissor(&self, x: i32, y: i32, w: i32, h: i32);
     fn enable(&self, cap: u32);
     fn disable(&self, cap: u32);
+    fn blend_func(&self, src: u32, dst: u32);
+    fn depth_func(&self, func: u32);
+    fn depth_mask(&self, enabled: bool);
+    fn cull_face(&self, mode: u32);
+
+    // --- buffers ---
+    fn create_buffer(&self) -> Result<BufferId, BackendError>;
+    fn delete_buffer(&self, id: BufferId);
+    fn bind_buffer(&self, target: u32, id: Option<BufferId>);
+    fn buffer_data(&self, target: u32, data: &[u8], usage: u32) -> Result<(), BackendError>;
+    fn buffer_sub_data(&self, target: u32, offset: usize, data: &[u8]) -> Result<(), BackendError>;
+
+    // --- textures ---
+    fn create_texture(&self) -> Result<TextureId, BackendError>;
+    fn delete_texture(&self, id: TextureId);
+    fn active_texture(&self, unit: u32);
+    fn bind_texture(&self, target: u32, id: Option<TextureId>);
+    #[allow(clippy::too_many_arguments)]
+    fn tex_image_2d(
+        &self,
+        target: u32,
+        level: i32,
+        internal_format: i32,
+        width: i32,
+        height: i32,
+        format: u32,
+        ty: u32,
+        data: Option<&[u8]>,
+    ) -> Result<(), BackendError>;
+    fn tex_parameter_i(&self, target: u32, pname: u32, value: i32);
+
+    // --- shaders / programs ---
+    fn compile_shader(&self, kind: u32, source: &str) -> Result<ShaderId, BackendError>;
+    fn delete_shader(&self, id: ShaderId);
+    fn link_program(&self, shaders: &[ShaderId]) -> Result<ProgramId, BackendError>;
+    fn delete_program(&self, id: ProgramId);
+    fn use_program(&self, id: Option<ProgramId>);
+    fn uniform_location(&self, program: ProgramId, name: &str) -> Option<i32>;
+    fn uniform_1i(&self, location: i32, v: i32);
+    fn uniform_1f(&self, location: i32, v: f32);
+    fn uniform_4f(&self, location: i32, x: f32, y: f32, z: f32, w: f32);
+    fn uniform_matrix_4(&self, location: i32, m: &[f32; 16], transpose: bool);
+
+    // --- vertex arrays ---
+    fn create_vertex_array(&self) -> Result<VertexArrayId, BackendError>;
+    fn delete_vertex_array(&self, id: VertexArrayId);
+    fn bind_vertex_array(&self, id: Option<VertexArrayId>);
+    fn vertex_attrib_pointer(&self, index: u32, size: i32, ty: u32, normalized: bool, stride: i32, offset: usize);
+    fn set_vertex_attrib_enabled(&self, index: u32, enabled: bool);
+
+    // --- framebuffers ---
+    fn create_framebuffer(&self) -> Result<FramebufferId, BackendError>;
+    fn delete_framebuffer(&self, id: FramebufferId);
+    fn bind_framebuffer(&self, target: u32, id: Option<FramebufferId>);
+    fn framebuffer_texture_2d(&self, target: u32, attachment: u32, tex_target: u32, tex: TextureId, level: i32);
+    fn check_framebuffer_status(&self, target: u32) -> u32;
+
+    // --- draws ---
+    fn draw_arrays(&self, mode: u32, first: i32, count: i32);
+    fn draw_elements(&self, mode: u32, count: i32, ty: u32, offset: usize);
+
+    // --- diagnostics / interop ---
     /// Raw backend error (0 if none).
     fn get_error(&self) -> u32;
     /// NUL-terminated string owned by the backend/driver; null if unavailable.
     fn get_string(&self, name: u32) -> *const u8;
+    /// Looks up a driver entry point by name (cached); null if the driver lacks it.
+    fn proc_address(&self, name: &str) -> *const c_void;
 }
 
 /// OpenGL-style sticky error state (spec section 7). First error wins until read.
@@ -97,6 +222,7 @@ impl GlErrorState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn first_error_wins_and_clears() {
         let s = GlErrorState::default();
@@ -105,9 +231,39 @@ mod tests {
         assert_eq!(s.take(), 0x0500);
         assert_eq!(s.take(), 0);
     }
+
     #[test]
     fn parses_backend() {
         assert_eq!(BackendKind::parse(" Vulkan "), Some(BackendKind::Vulkan));
         assert_eq!(BackendKind::parse("metal"), None);
+    }
+
+    #[test]
+    fn parses_es_versions() {
+        assert_eq!(parse_es_version("OpenGL ES 3.2 V@0502.0 (GIT@abc)"), Some((3, 2)));
+        assert_eq!(parse_es_version("OpenGL ES 3.0"), Some((3, 0)));
+        assert_eq!(parse_es_version("4.6.0 NVIDIA"), None);
+        assert_eq!(parse_es_version("OpenGL ES x"), None);
+    }
+
+    #[test]
+    fn capability_queries() {
+        let c = Capabilities {
+            es_major: 3,
+            es_minor: 1,
+            extensions: vec!["GL_EXT_texture_format_BGRA8888".into()],
+            ..Default::default()
+        };
+        assert!(c.at_least(3, 0));
+        assert!(c.at_least(3, 1));
+        assert!(!c.at_least(3, 2));
+        assert!(c.has_extension("GL_EXT_texture_format_BGRA8888"));
+        assert!(!c.has_extension("GL_FOO"));
+    }
+
+    #[test]
+    fn error_names() {
+        assert_eq!(gl_error_name(0x0502), "GL_INVALID_OPERATION");
+        assert_eq!(gl_error_name(0x9999), "GL_UNKNOWN_ERROR");
     }
 }

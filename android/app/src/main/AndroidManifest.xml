@@ -1,21 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
     <application
         android:label="Rust Renderer"
+        android:hasCode="false"
         android:extractNativeLibs="true">
 
-        <activity android:name=".MainActivity" android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
-        </activity>
+        <meta-data
+            android:name="fclPlugin_V2"
+            android:resource="@string/config" />
 
-        <meta-data android:name="fclPlugin_V2" android:resource="@string/config"/>
-        <meta-data android:name="fclPlugin" android:value="true"/>
-        <meta-data android:name="zalithRendererPlugin" android:value="true"/>
-        <meta-data android:name="renderer" android:value="Rust Renderer:librust_gl.so:/librust_gl.so"/>
-        <meta-data android:name="boatEnv" android:value="LIBGL_ES=3:POJAV_RENDERER=opengles3:RENDERER_BACKEND=auto"/>
-        <meta-data android:name="pojavEnv" android:value="LIBGL_ES=3:POJAV_RENDERER=opengles3:RENDERER_BACKEND=auto"/>
     </application>
+
 </manifest>

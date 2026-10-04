@@ -11,6 +11,8 @@ crate-type = ["cdylib"]
 renderer-core = { path = "../renderer-core" }
 gles-backend = { path = "../gles-backend" }
 vulkan-backend = { path = "../vulkan-backend" }
+shader-translate = { path = "../shader-translate" }
+format-translate = { path = "../format-translate" }
 
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.14"
