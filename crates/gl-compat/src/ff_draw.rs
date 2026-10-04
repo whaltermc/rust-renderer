@@ -83,6 +83,9 @@ struct Gpu {
 
 static GPU: Mutex<Option<Gpu>> = Mutex::new(None);
 static DRAWS: AtomicU64 = AtomicU64::new(0);
+static DIAG: AtomicU64 = AtomicU64::new(0);
+static SUSPECT: AtomicU64 = AtomicU64::new(0);
+static ERRS: AtomicU64 = AtomicU64::new(0);
 
 fn build(be: &dyn Backend) -> Option<Gpu> {
     let vs = be
@@ -242,6 +245,18 @@ pub unsafe fn try_draw_arrays(mode: u32, first: i32, count: i32) -> bool {
         0
     };
 
+    // Diagnostics: the first 60 draws, plus untextured draws with no color array (these fall
+    // back to the current color, white by default -- the prime suspect for a white screen).
+    let d = DIAG.fetch_add(1, Ordering::Relaxed);
+    let suspect = !use_tex && !has_color;
+    if d < 60 || (suspect && SUSPECT.fetch_add(1, Ordering::Relaxed) < 40) {
+        let c = fixed_func::current_color();
+        crate::log(&format!(
+            "[FFDraw] diag #{d}: mode=0x{mode:04X} count={count} tex={use_tex} color_array={has_color} uv_array={has_uv} alpha_mode={alpha_mode} cur_color=({:.2},{:.2},{:.2},{:.2})",
+            c[0], c[1], c[2], c[3]
+        ));
+    }
+
     be.use_program(Some(gpu.prog));
     be.uniform_matrix_4(gpu.loc_mvp, &fixed_func::mvp_matrix(), false);
     be.uniform_1i(gpu.loc_tex, 0);
@@ -264,6 +279,11 @@ pub unsafe fn try_draw_arrays(mode: u32, first: i32, count: i32) -> bool {
         }
     } else {
         be.draw_arrays(mode, 0, count);
+    }
+
+    let err = be.get_error();
+    if err != 0 && ERRS.fetch_add(1, Ordering::Relaxed) < 20 {
+        crate::log(&format!("[FFDraw] GL error 0x{err:04X} after draw mode=0x{mode:04X} count={count}"));
     }
 
     restore(be, prev_vao, prev_abuf);
