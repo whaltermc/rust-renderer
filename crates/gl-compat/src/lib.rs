@@ -1040,10 +1040,6 @@ pub unsafe extern "C" fn glBufferStorage(target: u32, size: isize, data: *const 
     }
 }
 
-fn legacy_noop_fn() {
-    // shared no-op for unresolved desktop-1.x probes
-}
-
 fn resolve_legacy_stub(n: &[u8]) -> *const c_void {
     // Fixed-pipeline / 1.x symbols LWJGL enumerates; safe to no-op.
     const LEGACY: &[&[u8]] = &[
