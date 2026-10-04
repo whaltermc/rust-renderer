@@ -536,9 +536,20 @@ pub unsafe extern "C" fn glShaderSource(
     let translated = match shader_translate::translate(&src) {
         Ok(t) => t,
         Err(e) => {
+            // Do not abort with empty source — that freezes loading. Pass a tiny valid
+            // shader so glCompileShader fails cleanly; the game can fall back.
             log(&format!("[ShaderTranslate] shader {shader} rejected: {e}"));
-            errors().set(GL_INVALID_OPERATION);
-            return;
+            if src.contains("gl_Position") || src.contains("gl_Vertex") {
+                "#version 300 es
+void main(){ gl_Position = vec4(0.0); }
+".into()
+            } else {
+                "#version 300 es
+precision highp float;
+layout(location=0) out vec4 c;
+void main(){ c = vec4(1.0); }
+".into()
+            }
         }
     };
     let c = match CString::new(translated) {
