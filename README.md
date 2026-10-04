@@ -570,6 +570,17 @@ GL_VERTEX_ATTRIB_ARRAY_STRIDE)` returns 0 even for an attribute that demonstrabl
 correctly, so stride cannot be used to diagnose anything here. That is why the harness no
 longer reports stride as data.
 
+### Vendored native dependencies
+
+`third_party/glslang` (Khronos, Apache-2.0, pinned at 15.0.0) is vendored as a submodule for
+GLSL → SPIR-V. **It is inert**: nothing in the Rust build references it, so the APK build and
+the test suite are unaffected. It is not yet buildable here — SPIRV-Tools has to be fetched at
+build time and the arm64 cross-compile needs an NDK and CMake, which this environment does not
+have. See `third_party/README.md` for the exact commands and what remains.
+
+Consequently `backend::vulkan::can_render()` is still `false` and `compile_shader` still
+returns the honest *"no SPIR-V compiler is linked"*. Nothing about rendering has changed yet.
+
 ### Backends are one module with two implementations
 
 `crates/backend/` holds both, as `gles` and `vulkan`. They shared the `Backend` trait and the

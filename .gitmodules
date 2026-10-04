@@ -1,3 +1,6 @@
 [submodule "tools/trace_replay/vendor/apitrace"]
 	path = tools/trace_replay/vendor/apitrace
 	url = https://github.com/MobileGL-Dev/apitrace.git
+[submodule "glslang"]
+	path = third_party/glslang
+	url = https://github.com/KhronosGroup/glslang.git
