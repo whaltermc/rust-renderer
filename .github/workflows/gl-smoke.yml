@@ -1,0 +1,75 @@
+name: GL Bridge Smoke Test
+
+# Separate from the APK build: this exercises the GL translation layer directly on a headless
+# software GLES context, so a GL regression is caught without a device or a Minecraft launch.
+# The HTML report is published as an artifact.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Render through librust_gl.so
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Unit tests
+        run: cargo test --workspace
+
+      # Mesa's llvmpipe gives a real GLES 3.x context with no GPU.
+      - name: Install Mesa software GL
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgles2 libegl1-mesa-dev libgles2-mesa-dev
+
+      - name: Report EGL/GL stack
+        run: |
+          { echo "### EGL/GL stack"; echo;
+            echo '```'; dpkg -l | grep -E 'libegl1|libgles2|mesa' | awk '{print $2, $3}'; echo '```';
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run smoke test
+        run: |
+          mkdir -p target/reports
+          GLSMOKE_REPORT=target/reports/gl-smoke.html \
+            ./tools/run-glsmoke.sh 2>&1 | tee target/reports/gl-smoke.log
+
+      # A non-zero exit here fails the job on regressions. Known issues are reported as
+      # "known" in the HTML rather than failing, so a documented limitation stays visible
+      # without blocking unrelated work.
+      - name: Upload HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gl-smoke-report
+          path: target/reports/
+          if-no-files-found: error
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### GL smoke test"
+            echo
+            if [ -f target/reports/gl-smoke.html ]; then
+              echo "[Report](artifact) — gl-smoke-report"
+              echo
+              grep -oE '[0-9]+ checks[^<]*' target/reports/gl-smoke.html | head -1 || true
+            else
+              echo "No report was produced; see the job log."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

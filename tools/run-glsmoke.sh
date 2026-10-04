@@ -22,8 +22,11 @@ command -v cc >/dev/null || { echo "cc is required"; exit 1; }
 cc -O1 -o "$OUT" tools/glsmoke.c -lEGL -ldl -lm
 
 # llvmpipe: there is no GPU here, and a real one is not needed for correctness checks.
-LIBGL_ALWAYS_SOFTWARE=1 "$OUT" "$SO"
+REPORT="${GLSMOKE_REPORT:-$PWD/target/reports/gl-smoke.html}"
+mkdir -p "$(dirname "$REPORT")"
+LIBGL_ALWAYS_SOFTWARE=1 "$OUT" "$SO" "$REPORT"
 status=$?
+[ -f "$REPORT" ] && echo "wrote $REPORT"
 
 if [ $status -eq 77 ]; then
     echo "no GL driver available; nothing was tested"

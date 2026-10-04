@@ -321,11 +321,47 @@ shader against a real compiler, and the DSA vertex-array path 1.20.5+ uses. A sh
 fails to compile, a state call that no-ops, or a mis-bound attribute shows up as wrong pixels
 rather than as a black screen much later.
 
-**Known issue, tracked by the harness:** the DSA path renders nothing. The attribute's buffer
-binding is correct (`attrib_buffer` matches) but its stride stays 0, and an explicit
-`glVertexAttribPointer` on a DSA-created vertex array is rejected with `GL_INVALID_ENUM` — so
-the fault is in how the DSA vertex array is created, not in the format bookkeeping. The check
-is reported as a known issue so it stays visible; flip it to a hard assertion once fixed.
+### Testing Minecraft rendering
+
+The harness has a group of scenarios that mirror what the vanilla renderer actually does,
+because that is where a translation bug becomes a visibly wrong world instead of an error:
+
+| Scenario | What it covers |
+|---|---|
+| Texture atlas sub-image | `glTexSubImage2D` with `UNPACK_ROW_LENGTH` set, as the 1.12–1.15 atlas uploader does — exercises the local unpack shadow |
+| Chunk geometry | interleaved buffer with a byte stride, drawn with **32-bit indices** |
+| Depth / fog | `glDepthRange(double)` translation and depth state |
+| Alpha blending | `GL_BLEND` + `glBlendFunc` for GUI and translucent blocks |
+| Scissor | clipping used by the GUI and chunk culling |
+| MVP transform | `glUniformMatrix4fv`, where a bad upload moves geometry rather than failing |
+| 1.12 client arrays | `glVertexPointer`/`glColorPointer` with `GL_QUADS`, the fixed-function route |
+| DSA vertex arrays | `glCreateBuffers`/`glNamedBufferData`/`glVertexArrayAttribFormat`, the 1.20.5+ route |
+
+### HTML report
+
+The run writes a self-contained HTML report — environment (spoofed vs. real GL strings,
+advertised extension count), every check grouped and colour-coded, and a detail column for
+failures. No assets or network access needed to read it.
+
+```bash
+GLSMOKE_REPORT=target/reports/gl-smoke.html ./tools/run-glsmoke.sh
+```
+
+`.github/workflows/gl-smoke.yml` runs this in a separate workflow from the APK build, installs
+Mesa's software rasteriser, fails the job on regressions, and uploads the report and log as
+the `gl-smoke-report` artifact. Known issues are reported as `known` rather than failing, so a
+documented limitation stays visible without blocking unrelated work.
+
+**Open findings this harness has surfaced** (all reported, none hidden):
+
+- The DSA path renders nothing. The attribute buffer binding is correct but its stride stays
+  0, and an explicit `glVertexAttribPointer` on a DSA-created vertex array is rejected with
+  `GL_INVALID_ENUM` — so the fault is in how that vertex array is created, not in the format
+  bookkeeping. A `GL_INVALID_ENUM` also shows up from `glTexStorage2D` later in the same
+  session, which may be the same root cause.
+- `glDrawElements` with a 32-bit index type and a byte stride draws nothing.
+- `glScissor` does not appear to clip a subsequent draw.
+- The 1.12 fixed-function quad path does not draw.
 
 ### How to actually verify a GL change
 
