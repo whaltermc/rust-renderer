@@ -24,10 +24,9 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Set up Android NDK
-        uses: android-actions/setup-ndk@v3
-        with:
-          ndk-version: "27.2.12479018"
+      - name: Install Android NDK
+        run: |
+          sdkmanager "ndk;27.2.12479018"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -38,32 +37,28 @@ jobs:
         run: cargo install cargo-ndk --locked
 
       - name: Build Rust renderer
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.2.12479018
         run: |
           cargo test -p renderer-core
-
           cargo ndk \
             -t arm64-v8a \
             build \
             --release \
             -p gl-compat
 
-      - name: Install renderer library
+      - name: Copy renderer library
         run: |
           mkdir -p android/app/src/main/jniLibs/arm64-v8a
-
           cp \
             target/aarch64-linux-android/release/librust_gl.so \
             android/app/src/main/jniLibs/arm64-v8a/librust_gl.so
 
-          ls -lh android/app/src/main/jniLibs/arm64-v8a/librust_gl.so
-
-      - name: Make Gradle executable
-        working-directory: android
-        run: chmod +x gradlew
-
       - name: Build APK
         working-directory: android
-        run: ./gradlew :app:assembleDebug --stacktrace
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
