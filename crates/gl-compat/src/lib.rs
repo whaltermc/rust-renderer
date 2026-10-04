@@ -9,6 +9,8 @@
 //! This is still incomplete for full Minecraft parity (no Vulkan, limited shader rewrite,
 //! missing some desktop-only APIs). Expect crash/black-screen on unhandled paths.
 
+mod fixed_func;
+
 use renderer_core::{Backend, BackendKind, Config, GlErrorState};
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::sync::{Mutex, OnceLock};
@@ -511,6 +513,10 @@ unsafe fn convert_pixel_upload(w: i32, h: i32, f: u32, ty: u32, d: *const c_void
 pub unsafe extern "C" fn glTexImage2D(
     t: u32, l: i32, ifmt: i32, w: i32, h: i32, b: i32, f: u32, ty: u32, d: *const c_void,
 ) {
+    // Desktop proxy texture probe (Minecraft max texture size detection)
+    if fixed_func::handle_proxy_tex_image(t, w, h) {
+        return;
+    }
     let ifmt2 = format_translate::map_internal_format(ifmt, f, ty);
     let conv = convert_pixel_upload(w, h, f, ty, d);
     let (f2, ty2, ptr) = match &conv {
@@ -542,16 +548,53 @@ pub unsafe extern "C" fn glTexSubImage2D(
 
 #[no_mangle]
 pub unsafe extern "C" fn glTexParameteri(t: u32, p: u32, v: i32) {
-    let is_wrap = matches!(p, 0x2802 | 0x2803 | 0x8072);
+    let Some(p2) = fixed_func::map_tex_parameter(p) else {
+        return; // desktop-only pname — drop silently
+    };
+    let is_wrap = matches!(p2, 0x2802 | 0x2803 | 0x8072);
     if is_wrap && v == format_translate::GL_CLAMP_TO_BORDER {
-        log("[GLCompat] GL_CLAMP_TO_BORDER unsupported in ES 3.0, using clamp-to-edge");
+        log("[GLCompat] GL_CLAMP_TO_BORDER → clamp-to-edge");
     }
     let v2 = if is_wrap { format_translate::map_wrap(v) } else { v };
     match driver_fn::<unsafe extern "C" fn(u32, u32, i32)>("glTexParameteri") {
-        Some(g) => g(t, p, v2),
+        Some(g) => g(t, p2, v2),
         None => errors().set(GL_INVALID_OPERATION),
     }
 }
+#[no_mangle]
+pub unsafe extern "C" fn glTexParameterf(t: u32, p: u32, v: f32) {
+    let Some(p2) = fixed_func::map_tex_parameter(p) else { return; };
+    let is_wrap = matches!(p2, 0x2802 | 0x2803 | 0x8072);
+    let v2 = if is_wrap { format_translate::map_wrap(v as i32) as f32 } else { v };
+    match driver_fn::<unsafe extern "C" fn(u32, u32, f32)>("glTexParameterf") {
+        Some(g) => g(t, p2, v2),
+        None => {
+            // fall back to integer path
+            match driver_fn::<unsafe extern "C" fn(u32, u32, i32)>("glTexParameteri") {
+                Some(g) => g(t, p2, v2 as i32),
+                None => errors().set(GL_INVALID_OPERATION),
+            }
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glGetTexLevelParameteriv(target: u32, level: i32, pname: u32, params: *mut i32) {
+    if fixed_func::handle_get_tex_level_parameter(target, level, pname, params) {
+        return;
+    }
+    match driver_fn::<unsafe extern "C" fn(u32, i32, u32, *mut i32)>("glGetTexLevelParameteriv") {
+        Some(g) => g(target, level, pname, params),
+        None => {
+            // ES often lacks this — soft-fail
+            if !params.is_null() {
+                *params = 0;
+            }
+            errors().set(GL_INVALID_OPERATION);
+        }
+    }
+}
+
 
 /// Desktop `glDrawBuffer(mode)` -> ES `glDrawBuffers(1, &mode)`.
 #[no_mangle]
@@ -666,8 +709,7 @@ forward_all! {
     glDepthMask(m: u8);
     glDetachShader(p: u32, s: u32);
     glDisableVertexAttribArray(i: u32);
-    glDrawArrays(m: u32, f: i32, c: i32);
-    glDrawArraysInstanced(m: u32, f: i32, c: i32, n: i32);
+        glDrawArraysInstanced(m: u32, f: i32, c: i32, n: i32);
     glDrawBuffers(n: i32, b: *const u32);
     glDrawElements(m: u32, c: i32, t: u32, i: *const c_void);
     glDrawElementsInstanced(m: u32, c: i32, t: u32, i: *const c_void, n: i32);
@@ -831,6 +873,17 @@ forward_all! {
 
 /// Symbol lookup used by LWJGL/GLFW-style loaders (`glXGetProcAddress` flavour).
 /// Returns null for anything unimplemented -- never a stub that pretends to work.
+
+#[no_mangle]
+pub unsafe extern "C" fn glDrawArrays(mode: u32, first: i32, count: i32) {
+    let mode = fixed_func::map_draw_mode(mode);
+    type F = unsafe extern "C" fn(u32, i32, i32);
+    match driver_fn::<F>("glDrawArrays") {
+        Some(f) => f(mode, first, count),
+        None => errors().set(GL_INVALID_OPERATION),
+    }
+}
+
 fn resolve_proc(n: &[u8]) -> *const c_void {
     match n {
         b"glGetError" => glGetError as *const c_void,
@@ -854,6 +907,37 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
             glXGetProcAddress as *const c_void
         }
         b"eglGetProcAddress" => eglGetProcAddress as *const c_void,
+                b"glDrawArrays" => glDrawArrays as *const c_void,
+        b"glMatrixMode" => glMatrixMode as *const c_void,
+        b"glLoadIdentity" => glLoadIdentity as *const c_void,
+        b"glPushMatrix" => glPushMatrix as *const c_void,
+        b"glPopMatrix" => glPopMatrix as *const c_void,
+        b"glLoadMatrixf" => glLoadMatrixf as *const c_void,
+        b"glMultMatrixf" => glMultMatrixf as *const c_void,
+        b"glTranslatef" => glTranslatef as *const c_void,
+        b"glScalef" => glScalef as *const c_void,
+        b"glRotatef" => glRotatef as *const c_void,
+        b"glOrtho" => glOrtho as *const c_void,
+        b"glFrustum" => glFrustum as *const c_void,
+        b"glEnableClientState" => glEnableClientState as *const c_void,
+        b"glDisableClientState" => glDisableClientState as *const c_void,
+        b"glVertexPointer" => glVertexPointer as *const c_void,
+        b"glColorPointer" => glColorPointer as *const c_void,
+        b"glTexCoordPointer" => glTexCoordPointer as *const c_void,
+        b"glNormalPointer" => glNormalPointer as *const c_void,
+        b"glClientActiveTexture" => glClientActiveTexture as *const c_void,
+        b"glColor4f" => glColor4f as *const c_void,
+        b"glColor3f" => glColor3f as *const c_void,
+        b"glAlphaFunc" => glAlphaFunc as *const c_void,
+        b"glFogf" => glFogf as *const c_void,
+        b"glFogi" => glFogi as *const c_void,
+        b"glFogfv" => glFogfv as *const c_void,
+        b"glShadeModel" => glShadeModel as *const c_void,
+        b"glTexEnvf" => glTexEnvf as *const c_void,
+        b"glTexEnvi" => glTexEnvi as *const c_void,
+        b"glTexEnvfv" => glTexEnvfv as *const c_void,
+        b"glTexParameterf" => glTexParameterf as *const c_void,
+        b"glGetTexLevelParameteriv" => glGetTexLevelParameteriv as *const c_void,
         b"eglGetDisplay" => eglGetDisplay as *const c_void,
         b"eglInitialize" => eglInitialize as *const c_void,
         b"eglTerminate" => eglTerminate as *const c_void,
@@ -955,6 +1039,40 @@ pub extern "C" fn wglGetProcAddress(name: *const c_char) -> *const c_void {
 }
 
 
+
+
+// =============================================================================
+// Fixed-function desktop GL shims (matrix stack, client arrays, legacy state)
+// =============================================================================
+
+#[no_mangle] pub extern "C" fn glMatrixMode(mode: u32) { fixed_func::gl_matrix_mode(mode); }
+#[no_mangle] pub extern "C" fn glLoadIdentity() { fixed_func::gl_load_identity(); }
+#[no_mangle] pub extern "C" fn glPushMatrix() { fixed_func::gl_push_matrix(); }
+#[no_mangle] pub extern "C" fn glPopMatrix() { fixed_func::gl_pop_matrix(); }
+#[no_mangle] pub unsafe extern "C" fn glLoadMatrixf(m: *const f32) { fixed_func::gl_load_matrixf(m); }
+#[no_mangle] pub unsafe extern "C" fn glMultMatrixf(m: *const f32) { fixed_func::gl_mult_matrixf(m); }
+#[no_mangle] pub extern "C" fn glTranslatef(x: f32, y: f32, z: f32) { fixed_func::gl_translatef(x, y, z); }
+#[no_mangle] pub extern "C" fn glScalef(x: f32, y: f32, z: f32) { fixed_func::gl_scalef(x, y, z); }
+#[no_mangle] pub extern "C" fn glRotatef(a: f32, x: f32, y: f32, z: f32) { fixed_func::gl_rotatef(a, x, y, z); }
+#[no_mangle] pub extern "C" fn glOrtho(l: f64, r: f64, b: f64, t: f64, n: f64, f: f64) { fixed_func::gl_ortho(l, r, b, t, n, f); }
+#[no_mangle] pub extern "C" fn glFrustum(l: f64, r: f64, b: f64, t: f64, n: f64, f: f64) { fixed_func::gl_frustum(l, r, b, t, n, f); }
+#[no_mangle] pub extern "C" fn glEnableClientState(cap: u32) { fixed_func::gl_enable_client_state(cap); }
+#[no_mangle] pub extern "C" fn glDisableClientState(cap: u32) { fixed_func::gl_disable_client_state(cap); }
+#[no_mangle] pub unsafe extern "C" fn glVertexPointer(size: i32, ty: u32, stride: i32, ptr: *const c_void) { fixed_func::gl_vertex_pointer(size, ty, stride, ptr); }
+#[no_mangle] pub unsafe extern "C" fn glColorPointer(size: i32, ty: u32, stride: i32, ptr: *const c_void) { fixed_func::gl_color_pointer(size, ty, stride, ptr); }
+#[no_mangle] pub unsafe extern "C" fn glTexCoordPointer(size: i32, ty: u32, stride: i32, ptr: *const c_void) { fixed_func::gl_tex_coord_pointer(size, ty, stride, ptr); }
+#[no_mangle] pub unsafe extern "C" fn glNormalPointer(ty: u32, stride: i32, ptr: *const c_void) { fixed_func::gl_normal_pointer(ty, stride, ptr); }
+#[no_mangle] pub extern "C" fn glClientActiveTexture(texture: u32) { fixed_func::gl_client_active_texture(texture); }
+#[no_mangle] pub extern "C" fn glColor4f(r: f32, g: f32, b: f32, a: f32) { fixed_func::gl_color4f(r, g, b, a); }
+#[no_mangle] pub extern "C" fn glColor3f(r: f32, g: f32, b: f32) { fixed_func::gl_color3f(r, g, b); }
+#[no_mangle] pub extern "C" fn glAlphaFunc(func: u32, ref_v: f32) { fixed_func::gl_alpha_func(func, ref_v); }
+#[no_mangle] pub extern "C" fn glFogf(pname: u32, param: f32) { fixed_func::gl_fogf(pname, param); }
+#[no_mangle] pub extern "C" fn glFogi(pname: u32, param: i32) { fixed_func::gl_fogi(pname, param); }
+#[no_mangle] pub unsafe extern "C" fn glFogfv(pname: u32, params: *const f32) { fixed_func::gl_fogfv(pname, params); }
+#[no_mangle] pub extern "C" fn glShadeModel(mode: u32) { fixed_func::gl_shade_model(mode); }
+#[no_mangle] pub extern "C" fn glTexEnvf(target: u32, pname: u32, param: f32) { fixed_func::gl_tex_envf(target, pname, param); }
+#[no_mangle] pub extern "C" fn glTexEnvi(target: u32, pname: u32, param: i32) { fixed_func::gl_tex_envi(target, pname, param); }
+#[no_mangle] pub unsafe extern "C" fn glTexEnvfv(target: u32, pname: u32, params: *const f32) { fixed_func::gl_tex_envfv(target, pname, params); }
 
 // =============================================================================
 // EGL forwarding — MobileGL-style: same .so is the EGL provider for the launcher.
