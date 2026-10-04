@@ -1,8 +1,13 @@
 //! C-ABI OpenGL surface loaded by the launcher as the "GL library".
 //!
-//! Phase 1 scope: a handful of core entry points over the GLES backend with OpenGL error
-//! semantics. It reports the driver's REAL (GLES) strings. It does NOT translate desktop GL,
-//! so Minecraft Java will not run on this yet (spec phases 3-4).
+//! GLES 3.0 passthrough with desktop-GL compatibility shims:
+//! - shader source rewriting (desktop GLSL → GLSL ES)
+//! - BGRA upload swizzle, clamp-to-border → clamp-to-edge
+//! - glMapBuffer → glMapBufferRange, glDrawBuffer → glDrawBuffers, glClearDepth → f
+//! - optional GL 3.2 version spoof (`RENDERER_SPOOF_GL=1`, on by default via plugin env)
+//!
+//! This is still incomplete for full Minecraft parity (no Vulkan, limited shader rewrite,
+//! missing some desktop-only APIs). Expect crash/black-screen on unhandled paths.
 
 use renderer_core::{Backend, BackendKind, Config, GlErrorState};
 use std::ffi::{c_char, c_void, CStr, CString};
@@ -150,9 +155,12 @@ static SPOOF_GLSL: &[u8] = b"1.50\0";
 fn spoof_gl() -> bool {
     static S: OnceLock<bool> = OnceLock::new();
     *S.get_or_init(|| {
-        let on = std::env::var("RENDERER_SPOOF_GL").map(|v| v == "1").unwrap_or(false);
+        // Default ON so Minecraft's GL version checks pass. Set RENDERER_SPOOF_GL=0 to disable.
+        let on = std::env::var("RENDERER_SPOOF_GL")
+            .map(|v| v != "0")
+            .unwrap_or(true);
         if on {
-            log("[GLCompat] WARNING: RENDERER_SPOOF_GL=1, advertising GL 3.2 without full support");
+            log("[GLCompat] RENDERER_SPOOF_GL enabled: advertising OpenGL 3.2 (passthrough GLES)");
         }
         on
     })
@@ -531,17 +539,110 @@ forward_all! {
     glVertexAttribIPointer(i: u32, s: i32, t: u32, st: i32, p: *const c_void);
     glVertexAttribDivisor(i: u32, d: u32);
     glUnmapBuffer(t: u32) -> u8;
+    // --- additional ES 3.0 / desktop-common entry points ---
+    glMapBufferRange(t: u32, o: isize, l: isize, a: u32) -> *mut c_void;
+    glFlushMappedBufferRange(t: u32, o: isize, l: isize);
+    glCopyBufferSubData(r: u32, w: u32, ro: isize, wo: isize, s: isize);
+    glGetBufferParameteriv(t: u32, n: u32, v: *mut i32);
+    glGetBufferParameteri64v(t: u32, n: u32, v: *mut i64);
+    glTexStorage2D(t: u32, levels: i32, ifmt: u32, w: i32, h: i32);
+    glTexStorage3D(t: u32, levels: i32, ifmt: u32, w: i32, h: i32, d: i32);
+    glTexSubImage3D(t: u32, l: i32, x: i32, y: i32, z: i32, w: i32, h: i32, d: i32, f: u32, ty: u32, data: *const c_void);
+    glCompressedTexImage2D(t: u32, l: i32, ifmt: u32, w: i32, h: i32, b: i32, size: i32, data: *const c_void);
+    glCompressedTexSubImage2D(t: u32, l: i32, x: i32, y: i32, w: i32, h: i32, f: u32, size: i32, data: *const c_void);
+    glCopyTexImage2D(t: u32, l: i32, ifmt: u32, x: i32, y: i32, w: i32, h: i32, b: i32);
+    glCopyTexSubImage2D(t: u32, l: i32, x: i32, y: i32, sx: i32, sy: i32, w: i32, h: i32);
+    glGetTexParameteriv(t: u32, n: u32, v: *mut i32);
+    glGetTexParameterfv(t: u32, n: u32, v: *mut f32);
+    glGetActiveUniform(p: u32, i: u32, buf: i32, len: *mut i32, size: *mut i32, ty: *mut u32, name: *mut c_char);
+    glGetActiveAttrib(p: u32, i: u32, buf: i32, len: *mut i32, size: *mut i32, ty: *mut u32, name: *mut c_char);
+    glGetAttachedShaders(p: u32, max: i32, count: *mut i32, shaders: *mut u32);
+    glGetFramebufferAttachmentParameteriv(t: u32, a: u32, n: u32, v: *mut i32);
+    glGetRenderbufferParameteriv(t: u32, n: u32, v: *mut i32);
+    glGetShaderSource(s: u32, buf: i32, len: *mut i32, src: *mut c_char);
+    glGetVertexAttribiv(i: u32, n: u32, v: *mut i32);
+    glGetVertexAttribfv(i: u32, n: u32, v: *mut f32);
+    glGetVertexAttribPointerv(i: u32, n: u32, p: *mut *mut c_void);
+    glIsBuffer(b: u32) -> u8;
+    glIsFramebuffer(f: u32) -> u8;
+    glIsProgram(p: u32) -> u8;
+    glIsRenderbuffer(r: u32) -> u8;
+    glIsShader(s: u32) -> u8;
+    glIsTexture(t: u32) -> u8;
+    glIsVertexArray(a: u32) -> u8;
+    glLineWidth(w: f32);
+    glSampleCoverage(v: f32, invert: u8);
+    glStencilFuncSeparate(face: u32, f: u32, r: i32, m: u32);
+    glStencilMaskSeparate(face: u32, m: u32);
+    glStencilOpSeparate(face: u32, a: u32, b: u32, c: u32);
+    glHint(t: u32, m: u32);
+    glInvalidateFramebuffer(t: u32, n: i32, attachments: *const u32);
+    glInvalidateSubFramebuffer(t: u32, n: i32, attachments: *const u32, x: i32, y: i32, w: i32, h: i32);
+    glRenderbufferStorageMultisample(t: u32, samples: i32, ifmt: u32, w: i32, h: i32);
+    glGetInteger64v(p: u32, d: *mut i64);
+    glGetIntegeri_v(p: u32, i: u32, d: *mut i32);
+    glGetInteger64i_v(p: u32, i: u32, d: *mut i64);
+    glVertexAttrib1f(i: u32, x: f32);
+    glVertexAttrib2f(i: u32, x: f32, y: f32);
+    glVertexAttrib3f(i: u32, x: f32, y: f32, z: f32);
+    glVertexAttrib4f(i: u32, x: f32, y: f32, z: f32, w: f32);
+    glVertexAttrib4Nub(i: u32, x: u8, y: u8, z: u8, w: u8);
+    glBindSampler(unit: u32, sampler: u32);
+    glGenSamplers(n: i32, s: *mut u32);
+    glDeleteSamplers(n: i32, s: *const u32);
+    glIsSampler(s: u32) -> u8;
+    glSamplerParameteri(s: u32, p: u32, v: i32);
+    glSamplerParameterf(s: u32, p: u32, v: f32);
+    glGetSamplerParameteriv(s: u32, p: u32, v: *mut i32);
+    glGetSamplerParameterfv(s: u32, p: u32, v: *mut f32);
+    glFenceSync(c: u32, f: u32) -> *mut c_void;
+    glIsSync(s: *mut c_void) -> u8;
+    glDeleteSync(s: *mut c_void);
+    glClientWaitSync(s: *mut c_void, f: u32, timeout: u64) -> u32;
+    glWaitSync(s: *mut c_void, f: u32, timeout: u64);
+    glGetSynciv(s: *mut c_void, p: u32, buf: i32, len: *mut i32, v: *mut i32);
+    glDrawRangeElements(m: u32, start: u32, end: u32, c: i32, t: u32, i: *const c_void);
+    glClearDepthf(d: f32);
+    glDepthRangef(n: f32, f: f32);
+    glGetProgramBinary(p: u32, buf: i32, len: *mut i32, format: *mut u32, binary: *mut c_void);
+    glProgramBinary(p: u32, format: u32, binary: *const c_void, len: i32);
+    glProgramParameteri(p: u32, n: u32, v: i32);
+    glValidateProgram(p: u32);
+    glGetUniformfv(p: u32, loc: i32, v: *mut f32);
+    glGetUniformiv(p: u32, loc: i32, v: *mut i32);
+    glTransformFeedbackVaryings(p: u32, count: i32, varyings: *const *const c_char, bufferMode: u32);
+    glBeginTransformFeedback(mode: u32);
+    glEndTransformFeedback();
+    glBindTransformFeedback(t: u32, id: u32);
+    glGenTransformFeedbacks(n: i32, ids: *mut u32);
+    glDeleteTransformFeedbacks(n: i32, ids: *const u32);
+    glIsTransformFeedback(id: u32) -> u8;
+    glPauseTransformFeedback();
+    glResumeTransformFeedback();
+    glVertexAttribI4i(i: u32, x: i32, y: i32, z: i32, w: i32);
+    glVertexAttribI4ui(i: u32, x: u32, y: u32, z: u32, w: u32);
+    glUniform1uiv(l: i32, n: i32, v: *const u32);
+    glUniform2uiv(l: i32, n: i32, v: *const u32);
+    glUniform3uiv(l: i32, n: i32, v: *const u32);
+    glUniform4uiv(l: i32, n: i32, v: *const u32);
+    glUniform1ui(l: i32, a: u32);
+    glUniform2ui(l: i32, a: u32, b: u32);
+    glUniform3ui(l: i32, a: u32, b: u32, c: u32);
+    glUniform4ui(l: i32, a: u32, b: u32, c: u32, d: u32);
+    glGetActiveUniformBlockiv(p: u32, i: u32, n: u32, v: *mut i32);
+    glGetActiveUniformBlockName(p: u32, i: u32, buf: i32, len: *mut i32, name: *mut c_char);
+    glGetUniformIndices(p: u32, count: i32, names: *const *const c_char, indices: *mut u32);
+    glGetActiveUniformsiv(p: u32, count: i32, indices: *const u32, n: u32, params: *mut i32);
+    glDrawArraysInstancedBaseInstance(m: u32, f: i32, c: i32, n: i32, base: u32);
+    glDrawElementsInstancedBaseVertex(m: u32, c: i32, t: u32, i: *const c_void, n: i32, base: i32);
+    glDrawElementsBaseVertex(m: u32, c: i32, t: u32, i: *const c_void, base: i32);
+    glBindFragDataLocation(p: u32, color: u32, name: *const c_char);
+    glGetFragDataLocation(p: u32, name: *const c_char) -> i32;
 }
 
 /// Symbol lookup used by LWJGL/GLFW-style loaders (`glXGetProcAddress` flavour).
 /// Returns null for anything unimplemented -- never a stub that pretends to work.
-#[no_mangle]
-pub extern "C" fn glXGetProcAddress(name: *const c_char) -> *const c_void {
-    if name.is_null() {
-        return std::ptr::null();
-    }
-    // SAFETY: caller passes a NUL-terminated C string per the GLX contract; null checked above.
-    let n = unsafe { CStr::from_ptr(name) }.to_bytes();
+fn resolve_proc(n: &[u8]) -> *const c_void {
     match n {
         b"glGetError" => glGetError as *const c_void,
         b"glClearColor" => glClearColor as *const c_void,
@@ -560,18 +661,60 @@ pub extern "C" fn glXGetProcAddress(name: *const c_char) -> *const c_void {
         b"glDrawBuffer" => glDrawBuffer as *const c_void,
         b"glMapBuffer" => glMapBuffer as *const c_void,
         b"glPolygonMode" => glPolygonMode as *const c_void,
-        _ if !forwarded(n).is_null() => forwarded(n),
+        b"glXGetProcAddress" | b"glXGetProcAddressARB" | b"eglGetProcAddress" | b"glGetProcAddress" => {
+            glXGetProcAddress as *const c_void
+        }
         _ => {
-            log(&format!(
-                "[GLCompat] Unsupported operation: {}\n  Reason: not implemented in this phase\n  Fallback: none",
-                String::from_utf8_lossy(n)
-            ));
-            std::ptr::null()
+            let f = forwarded(n);
+            if !f.is_null() {
+                f
+            } else {
+                // Fall through to the driver so GLES extensions still resolve.
+                match backend() {
+                    Some(be) => {
+                        let name = String::from_utf8_lossy(n);
+                        let p = be.proc_address(&name);
+                        if p.is_null() {
+                            log(&format!(
+                                "[GLCompat] Missing entry point: {name}"
+                            ));
+                        }
+                        p
+                    }
+                    None => {
+                        log(&format!(
+                            "[GLCompat] Missing entry point (no backend): {}",
+                            String::from_utf8_lossy(n)
+                        ));
+                        std::ptr::null()
+                    }
+                }
+            }
         }
     }
 }
 
 #[no_mangle]
+pub extern "C" fn glXGetProcAddress(name: *const c_char) -> *const c_void {
+    if name.is_null() {
+        return std::ptr::null();
+    }
+    // SAFETY: caller passes a NUL-terminated C string per the GLX contract; null checked above.
+    let n = unsafe { CStr::from_ptr(name) }.to_bytes();
+    resolve_proc(n)
+}
+
+#[no_mangle]
 pub extern "C" fn glXGetProcAddressARB(name: *const c_char) -> *const c_void {
+    glXGetProcAddress(name)
+}
+
+#[no_mangle]
+pub extern "C" fn eglGetProcAddress(name: *const c_char) -> *const c_void {
+    glXGetProcAddress(name)
+}
+
+#[no_mangle]
+pub extern "C" fn glGetProcAddress(name: *const c_char) -> *const c_void {
     glXGetProcAddress(name)
 }

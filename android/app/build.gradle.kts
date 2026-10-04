@@ -39,11 +39,13 @@ val pluginRendererConfig = buildJsonValue {
 
         env = buildEnvs {
             normal("LIBGL_ES", "3")
+            // Advertise desktop GL 3.2 so Minecraft version checks pass (passthrough GLES).
+            normal("RENDERER_SPOOF_GL", "1")
 
             selectable(
                 key = "RENDERER_BACKEND",
                 items = RendererConfig.EnvItems(
-                    defaultValue = "auto",
+                    defaultValue = "gles",
                     values = listOf(
                         "gles",
                         "vulkan"
