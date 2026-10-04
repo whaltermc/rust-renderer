@@ -177,7 +177,7 @@ pub unsafe fn try_draw_arrays(mode: u32, first: i32, count: i32) -> bool {
         None => return false,
     };
     type GetInt = unsafe extern "C" fn(u32, *mut i32);
-    let get_int = match crate::driver_fn::<GetInt>("glGetIntegerv") {
+    let get_int = match crate::driver_fn_cached::<GetInt>("glGetIntegerv") {
         Some(f) => f,
         None => return false,
     };
@@ -219,7 +219,7 @@ pub unsafe fn try_draw_arrays(mode: u32, first: i32, count: i32) -> bool {
         return false;
     }
     type Attrib4f = unsafe extern "C" fn(u32, f32, f32, f32, f32);
-    let attrib4f = crate::driver_fn::<Attrib4f>("glVertexAttrib4f");
+    let attrib4f = crate::driver_fn_cached::<Attrib4f>("glVertexAttrib4f");
 
     let has_color = setup_attrib(be, 1, &col, gpu.vbo[1], first, count, true);
     if !has_color {

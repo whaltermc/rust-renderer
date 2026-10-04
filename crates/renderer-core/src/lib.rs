@@ -6,18 +6,36 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BackendKind {
+    /// Try each backend in order and use the first that initializes.
     Auto,
+    /// GLES 3.x passthrough. This is what serves the game's desktop-GL entry points.
     Gles,
+    /// Vulkan only.
     Vulkan,
+    /// GLES for the GL API surface the game draws through, Vulkan for the work this
+    /// renderer owns itself. Falls back per-stage, never per-frame, so no frame is ever
+    /// split across two APIs.
+    Hybrid,
 }
 
 impl BackendKind {
     pub fn parse(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "auto" => Some(Self::Auto),
-            "gles" => Some(Self::Gles),
-            "vulkan" => Some(Self::Vulkan),
+            "gles" | "es" | "opengles" | "opengles3" => Some(Self::Gles),
+            "vulkan" | "vk" | "vulkan1" => Some(Self::Vulkan),
+            "hybrid" | "vk_es" | "vulkan+gles" | "gles+vulkan" => Some(Self::Hybrid),
             _ => None,
+        }
+    }
+
+    /// Stable lowercase name, as used by the launcher's renderer options.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Gles => "gles",
+            Self::Vulkan => "vulkan",
+            Self::Hybrid => "hybrid",
         }
     }
 }
@@ -30,15 +48,30 @@ pub struct Config {
 }
 
 impl Config {
-    /// Reads `RENDERER_BACKEND` and `RENDERER_DEBUG`. Unknown values fall back to defaults.
+    /// Reads the backend selection and debug flag from the environment.
     pub fn from_env() -> Self {
-        let backend = std::env::var("RENDERER_BACKEND")
-            .ok()
-            .and_then(|v| BackendKind::parse(&v))
-            .unwrap_or(BackendKind::Auto);
+        let select = std::env::var("RENDERER_BACKEND_SELECT").ok();
+        let base = std::env::var("RENDERER_BACKEND").ok();
         let debug = std::env::var("RENDERER_DEBUG").map(|v| v == "1").unwrap_or(false);
-        Self { backend, debug }
+        Self {
+            backend: select_backend(select.as_deref(), base.as_deref()),
+            debug,
+        }
     }
+}
+
+/// Chooses the backend from the two environment variables the plugin sets.
+///
+/// `select` (`RENDERER_BACKEND_SELECT`) wins over `base` (`RENDERER_BACKEND`): the plugin
+/// ships the latter as a fixed default while the launcher sets the former to whatever the
+/// user picked in the renderer options. Without this precedence the picker is inert.
+/// An unparseable value is ignored rather than fatal, so a stale or hand-edited value
+/// cannot stop the game from starting.
+pub fn select_backend(select: Option<&str>, base: Option<&str>) -> BackendKind {
+    select
+        .and_then(BackendKind::parse)
+        .or_else(|| base.and_then(BackendKind::parse))
+        .unwrap_or(BackendKind::Auto)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -129,6 +162,15 @@ pub trait Backend: Send + Sync {
     fn device_info(&self) -> &DeviceInfo;
     fn capabilities(&self) -> &Capabilities;
 
+    /// Whether this backend can actually render frames.
+    ///
+    /// A backend may initialize (Vulkan present, device enumerated) without being able to
+    /// draw: Vulkan detection alone is not a renderer. Selection uses this to fall back to
+    /// a backend that can draw instead of reporting success for one that cannot.
+    fn can_render(&self) -> bool {
+        true
+    }
+
     // --- frame / state ---
     fn clear_color(&self, r: f32, g: f32, b: f32, a: f32);
     fn clear(&self, mask: u32);
@@ -207,15 +249,21 @@ pub trait Backend: Send + Sync {
 }
 
 /// OpenGL-style sticky error state (spec section 7). First error wins until read.
+///
+/// Relaxed ordering is enough and matters here: the game calls `glGetError` constantly, and
+/// this is read-modify-written on every call. The only requirement is that the flag is not
+/// lost between threads, which Release/Acquire provides; `SeqCst` bought nothing.
 #[derive(Default)]
 pub struct GlErrorState(AtomicU32);
 
 impl GlErrorState {
     pub fn set(&self, e: u32) {
-        let _ = self.0.compare_exchange(0, e, Ordering::SeqCst, Ordering::SeqCst);
+        let _ = self
+            .0
+            .compare_exchange(0, e, Ordering::Release, Ordering::Relaxed);
     }
     pub fn take(&self) -> u32 {
-        self.0.swap(0, Ordering::SeqCst)
+        self.0.swap(0, Ordering::Acquire)
     }
 }
 
@@ -236,6 +284,56 @@ mod tests {
     fn parses_backend() {
         assert_eq!(BackendKind::parse(" Vulkan "), Some(BackendKind::Vulkan));
         assert_eq!(BackendKind::parse("metal"), None);
+    }
+
+    #[test]
+    fn parses_backend_aliases_used_by_the_launcher() {
+        // The launcher sends the exact value listed in the renderer options; the aliases
+        // keep hand-edited env files working.
+        assert_eq!(BackendKind::parse("gles"), Some(BackendKind::Gles));
+        assert_eq!(BackendKind::parse("es"), Some(BackendKind::Gles));
+        assert_eq!(BackendKind::parse("vk"), Some(BackendKind::Vulkan));
+        assert_eq!(BackendKind::parse("hybrid"), Some(BackendKind::Hybrid));
+        assert_eq!(BackendKind::parse("HYBRID"), Some(BackendKind::Hybrid));
+        assert_eq!(BackendKind::parse("vk_es"), Some(BackendKind::Hybrid));
+        assert_eq!(BackendKind::parse("zink"), None);
+    }
+
+    #[test]
+    fn backend_names_round_trip() {
+        for kind in [
+            BackendKind::Auto,
+            BackendKind::Gles,
+            BackendKind::Vulkan,
+            BackendKind::Hybrid,
+        ] {
+            assert_eq!(BackendKind::parse(kind.as_str()), Some(kind));
+        }
+    }
+
+    #[test]
+    fn launcher_picker_beats_the_shipped_default() {
+        // The plugin always ships RENDERER_BACKEND=gles; picking "hybrid" in the launcher
+        // has to win, otherwise the option does nothing.
+        assert_eq!(
+            select_backend(Some("hybrid"), Some("gles")),
+            BackendKind::Hybrid
+        );
+        assert_eq!(
+            select_backend(Some("vulkan"), Some("gles")),
+            BackendKind::Vulkan
+        );
+        // Absent picker (older launcher, or the value was not applied): use the default.
+        assert_eq!(select_backend(None, Some("gles")), BackendKind::Gles);
+        // A junk value must not stop the game from starting.
+        assert_eq!(select_backend(Some("nonsense"), Some("gles")), BackendKind::Gles);
+        // Nothing set at all.
+        assert_eq!(select_backend(None, None), BackendKind::Auto);
+    }
+
+    #[test]
+    fn an_empty_picker_falls_through_to_the_default() {
+        assert_eq!(select_backend(Some(""), Some("vulkan")), BackendKind::Vulkan);
     }
 
     #[test]

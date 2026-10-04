@@ -10,22 +10,244 @@ renderer plugin APK.
 | Plugin APK (V2, MAIN activity) | ready — install and pick **Rust Renderer** |
 | `renderer-core` | Backend trait, config, error state, unit tests |
 | `gles-backend` | Full resource Backend over system GLES 3.0+ (dlopen) |
-| `vulkan-backend` | **not implemented** — `auto` falls back to GLES |
+| `vulkan-backend` | **Device discovery only** — loads `libvulkan`, enumerates and picks a physical device, creates a device + graphics queue, reports real info/limits. Cannot render (see below) |
 | `gl-compat` `librust_gl.so` | GLES 3.x backend + OpenGL 3.3 compatibility entry-point layer + legacy fixed-function shims |
 | Shader translate | Version rewrite, precision, texture2D→texture, gl_FragColor, attribute/varying |
-| Format translate | BGRA swizzle, depth internal formats, clamp-to-border |
-| OpenGL 3.3 core API surface | Broad entry-point coverage; unsupported desktop-only features return real GL errors instead of lying |
-| Vulkan path | not started |
+| Format translate | BGRA swizzle, depth internal formats, clamp-to-border, BGRA8→RGBA8 storage |
+| OpenGL 3.3 core API surface | Complete against the GL 3.0–3.3 core function list; unsupported desktop-only features return real GL errors instead of lying |
+| Vulkan path | Device discovery + reporting; **no rendering path** |
+
+### What has actually been verified
+
+Verified by running it, on this machine:
+
+- `cargo check --workspace` / `cargo test --workspace` — 33 unit tests pass.
+- `cargo build -p gl-compat --release` links; `nm -D` shows **352 exported `gl*` entry points**
+  with **no duplicate symbols**.
+- `cargo run -p vulkan-backend --example probe` runs and reports a precise reason when no
+  Vulkan loader is present.
+
+**Not** verified, because this environment has no Android NDK, no device, no Vulkan driver
+(no ICD, no `libvulkan`) and no Minecraft:
+
+- The APK has never been built from these changes.
+- No Minecraft version has been launched, and no frame has been rendered, with this code.
+  Treat the version rows below as *prior* results from earlier device testing, not as
+  results for the current tree.
+- The Vulkan backend's **positive** path — instance, device and queue creation, device
+  selection, reported limits — has never executed against a real driver. It compiles, and
+  its absence path is tested, but only a device can confirm the FFI layouts. The struct
+  offsets it decodes are pinned by a unit test, yet that arithmetic is exactly the kind of
+  thing that must be re-checked on hardware before trusting a reported limit.
 
 **Will Minecraft launch?** It *may* get past GL version checks and compile simple shaders.
 Complex packs (Sodium, Iris, modern core-profile shaders, MRT, geometry shaders) will still
 fail. Treat every successful frame as a bonus and file the log line that broke.
+
+### The 1.12 → 26.3 range is not one GL version
+
+A single "OpenGL 3.3 core layer" only addresses the modern half of that range. What each
+band actually asks for:
+
+| Band | Requirement | Handled by |
+|---|---|---|
+| 1.12–1.15 | GL 2.1 fixed function, GLSL 120 | `fixed_func.rs` + `ff_draw.rs` (matrix stack, client arrays, alpha test, quads→tris) |
+| 1.16 | GL 2.1 plus early core-profile calls | both layers |
+| 1.17 – 26.3 | **GL 3.2 core floor**, no forward-compatible fallback; GLSL 330/410 shaders | `gl33.rs` + shader translate |
+
+So "launch 1.12 through 26.3" needs the fixed-function layer *and* the 3.3 layer to both
+work; neither one alone covers the range. (Versions follow Mojang's year-based scheme from
+2026 onward, so `26.x` is the current numbering.)
+
+### Sodium: why "pass Sodium conformance" is not a goal that can be met here
+
+There is no Sodium conformance suite, and three things make Sodium specifically out of reach
+for a GLES translation layer:
+
+1. **Sodium's own docs rule this architecture out.** From the Sodium README: *"Devices
+   which need to use OpenGL translation layers (such as GL4ES, ANGLE, etc.) are not
+   supported and will very likely not work with Sodium. These translation layers do not
+   implement required functionality, and they suffer from underlying driver bugs which
+   cannot be worked around."* This project **is** such a translation layer.
+2. **Sodium needs more than a 3.3 layer.** Sodium officially supports drivers compatible
+   with **OpenGL 4.5+** and uses those "new API features"; a 3.3 layer cannot provide
+   SSBOs, real persistent mapping, debug output, or the rest of the 4.x surface by
+   construction. Sodium is also porting to Vulkan, which is where its effort is going.
+3. **Sodium is a mod, not a GL feature.** It needs Fabric/NeoForge plus Mixin working
+   under the launcher's JVM. That is an independent problem from the GL surface, and no
+   change to `librust_gl.so` can fix it. Sodium also publishes **no 1.12–1.15 builds**
+   (its supported list starts at 1.16.3), so "1.12 + Sodium" has no target at all.
+
+What is realistic: vanilla and lightly-modded launch on the modern band, with mods that
+stay inside the 3.3 surface.
+
+## Backend selection: gles / vulkan / hybrid / auto
+
+The renderer options in the plugin (ZalithLauncher → renderer settings) expose four modes,
+read through `RENDERER_BACKEND_SELECT`:
+
+| Mode | Behaviour |
+|---|---|
+| `gles` | GLES 3.x passthrough. Serves every desktop GL entry point the game calls. Default. |
+| `vulkan` | Try Vulkan for renderer-owned work; if it cannot render, log why and stay on GLES so the game still starts. |
+| `hybrid` | GLES for the GL surface, Vulkan preferred for renderer-owned work when it can render. |
+| `auto` | First backend that initializes *and can render*, in the order vulkan → gles. |
+
+`RENDERER_BACKEND_SELECT` takes precedence over the plugin's shipped `RENDERER_BACKEND=gles`
+default, which is what makes the picker do anything; a junk value is ignored rather than fatal.
+
+### What the Vulkan backend does and does not do
+
+**Does:** loads `libvulkan.so` (Android sonames, plus `libvulkan.so.1` on desktop), creates an
+instance at the highest version the loader reports, enumerates physical devices, picks one by
+device class → graphics-queue count → device-local memory, creates a logical device with a
+graphics queue, and reports real `DeviceInfo`/`Capabilities` (vendor, device name, driver
+version, memory, `maxImageDimension2D`). Zero new dependencies — direct FFI.
+
+**Does not:** render. There is no SPIR-V compilation, pipeline creation, descriptor sets,
+command recording, or swapchain presentation. `can_render()` therefore returns `false`, and
+selection skips Vulkan rather than reporting a renderer that cannot draw a triangle. All
+resource methods return `BackendError::Unsupported` with a specific message rather than a
+misleading GL error.
+
+This is deliberate. A Vulkan backend only becomes the renderer once something owns the drawing:
+either the game speaks Vulkan itself, or this renderer compiles for Vulkan and runs the
+fixed-function emulation path on it. Both need the pipeline/present layer that does not exist
+yet, so the honest state today is *detects the device, reports it, stays on GLES*.
+
+### What "making the Vulkan backend functional" actually requires
+
+Not attempted here, deliberately: it is several thousand lines and there is no way to test it
+from here (no Vulkan driver, no NDK, no device). The pieces, in dependency order:
+
+1. **GLSL → SPIR-V compilation.** The shader translator currently emits GLSL ES; Vulkan needs
+   SPIR-V. Requires a compiler crate (e.g. `naga` with `spv-out`, or `shaderc`) — the
+   existing `shader-translate` output would have to be fed through it, and translate results
+   validated with `spirv-val`.
+2. **Resources.** VkBuffer + VkDeviceMemory with a real allocator (suballocation, as
+   `VMA`/naga do), VkImage + VkImageView, VkSampler, with the format mapping in
+   `format-translate` re-expressed as Vulkan formats rather than GLES sized formats.
+3. **Pipelines.** Shader modules, pipeline layout, descriptor set layout/pool, render pass
+   and framebuffer for the `Framebuffer` trait methods, pipeline cache.
+4. **Submission.** Command buffer pool, recording for the draw calls, queue submit, and a
+   fence or semaphore for the `map_buffer`/readback paths.
+5. **Presentation.** VkSwapchainKHR, surface (needs `VK_KHR_android_surface`), and the
+   acquire/present synchronization against the existing `eglSwapBuffers` export — this is
+   where a hybrid GL+Vulkan design genuinely conflicts, since a frame cannot be split across
+   two APIs without an interop copy.
+
+Until (1)–(5) exist, `can_render()` stays `false` and selection keeps using GLES. The
+detection code in `raw.rs` is a usable foundation for it: device selection, queue families
+and memory sizing are the parts any real Vulkan backend needs first.
+
+To check what a device reports:
+
+```bash
+cargo run -p vulkan-backend --example probe   # exits 1 when no loader is present
+```
 
 ## Compatibility shims (gl-compat)
 
 The 3.3 layer is a translation layer, not a fake desktop driver: GLES-compatible 3.3 calls are forwarded directly, desktop-only calls are emulated where practical, and features with no GLES 3.x equivalent fail explicitly.
 
 Covered 3.3-era paths include VAO/VBO/UBO state, sampler objects, instanced and range draws, multi-draw fallback loops, indexed buffer bindings, sync objects, query objects, texture storage, layered FBOs, multisample renderbuffers, clear-buffer APIs, integer/64-bit queries, transform-feedback/UBO forwarding, and packed vertex attributes.
+
+Added on top of that, to close the gaps found against the GL 3.0–3.3 core function list:
+
+- Buffer read-back — `glGetBufferSubData`, `glGetBufferPointerv`
+- Texture targets/queries — `glCompressedTexImage3D`, `glCompressedTexSubImage3D`,
+  `glCopyTexSubImage3D`, `glGetCompressedTexImage`, `glGetTexLevelParameterfv`,
+  `glGetTexImage` (BGRA/BGR read back through RGBA/RGB and swizzled)
+- `glFramebufferTexture`, `glIsEnabledi`, `glGetBooleani_v`
+- `glTexImage2DMultisample`, `glTexImage3DMultisample`, `glGetMultisamplefv`
+- Generic integer vertex attributes — `glVertexAttribI2i`/`I2iv`/`I2ui`/`I2uiv`,
+  `I3i`/`I3iv`/`I3ui`/`I3uiv`, `I4iv`/`I4uiv`
+- Multi-bind `glBindTextureUnit` (restores the previously active unit)
+- DSA texture getters — `glGetTextureImage`, `glGetTextureLevelParameteriv`,
+  `glGetTextureParameteriv`/`fv` (bind, delegate, restore)
+- Program interface queries — `glGetProgramInterfaceiv`, `glGetProgramStageiv`,
+  `glGetProgramResourceIndex`/`iv`/`Name`
+- `glDepthRange(double,double)` → `glDepthRangef`, `glTexParameteriv`/`fv` (same wrap
+  translation as the scalar forms), `glRenderbufferStorage` (BGRA8 → RGBA8)
+- `glBufferStorage` now honours its flags: ES 3.1 `glBufferStorage` when the driver has it,
+  otherwise `glBufferData` with `GL_DYNAMIC_STORAGE_BIT` respected, and immutable buffers
+  reject `glBufferData`/`glBufferSubData` with `GL_INVALID_OPERATION`
+
+Still rejected on purpose, because GLES 3.x has no equivalent: `glTexStorage1D`,
+`glTexSubImage1D`, `glTexBuffer`/`glTexBufferRange`, double-precision vertex attributes,
+timer queries, geometry stages, and `GL_QUADS`/`LINE`/`POINT` polygon modes.
+
+### Extension advertising is capability-probed, not assumed
+
+`crates/gl-compat/src/caps.rs` measures the device once — ES version, the full extension set,
+and the limits that actually change behaviour (`GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT`,
+`GL_MAX_TEXTURE_SIZE`, vertex attribs, draw buffers, samples, …). Decisions then read from
+that instead of from a fixed guess:
+
+- **Which aliases to advertise** is computed per device. `GL_ARB_instanced_arrays`,
+  `GL_ARB_uniform_buffer_object`, `GL_ARB_map_buffer_range` and
+  `GL_ARB_program_interface_query` need ES 3.1 (or the matching ES extension on 3.0);
+  `GL_EXT_texture_filter_anisotropic` is claimed only when the driver has it *and* reports a
+  usable limit; `GL_EXT_color_buffer_float`/`_half_float` follow ES 3.2 or the extension.
+  Advertising an alias whose backing feature is missing is the bug this prevents — the
+  client enables a fast path and gets a driver error instead of the behaviour it asked for.
+- **`GL_TEXTURE_MAX_ANISOTROPY_EXT`** is dropped on devices without the extension instead of
+  raising `GL_INVALID_ENUM`.
+- **`GL_CLAMP_TO_BORDER`** survives only where `GL_EXT_texture_border_clamp` exists;
+  otherwise it becomes clamp-to-edge, which is the behaviour the ES enum set allows.
+- With no live context the probe is reported invalid and only the always-on alias set is
+  offered, rather than guessing.
+
+`glGetStringi` and `GL_NUM_EXTENSIONS` are served from one merged, de-duplicated list
+(driver entries first, then the filtered aliases), so an iterator that reads `count` entries
+never hits an early null — previously the count came from the driver while indices past the
+driver's list resolved to null, which truncated enumeration and hid every alias.
+`glGetString(GL_EXTENSIONS)` returns the alias list; GLES 3.0 defines the driver half of that
+string as empty and directs clients to `glGetStringi`, which is where the driver-inclusive
+list lives. The merged list is rebuilt until the driver has actually reported extensions, so
+an early query made before the context exists no longer caches a truncated list for the rest
+of the process.
+
+`GL_KHR_debug` is **not** advertised: the layer exports no `glDebugMessageCallback`,
+`glObjectLabel` or debug-group entry points, so a client that probed the extension and then
+bound the callback would have resolved a null pointer. A unit test asserts every advertised
+extension resolves a real entry point, and that the two cannot drift apart.
+
+BGRA storage is real rather than aspirational: `GL_BGRA8_EXT` maps to `GL_RGBA8` for texture
+*and* renderbuffer targets, matching the BGRA→RGBA upload swizzle, which is what makes the
+`GL_EXT_texture_format_BGRA8888` advertisement consistent.
+
+### Hot-path cost
+
+The bridge used to run a `dlsym` — plus a `CString` allocation in the `eglGetProcAddress`
+fallback — **on every forwarded GL call**, so a draw-heavy frame paid a symbol lookup per
+draw. Entry points are now memoized by the address of the name literal, turning that into
+one lookup per call, and the table is dropped when `eglMakeCurrent` observes a context change
+(so context-specific pointers from `eglGetProcAddress` are never reused across contexts).
+
+Two other per-call costs are gone:
+
+- `glTexImage2D`/`glTexSubImage2D` issued **three `glGetIntegerv` round-trips each** to read
+  `GL_UNPACK_ROW_LENGTH`/`SKIP_ROWS`/`SKIP_PIXELS`. Those enums can only change through
+  `glPixelStorei`, which now maintains a local shadow, so the upload path reads them without
+  touching the driver. A texture-atlas-heavy frame was paying 3× the driver calls per upload.
+- `GL_ARRAY_BUFFER` is global context state, so it is shadowed locally instead of queried by
+  every client-array pointer call on the fixed-function path.
+- The sticky error flag moved off `SeqCst` to Release/Acquire; it is read-modify-written on
+  every `glGetError`.
+
+Regressions here are covered by unit tests: repeated lookups must not grow the cache, cached
+misses stay misses, clearing the cache forgets everything, and the unpack shadow must be
+visible to the upload path and resettable.
+
+### Verified GL 3.3 completeness
+
+The exported surface is checked against the GL 3.0–3.3 core function list. What is *not*
+exported as a real entry point is deliberate: `glGetMap*`/`glGetTexEnv*`/`glGetTexGen*` are
+GL 1.x–2.0 fixed-function getters handled by the legacy no-op table; `glGetTexParameteri_v`
+(GL 4.4), `glGetTexSubImage` (GL 4.3) are past the 3.3 line; and `glUniformfv`,
+`glUniformiv`, `glUniformuiv` are not real GL entry points (only the `glUniform1fv`-style
+indexed forms exist).
 
 The shader translator also rewrites common GLSL 3.30 desktop constructs to GLSL ES 3.00, including desktop version headers, precision, `attribute`/`varying`, texture functions, explicit layout cleanup, `noperspective`, and double-precision type fallbacks.
 
@@ -60,18 +282,35 @@ Logs: `adb logcat -s RustRenderer RendererV2Plugin`
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `RENDERER_BACKEND` | `gles` | `gles` / `vulkan` / `auto` |
-| `RENDERER_SPOOF_GL` | `1` | Advertise OpenGL 3.2 (set `0` to report real GLES strings) |
+| `RENDERER_BACKEND` | `gles` | `gles` / `vulkan` / `hybrid` / `auto` (overridden by `RENDERER_BACKEND_SELECT` from the launcher picker) |
+| `RENDERER_SPOOF_GL` | `1` | Advertise OpenGL 3.3 core / GLSL 3.30 (set `0` to report real GLES strings) |
 | `LIBGL_ES` | `3` | Hint for launcher / other libs |
 | `RENDERER_DEBUG` | unset | `1` enables extra logging later |
 
 ## Next work (spec order)
 
-1. Shader translator: geometry/tessellation reject, MRT, more builtins  
-2. Missing desktop entry points that show up in logcat  
-3. `glGetTexImage` / PBO readback path  
-4. Vulkan backend (spec phase 5)  
-5. Standalone triangle / FBO test APK  
+1. Shader translator: geometry/tessellation reject, MRT, more builtins
+2. **Device verification of the new 3.3 entry points** — see checklist below
+3. Full GLSL 410+ → ES 320 rewrite (MC 1.20+ ships desktop-style core shaders)
+4. Vulkan backend (spec phase 5)
+5. Standalone triangle / FBO test APK — the cheapest way to test a GL path
+   without a full Minecraft launch
+
+### How to actually verify a GL change
+
+The 3.3 layer can only be trusted against a real device. Loop for each entry-point change:
+
+```bash
+./build.sh
+adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+adb logcat -c && adb logcat -s RustRenderer RendererV2Plugin
+# launch the version under test from ZalithLauncher, then:
+```
+
+Watch for `[GLBridge] Missing entry point: <name>` (a symbol the game asked for that we do
+not resolve), `[GLCompat]` lines (shims taking an unsupported path), and any
+`GL_INVALID_*` raised during a frame. Each of those is a concrete bug report; the fix is to
+make that one call behave, not to widen the version claim.
 
 ## License / honesty
 
@@ -81,25 +320,32 @@ Do not claim Minecraft compatibility until a concrete version has been tested an
 
 | Target | Status |
 |--------|--------|
-| Vanilla MC 1.16 | **Works** — world render verified |
+| Vanilla MC 1.16 | **Works** on an earlier build — world render verified on device |
 | Vanilla MC 1.12–1.15 | Likely works (fixed-function path) |
 | Vanilla MC 1.17–1.20 | Partial — modern shaders via GLES3 passthrough + GLSL rewrite; test per version |
-| Vanilla MC 1.21+ | Experimental — needs more GL 4.x / DSA coverage |
-| Sodium | **Not yet** — needs multi-draw, buffer storage semantics, full extension set; shims started |
+| Vanilla MC 1.21 / 26.x | Experimental — needs more GL 4.x / DSA coverage |
+| Sodium | **Out of scope for a 3.3 layer** — see above: unsupported architecture per Sodium's own docs, needs 4.5-class drivers, and is a mod requiring a working Fabric/NeoForge loader |
 | Iris / shader packs | **Not yet** — needs broader GLSL + extension surface (shadow, compute later) |
 | Performance | GLES driver does the heavy lifting; FF path is only used when no program is bound |
+
+These rows describe earlier device testing and are **not** re-verified for the current tree
+(see *What has actually been verified*).
 
 ### Enabling debug logs
 ```
 RENDERER_DEBUG=1
 ```
 
-### Roadmap toward Sodium / modern MC
-1. Extension string + `glGetStringi` advertising (started)
-2. `glBufferStorage` / multi-draw shims (started)
-3. Persistent mapped buffers / fence-heavy paths Sodium uses
-4. Full GLSL 410+ → ES 320 rewrite
-5. Optional Desktop-GL-on-Vulkan path long-term
+### Roadmap toward modern MC
+1. Extension string + `glGetStringi` advertising — **done** (merged, de-duplicated, self-consistent)
+2. `glBufferStorage` / multi-draw shims — **done** (flags honoured, immutability enforced when supported)
+3. Full GLSL 410+ → ES 320 rewrite
+4. Device verification per version, oldest band first (1.12 fixed-function → 1.17 core)
+5. Vulkan rendering path: SPIR-V compilation (GLSL → SPIR-V), pipelines, descriptor sets,
+   command submission, swapchain. Until this exists, `vulkan`/`hybrid` only detect the device.
+
+The previous "toward Sodium" goal is deliberately dropped rather than left aspirational —
+see *Sodium: why "pass Sodium conformance" is not a goal that can be met here*.
 
 
 ### Minecraft 1.16 compatibility

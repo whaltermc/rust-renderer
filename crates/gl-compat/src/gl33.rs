@@ -10,9 +10,17 @@
 use std::ffi::{c_char, c_void};
 use std::ptr;
 
+use format_translate;
+
 const GL_INVALID_ENUM: u32 = 0x0500;
 const GL_INVALID_VALUE: u32 = 0x0501;
 const GL_INVALID_OPERATION: u32 = 0x0502;
+const GL_TEXTURE_2D: u32 = 0x0DE1;
+const GL_TEXTURE_WIDTH: u32 = 0x1000;
+const GL_TEXTURE_HEIGHT: u32 = 0x1001;
+const GL_ACTIVE_TEXTURE: u32 = 0x84E0;
+const GL_TEXTURE0: u32 = 0x84C0;
+const GL_UNSIGNED_BYTE: u32 = 0x1401;
 const GL_SAMPLES_PASSED: u32 = 0x8914;
 const GL_TIME_ELAPSED: u32 = 0x88BF;
 const GL_QUERY_COUNTER_BITS: u32 = 0x8864;
@@ -21,9 +29,9 @@ const GL_WAIT_FAILED: u32 = 0x911D;
 
 fn err(e: u32) { crate::errors().set(e); }
 
-unsafe fn f<T: Copy>(name: &str) -> Option<T> { crate::driver_fn::<T>(name) }
+unsafe fn f<T: Copy>(name: &'static str) -> Option<T> { crate::driver_fn_cached::<T>(name) }
 
-unsafe fn call_void1(name: &str, a: u32) -> bool {
+unsafe fn call_void1(name: &'static str, a: u32) -> bool {
     if let Some(x) = f::<unsafe extern "C" fn(u32)>(name) { x(a); true } else { false }
 }
 
@@ -42,7 +50,7 @@ pub unsafe extern "C" fn glBindSampler(unit: u32, sampler: u32) {
     if !call_void2("glBindSampler", unit, sampler) { err(GL_INVALID_OPERATION); }
 }
 
-unsafe fn call_void2(name: &str, a: u32, b: u32) -> bool {
+unsafe fn call_void2(name: &'static str, a: u32, b: u32) -> bool {
     if let Some(x) = f::<unsafe extern "C" fn(u32,u32)>(name) { x(a,b); true } else { false }
 }
 
@@ -149,7 +157,8 @@ pub unsafe extern "C" fn glBlitFramebuffer(sx0:i32,sy0:i32,sx1:i32,sy1:i32,dx0:i
 }
 #[no_mangle]
 pub unsafe extern "C" fn glRenderbufferStorageMultisample(target:u32,samples:i32,internalformat:u32,w:i32,h:i32){
-    if let Some(x)=f::<unsafe extern "C" fn(u32,i32,u32,i32,i32)>("glRenderbufferStorageMultisample"){x(target,samples,internalformat,w,h)}else{err(GL_INVALID_OPERATION)}
+    let ifmt = format_translate::map_renderbuffer_internal_format(internalformat);
+    if let Some(x)=f::<unsafe extern "C" fn(u32,i32,u32,i32,i32)>("glRenderbufferStorageMultisample"){x(target,samples,ifmt,w,h)}else{err(GL_INVALID_OPERATION)}
 }
 
 #[no_mangle]
@@ -302,6 +311,298 @@ pub unsafe extern "C" fn glUniformBlockBinding(program:u32,uniformBlockIndex:u32
     if let Some(x)=f::<unsafe extern "C" fn(u32,u32,u32)>("glUniformBlockBinding"){x(program,uniformBlockIndex,uniformBlockBinding)}else{err(GL_INVALID_OPERATION)}
 }
 
+// ---- Multi-bind (GL 3.1 / ARB_multi_bind) ----------------------------------------------------
+//
+// The unit bindings are emulated by selecting the unit, binding, and restoring the previously
+// active unit. `glBindTextureUnit` binds a bare texture name with no target, and desktop GL
+// resolves that per target; 2D is the only target that can be reached without extra state, so
+// 1D/3D/cube textures must still be bound with glActiveTexture + glBindTexture.
+
+/// Saves the active texture unit and 2D binding, restoring both on drop.
+struct TextureBindingGuard {
+    unit: i32,
+    texture: i32,
+}
+
+impl TextureBindingGuard {
+    /// # Safety
+    /// Queries the driver, so a context must be current.
+    unsafe fn capture() -> Option<Self> {
+        let get = f::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv")?;
+        let mut unit = 0i32;
+        let mut texture = 0i32;
+        get(GL_ACTIVE_TEXTURE, &mut unit);
+        get(0x8069 /* GL_TEXTURE_BINDING_2D */, &mut texture);
+        Some(Self { unit, texture })
+    }
+
+    /// # Safety
+    /// Writes driver state, so a context must be current.
+    unsafe fn restore(self) {
+        if let Some(x) = f::<unsafe extern "C" fn(u32)>("glActiveTexture") {
+            // GL_ACTIVE_TEXTURE is an enum offset from GL_TEXTURE0; a 0 here means the
+            // query failed, and passing 0 to glActiveTexture is a GL_INVALID_ENUM.
+            x(if self.unit >= GL_TEXTURE0 as i32 { self.unit as u32 } else { GL_TEXTURE0 });
+        }
+        if let Some(x) = f::<unsafe extern "C" fn(u32, u32)>("glBindTexture") {
+            x(GL_TEXTURE_2D, self.texture as u32);
+        }
+    }
+}
+
+/// `GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS`, measured once. Desktop GL keeps the per-unit and
+/// combined limits apart; the combined limit is the one that bounds `unit` here.
+/// # Safety
+/// Queries the driver, so a context must be current.
+unsafe fn max_texture_units() -> u32 {
+    static MAX: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let cached = MAX.load(std::sync::atomic::Ordering::Relaxed);
+    if cached != 0 {
+        return cached;
+    }
+    let mut n = 0i32;
+    if let Some(get) = f::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
+        get(0x8B4D /* GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS */, &mut n);
+    }
+    let n = if n > 0 { n as u32 } else { 32 };
+    MAX.store(n, std::sync::atomic::Ordering::Relaxed);
+    n
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glBindTextureUnit(unit: u32, texture: u32) {
+    if unit >= max_texture_units() {
+        err(GL_INVALID_VALUE);
+        return;
+    }
+    let active = f::<unsafe extern "C" fn(u32)>("glActiveTexture");
+    let bind = f::<unsafe extern "C" fn(u32, u32)>("glBindTexture");
+    let (Some(active), Some(bind)) = (active, bind) else {
+        err(GL_INVALID_OPERATION);
+        return;
+    };
+    let mut prev = 0i32;
+    if let Some(get) = f::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
+        get(GL_ACTIVE_TEXTURE, &mut prev);
+    }
+    active(GL_TEXTURE0 + unit);
+    bind(GL_TEXTURE_2D, texture);
+    // Same rule as TextureBindingGuard::restore: a failed query leaves prev at 0, which is
+    // not a valid glActiveTexture argument.
+    active(if prev >= GL_TEXTURE0 as i32 { prev as u32 } else { GL_TEXTURE0 });
+}
+
+// ---- Direct-state-access texture getters (GL 3.0/3.1) ---------------------------------------
+//
+// These take a texture *name* instead of a target, and GLES 3.x has no DSA. Each one binds
+// the texture to the active unit, calls the bound-target entry point, and puts the previous
+// binding back. The signatures follow LWJGL, which omits the `bufSize` argument of
+// glGetTextureImage.
+
+#[no_mangle]
+pub unsafe extern "C" fn glGetTextureLevelParameteriv(texture: u32, level: i32, pname: u32, params: *mut i32) {
+    if params.is_null() {
+        err(GL_INVALID_VALUE);
+        return;
+    }
+    let Some(guard) = TextureBindingGuard::capture() else {
+        err(GL_INVALID_OPERATION);
+        return;
+    };
+    if let Some(x) = f::<unsafe extern "C" fn(u32, u32)>("glBindTexture") {
+        x(GL_TEXTURE_2D, texture);
+    }
+    if let Some(x) = f::<unsafe extern "C" fn(u32, i32, u32, *mut i32)>("glGetTexLevelParameteriv") {
+        x(GL_TEXTURE_2D, level, pname, params);
+    } else if !params.is_null() {
+        *params = 0;
+        err(GL_INVALID_OPERATION);
+    }
+    guard.restore();
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glGetTextureParameteriv(texture: u32, pname: u32, params: *mut i32) {
+    if params.is_null() {
+        err(GL_INVALID_VALUE);
+        return;
+    }
+    let Some(guard) = TextureBindingGuard::capture() else {
+        err(GL_INVALID_OPERATION);
+        return;
+    };
+    if let Some(x) = f::<unsafe extern "C" fn(u32, u32)>("glBindTexture") {
+        x(GL_TEXTURE_2D, texture);
+    }
+    if let Some(x) = f::<unsafe extern "C" fn(u32, u32, *mut i32)>("glGetTexParameteriv") {
+        x(GL_TEXTURE_2D, pname, params);
+    } else if !params.is_null() {
+        *params = 0;
+        err(GL_INVALID_OPERATION);
+    }
+    guard.restore();
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glGetTextureParameterfv(texture: u32, pname: u32, params: *mut f32) {
+    if params.is_null() {
+        err(GL_INVALID_VALUE);
+        return;
+    }
+    let Some(guard) = TextureBindingGuard::capture() else {
+        err(GL_INVALID_OPERATION);
+        return;
+    };
+    if let Some(x) = f::<unsafe extern "C" fn(u32, u32)>("glBindTexture") {
+        x(GL_TEXTURE_2D, texture);
+    }
+    if let Some(x) = f::<unsafe extern "C" fn(u32, u32, *mut f32)>("glGetTexParameterfv") {
+        x(GL_TEXTURE_2D, pname, params);
+    } else if !params.is_null() {
+        *params = 0.0;
+        err(GL_INVALID_OPERATION);
+    }
+    guard.restore();
+}
+
+/// 2D level read-back. BGRA/BGR are read through RGBA/RGB and swizzled on the way out,
+/// because GLES 3.x cannot read those formats directly. Targets with more than one layer
+/// (3D, cube, 2D array) are forwarded unchanged so the driver's own error surfaces.
+#[no_mangle]
+pub unsafe extern "C" fn glGetTexImage(target: u32, level: i32, format: u32, ty: u32, pixels: *mut c_void) {
+    let components = if format_translate::is_bgra8(format, ty) {
+        Some((format_translate::GL_RGBA, 4usize))
+    } else if format_translate::is_bgr8(format, ty) {
+        Some((format_translate::GL_RGB, 3usize))
+    } else {
+        None
+    };
+    let Some((native_format, comps)) = components else {
+        forward_get_tex_image(target, level, format, ty, pixels);
+        return;
+    };
+    if target != GL_TEXTURE_2D || pixels.is_null() {
+        // Size query (pixels == null) or a target we do not translate here.
+        forward_get_tex_image(target, level, format, ty, pixels);
+        return;
+    }
+    let Some(get_level) = f::<unsafe extern "C" fn(u32, i32, u32, *mut i32)>("glGetTexLevelParameteriv")
+    else {
+        err(GL_INVALID_OPERATION);
+        return;
+    };
+    let (mut w, mut h) = (0i32, 0i32);
+    get_level(target, level, GL_TEXTURE_WIDTH, &mut w);
+    get_level(target, level, GL_TEXTURE_HEIGHT, &mut h);
+    if w <= 0 || h <= 0 {
+        err(GL_INVALID_OPERATION);
+        return;
+    }
+    let n = w as usize * h as usize;
+    let mut tmp = vec![0u8; n * comps];
+    if let Some(x) = f::<unsafe extern "C" fn(u32, i32, u32, u32, *mut c_void)>("glGetTexImage") {
+        x(target, level, native_format, GL_UNSIGNED_BYTE, tmp.as_mut_ptr() as *mut c_void);
+    } else {
+        err(GL_INVALID_OPERATION);
+        return;
+    }
+    let out = std::slice::from_raw_parts_mut(pixels as *mut u8, n * comps);
+    if comps == 4 {
+        out.copy_from_slice(&format_translate::swizzle_bgra_to_rgba(&tmp, n));
+    } else {
+        out.copy_from_slice(&format_translate::swizzle_bgr_to_rgb(&tmp, n));
+    }
+}
+
+unsafe fn forward_get_tex_image(target: u32, level: i32, format: u32, ty: u32, pixels: *mut c_void) {
+    if let Some(x) = f::<unsafe extern "C" fn(u32, i32, u32, u32, *mut c_void)>("glGetTexImage") {
+        x(target, level, format, ty, pixels);
+    } else {
+        err(GL_INVALID_OPERATION);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glGetTextureImage(texture: u32, level: i32, format: u32, ty: u32, pixels: *mut c_void) {
+    let Some(guard) = TextureBindingGuard::capture() else {
+        err(GL_INVALID_OPERATION);
+        return;
+    };
+    if let Some(x) = f::<unsafe extern "C" fn(u32, u32)>("glBindTexture") {
+        x(GL_TEXTURE_2D, texture);
+    }
+    glGetTexImage(GL_TEXTURE_2D, level, format, ty, pixels);
+    guard.restore();
+}
+
+// ---- Program interface queries (GL 3.3 / ARB_program_interface_query) -----------------------
+// Present in GLES 3.1. On a 3.0 driver these are genuinely absent.
+
+#[no_mangle]
+pub unsafe extern "C" fn glGetProgramInterfaceiv(program: u32, iface: u32, pname: u32, params: *mut i32) {
+    if let Some(x) = f::<unsafe extern "C" fn(u32, u32, u32, *mut i32)>("glGetProgramInterfaceiv") {
+        x(program, iface, pname, params);
+    } else {
+        if !params.is_null() {
+            *params = 0;
+        }
+        err(GL_INVALID_OPERATION);
+    }
+}
+#[no_mangle]
+pub unsafe extern "C" fn glGetProgramStageiv(program: u32, stage: u32, pname: u32, params: *mut i32) {
+    if let Some(x) = f::<unsafe extern "C" fn(u32, u32, u32, *mut i32)>("glGetProgramStageiv") {
+        x(program, stage, pname, params);
+    } else {
+        if !params.is_null() {
+            *params = 0;
+        }
+        err(GL_INVALID_OPERATION);
+    }
+}
+#[no_mangle]
+pub unsafe extern "C" fn glGetProgramResourceIndex(program: u32, iface: u32, name: *const c_char) -> u32 {
+    if let Some(x) = f::<unsafe extern "C" fn(u32, u32, *const c_char) -> u32>("glGetProgramResourceIndex") {
+        x(program, iface, name)
+    } else {
+        err(GL_INVALID_OPERATION);
+        0xFFFF_FFFF
+    }
+}
+#[no_mangle]
+pub unsafe extern "C" fn glGetProgramResourceiv(program: u32, iface: u32, index: u32, count: i32, props: *const u32, count_len: i32, length: *mut i32, params: *mut i32) {
+    if let Some(x) = f::<unsafe extern "C" fn(u32, u32, u32, i32, *const u32, i32, *mut i32, *mut i32)>("glGetProgramResourceiv") {
+        x(program, iface, index, count, props, count_len, length, params);
+    } else {
+        err(GL_INVALID_OPERATION);
+    }
+}
+#[no_mangle]
+pub unsafe extern "C" fn glGetProgramResourceName(program: u32, iface: u32, index: u32, buf_size: i32, length: *mut i32, name: *mut c_char) {
+    if let Some(x) = f::<unsafe extern "C" fn(u32, u32, u32, i32, *mut i32, *mut c_char)>("glGetProgramResourceName") {
+        x(program, iface, index, buf_size, length, name);
+    } else {
+        err(GL_INVALID_OPERATION);
+    }
+}
+
+// ---- GL 3.1 calls with no GLES 3.x equivalent ------------------------------------------------
+// GL_TEXTURE_1D and the texel-buffer targets were never adopted into ES. Rejecting keeps a
+// caller that probes-and-falls-back working instead of corrupting bindings.
+
+#[no_mangle]
+pub unsafe extern "C" fn glTexSubImage1D(_t: u32, _l: i32, _x: i32, _w: i32, _f: u32, _ty: u32, _data: *const c_void) {
+    err(GL_INVALID_ENUM);
+}
+#[no_mangle]
+pub unsafe extern "C" fn glTexBuffer(_t: u32, _r: u32, _b: u32) {
+    err(GL_INVALID_ENUM);
+}
+#[no_mangle]
+pub unsafe extern "C" fn glTexBufferRange(_t: u32, _r: u32, _b: u32, _o: isize, _s: isize) {
+    err(GL_INVALID_ENUM);
+}
+
 pub fn resolve(name: &[u8]) -> *const c_void {
     macro_rules! r { ($($n:literal => $f:ident),* $(,)?) => { match name { $( $n => $f as *const c_void, )* _ => ptr::null(), } } }
     r!(
@@ -373,5 +674,19 @@ pub fn resolve(name: &[u8]) -> *const c_void {
         b"glGetActiveUniformBlockiv"=>glGetActiveUniformBlockiv,
         b"glGetActiveUniformBlockName"=>glGetActiveUniformBlockName,
         b"glUniformBlockBinding"=>glUniformBlockBinding,
+        b"glBindTextureUnit"=>glBindTextureUnit,
+        b"glGetTextureLevelParameteriv"=>glGetTextureLevelParameteriv,
+        b"glGetTextureParameteriv"=>glGetTextureParameteriv,
+        b"glGetTextureParameterfv"=>glGetTextureParameterfv,
+        b"glGetTexImage"=>glGetTexImage,
+        b"glGetTextureImage"=>glGetTextureImage,
+        b"glGetProgramInterfaceiv"=>glGetProgramInterfaceiv,
+        b"glGetProgramStageiv"=>glGetProgramStageiv,
+        b"glGetProgramResourceIndex"=>glGetProgramResourceIndex,
+        b"glGetProgramResourceiv"=>glGetProgramResourceiv,
+        b"glGetProgramResourceName"=>glGetProgramResourceName,
+        b"glTexSubImage1D"=>glTexSubImage1D,
+        b"glTexBuffer"=>glTexBuffer,
+        b"glTexBufferRange"=>glTexBufferRange,
     )
 }

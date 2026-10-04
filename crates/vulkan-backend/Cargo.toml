@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 renderer-core = { path = "../renderer-core" }
+libloading = "0.8"

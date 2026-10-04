@@ -9,12 +9,14 @@
 //! This is still incomplete for full Minecraft parity (no Vulkan, limited shader rewrite,
 //! missing some desktop-only APIs). Expect crash/black-screen on unhandled paths.
 
+mod caps;
 mod ff_draw;
 mod fixed_func;
 mod gl33;
 
 use renderer_core::{Backend, BackendKind, Config, GlErrorState};
 use std::ffi::{c_char, c_void, CStr, CString};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 
@@ -31,12 +33,20 @@ fn errors() -> &'static GlErrorState {
 }
 
 /// Current GL_ARRAY_BUFFER binding (client-array pointers capture it, per GL semantics).
-pub(crate) unsafe fn current_array_buffer() -> u32 {
-    let mut v = 0i32;
-    if let Some(f) = driver_fn::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
-        f(0x8894, &mut v);
-    }
-    v.max(0) as u32
+/// Shadow of the `GL_ARRAY_BUFFER` binding.
+///
+/// `GL_ARRAY_BUFFER` is global context state (it is *not* part of vertex-array-object
+/// state, unlike `GL_ELEMENT_ARRAY_BUFFER`), so mirroring it here is safe. This removes a
+/// `glGetIntegerv` round-trip from every client-array pointer call on the fixed-function
+/// path.
+static ARRAY_BUFFER_BINDING: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+fn set_array_buffer_binding(v: u32) {
+    ARRAY_BUFFER_BINDING.store(v, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub(crate) fn current_array_buffer() -> u32 {
+    ARRAY_BUFFER_BINDING.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 fn log(msg: &str) {
@@ -69,25 +79,72 @@ fn backend() -> Option<&'static dyn Backend> {
         return Some(b.as_ref());
     }
     let cfg = Config::from_env();
-    log(&format!("[Renderer] Initializing, requested backend: {:?}", cfg.backend));
+    log(&format!(
+        "[Renderer] Initializing, requested backend: {}",
+        cfg.backend.as_str()
+    ));
 
-    let mut chosen: Option<Box<dyn Backend>> = None;
-    if matches!(cfg.backend, BackendKind::Auto | BackendKind::Vulkan) {
+    let gles = || match gles_backend::GlesBackend::new() {
+        Ok(b) => Some(Box::new(b) as Box<dyn Backend>),
+        Err(e) => {
+            log(&format!("[GLES] {e}"));
+            None
+        }
+    };
+
+    // Vulkan is only *attempted* for the modes that ask for it. Note the game reaches us
+    // through desktop GL entry points, which the GLES driver serves; a Vulkan backend is
+    // selected here only for renderer-owned work (fixed-function emulation), and only when
+    // it reports it can actually render.
+    let wants_vulkan = matches!(cfg.backend, BackendKind::Auto | BackendKind::Vulkan | BackendKind::Hybrid);
+    let vulkan = if wants_vulkan {
         match vulkan_backend::probe() {
-            Ok(b) => chosen = Some(b),
-            Err(e) => log(&format!("[Vulkan] {e}")),
+            Ok(b) => {
+                if b.can_render() {
+                    Some(b)
+                } else {
+                    log(&format!(
+                        "[Vulkan] {} present but cannot render (no SPIR-V/pipeline/present path)",
+                        b.device_info().renderer
+                    ));
+                    None
+                }
+            }
+            Err(e) => {
+                log(&format!("[Vulkan] {e}"));
+                None
+            }
         }
-    }
-    if chosen.is_none() && matches!(cfg.backend, BackendKind::Auto | BackendKind::Gles) {
-        match gles_backend::GlesBackend::new() {
-            Ok(b) => chosen = Some(Box::new(b)),
-            Err(e) => log(&format!("[GLES] {e}")),
+    } else {
+        None
+    };
+
+    let chosen: Option<Box<dyn Backend>> = match cfg.backend {
+        // Explicit Vulkan, no device: fail loudly rather than silently running on GLES.
+        BackendKind::Vulkan => match vulkan {
+            Some(b) => Some(b),
+            None => {
+                log("[Renderer] RENDERER_BACKEND=vulkan requested but unavailable; using GLES so the game still starts");
+                gles()
+            }
+        },
+        // Hybrid: GLES serves the GL surface; Vulkan is preferred for renderer-owned work
+        // when it can render, which (today) it cannot, so GLES wins and Vulkan is only
+        // reported. Falls back rather than failing.
+        BackendKind::Hybrid => {
+            if vulkan.is_some() {
+                log("[Renderer] hybrid: Vulkan can render, GLES still serves the GL entry points");
+            }
+            gles()
         }
-    }
+        BackendKind::Gles => gles(),
+        BackendKind::Auto => vulkan.or_else(gles),
+    };
+
     match chosen {
         Some(b) => {
             let i = b.device_info();
-            log(&format!("[Renderer] Backend: {:?}", b.kind()));
+            log(&format!("[Renderer] Backend: {}", b.kind().as_str()));
             log(&format!("[Renderer] GPU: {} ({})", i.renderer, i.vendor));
             log(&format!("[Renderer] API: {}", i.api_version));
             let c = b.capabilities();
@@ -116,7 +173,7 @@ pub extern "C" fn glGetError() -> u32 {
     }
     unsafe {
         type F = unsafe extern "C" fn() -> u32;
-        if let Some(f) = driver_fn::<F>("glGetError") {
+        if let Some(f) = driver_fn_cached::<F>("glGetError") {
             return f();
         }
     }
@@ -131,7 +188,7 @@ pub extern "C" fn glClearColor(r: f32, g: f32, b: f32, a: f32) {
     }
     unsafe {
         type F = unsafe extern "C" fn(f32, f32, f32, f32);
-        if let Some(f) = driver_fn::<F>("glClearColor") {
+        if let Some(f) = driver_fn_cached::<F>("glClearColor") {
             f(r, g, b, a);
             return;
         }
@@ -147,7 +204,7 @@ pub extern "C" fn glClear(mask: u32) {
     }
     unsafe {
         type F = unsafe extern "C" fn(u32);
-        if let Some(f) = driver_fn::<F>("glClear") {
+        if let Some(f) = driver_fn_cached::<F>("glClear") {
             f(mask);
             return;
         }
@@ -167,7 +224,7 @@ pub extern "C" fn glViewport(x: i32, y: i32, w: i32, h: i32) {
     }
     unsafe {
         type F = unsafe extern "C" fn(i32, i32, i32, i32);
-        if let Some(f) = driver_fn::<F>("glViewport") {
+        if let Some(f) = driver_fn_cached::<F>("glViewport") {
             f(x, y, w, h);
             return;
         }
@@ -186,7 +243,7 @@ pub extern "C" fn glEnable(cap: u32) {
     }
     unsafe {
         type F = unsafe extern "C" fn(u32);
-        if let Some(f) = driver_fn::<F>("glEnable") {
+        if let Some(f) = driver_fn_cached::<F>("glEnable") {
             f(cap);
             return;
         }
@@ -205,7 +262,7 @@ pub extern "C" fn glDisable(cap: u32) {
     }
     unsafe {
         type F = unsafe extern "C" fn(u32);
-        if let Some(f) = driver_fn::<F>("glDisable") {
+        if let Some(f) = driver_fn_cached::<F>("glDisable") {
             f(cap);
             return;
         }
@@ -275,8 +332,60 @@ fn gles_driver() -> Option<&'static GlesDriver> {
     .as_ref()
 }
 
+/// Resolved driver entry points, keyed by the address of the NUL-terminated name literal.
+///
+/// Resolving costs a `dlsym` (plus a `CString` allocation in the `eglGetProcAddress`
+/// fallback) and the previous code paid that on *every* forwarded GL call — a `dlsym` per
+/// draw call. Every name here is a `'static` literal, so its address identifies it. The
+/// whole table is dropped when the EGL context changes, because `eglGetProcAddress` may
+/// hand back context-specific pointers.
+static DRIVER_CACHE: Mutex<Vec<(usize, usize, usize)>> = Mutex::new(Vec::new());
+
+/// Drops every memoized driver entry point. Called when the GL context changes.
+fn clear_driver_cache() {
+    DRIVER_CACHE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
+}
+
+/// Memoized [`driver_fn`]. Callers pass the same `'static` name every time.
+pub(crate) fn driver_fn_cached<T: Copy>(name: &'static str) -> Option<T> {
+    let key = (name.as_ptr() as usize, name.len());
+    {
+        let cache = DRIVER_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, _, addr)) = cache
+            .iter()
+            .find(|(p, l, _)| *p == key.0 && *l == key.1)
+        {
+            if *addr == 0 {
+                return None;
+            }
+            // SAFETY: the cached value came from `driver_fn`, which stores only pointers
+            // obtained from dlsym / eglGetProcAddress for this exact symbol name.
+            let addr = *addr;
+            return Some(unsafe { std::mem::transmute_copy::<usize, T>(&addr) });
+        }
+    }
+    // Resolve outside the lock: dlsym must not run while the cache is borrowed.
+    let resolved = unsafe { driver_fn::<T>(name) };
+    let ptr: usize = match resolved {
+        Some(f) => {
+            // SAFETY: `driver_fn` already checked that T has pointer size, so this copies
+            // the function pointer's bits verbatim into a pointer-sized integer.
+            unsafe { std::mem::transmute_copy::<T, usize>(&f) }
+        }
+        None => 0,
+    };
+    let mut cache = DRIVER_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if !cache.iter().any(|(p, l, _)| *p == key.0 && *l == key.1) {
+        cache.push((key.0, key.1, ptr));
+    }
+    resolved
+}
+
 /// Resolve a GLES driver symbol by name. Safe to call before a context exists.
-unsafe fn driver_fn<T: Copy>(name: &str) -> Option<T> {
+pub(crate) unsafe fn driver_fn<T: Copy>(name: &str) -> Option<T> {
     if std::mem::size_of::<T>() != std::mem::size_of::<*const c_void>() {
         log(&format!("[GLBridge] bad fn size for {name}"));
         return None;
@@ -351,7 +460,7 @@ pub extern "C" fn glGetString(name: u32) -> *const u8 {
             GL_SHADING_LANGUAGE_VERSION => return SPOOF_GLSL.as_ptr(),
             GL_VENDOR => return SPOOF_VENDOR.as_ptr(),
             GL_RENDERER => return SPOOF_RENDERER.as_ptr(),
-            GL_EXTENSIONS => return SPOOF_EXTENSIONS.as_ptr(),
+            GL_EXTENSIONS => return merged_extension_string().as_ptr(),
             _ => {}
         }
     }
@@ -367,7 +476,7 @@ pub extern "C" fn glGetString(name: u32) -> *const u8 {
     // Direct driver call (works once a GLES context is current)
     unsafe {
         type F = unsafe extern "C" fn(u32) -> *const u8;
-        if let Some(f) = driver_fn::<F>("glGetString") {
+        if let Some(f) = driver_fn_cached::<F>("glGetString") {
             let p = f(name);
             if !p.is_null() {
                 return p;
@@ -396,26 +505,18 @@ pub unsafe extern "C" fn glGetIntegerv(pname: u32, data: *mut i32) {
         return;
     }
     if spoof_gl() {
-        const GL_NUM_EXTENSIONS: u32 = 0x821D;
         match pname {
             GL_MAJOR_VERSION => { *data = 3; return; }
             GL_MINOR_VERSION => { *data = 3; return; }
             0x9126 => { *data = 0x0001; return; } // GL_CONTEXT_PROFILE_MASK = CORE_PROFILE_BIT
             GL_NUM_EXTENSIONS => {
-                // Prefer driver count; otherwise our advertised list length.
-                if let Some(f) = driver_fn::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
-                    f(pname, data);
-                    if *data > 0 {
-                        return;
-                    }
-                }
-                *data = advertised_extensions().len() as i32;
+                *data = merged_extensions().len() as i32;
                 return;
             }
             _ => {}
         }
     }
-    if let Some(f) = driver_fn::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
+    if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
         f(pname, data);
         return;
     }
@@ -424,40 +525,130 @@ pub unsafe extern "C" fn glGetIntegerv(pname: u32, data: *mut i32) {
     errors().set(GL_INVALID_OPERATION);
 }
 
-/// Extensions we advertise for modern MC / Sodium feature probes.
-/// Prefer real driver extensions; fall back to this curated list so mods that only
-/// check the string still enable their fast paths when the GLES driver has the feature.
-fn advertised_extensions() -> &'static [&'static [u8]] {
-    static EXTS: OnceLock<Vec<&'static [u8]>> = OnceLock::new();
-    EXTS.get_or_init(|| {
-        // Only advertise aliases whose semantics are backed by GLES 3.x or by
-        // an implementation in gl-compat. Do not claim timer queries, geometry,
-        // multisample-texture, or other desktop-only functionality merely because
-        // a mod checks for the extension string.
-        let list: &[&[u8]] = &[
-            b"GL_ARB_vertex_array_object\0",
-            b"GL_ARB_explicit_attrib_location\0",
-            b"GL_ARB_explicit_uniform_location\0",
-            b"GL_ARB_instanced_arrays\0",
-            b"GL_ARB_draw_instanced\0",
-            b"GL_ARB_uniform_buffer_object\0",
-            b"GL_ARB_map_buffer_range\0",
-            b"GL_ARB_framebuffer_object\0",
-            b"GL_ARB_texture_storage\0",
-            b"GL_ARB_copy_buffer\0",
-            b"GL_ARB_sync\0",
-            b"GL_ARB_sampler_objects\0",
-            b"GL_ARB_half_float_pixel\0",
-            b"GL_ARB_half_float_vertex\0",
-            b"GL_ARB_vertex_type_2_10_10_10_rev\0",
-            b"GL_EXT_texture_filter_anisotropic\0",
-            b"GL_KHR_debug\0",
-            b"GL_OES_element_index_uint\0",
-            b"GL_EXT_color_buffer_float\0",
-            b"GL_EXT_color_buffer_half_float\0",
-            b"GL_EXT_texture_format_BGRA8888\0",
-        ];
-        list.to_vec()
+/// Extensions this layer adds on top of the driver, filtered by what the device supports.
+///
+/// The list is computed from [`caps::probe`] rather than fixed, so a device without a
+/// feature is not told it has one. Only advertise an alias whose entry points we actually
+/// export, or whose semantics are backed by GLES 3.x or by an implementation in
+/// gl-compat.
+fn compat_extensions() -> Vec<&'static [u8]> {
+    caps::supported_aliases(caps::caps())
+}
+
+const GL_NUM_EXTENSIONS: u32 = 0x821D;
+const GL_EXTENSIONS: u32 = 0x1F03;
+
+type GetIntFn = unsafe extern "C" fn(u32, *mut i32);
+type GetStringiFn = unsafe extern "C" fn(u32, u32) -> *const u8;
+type GetStringFn = unsafe extern "C" fn(u32) -> *const u8;
+
+/// Appends `name` as a NUL-terminated entry unless it is empty or already present.
+fn push_extension(out: &mut Vec<Vec<u8>>, name: &[u8]) {
+    if name.is_empty() || name.contains(&0) {
+        return;
+    }
+    let entry = [name, &[0u8]].concat();
+    if !out.iter().any(|e| e == &entry) {
+        out.push(entry);
+    }
+}
+
+/// Appends the driver's own extension names to `out` and returns how many were found.
+///
+/// # Safety
+/// Calls into the GL driver, so a context must be current. Reached only from GL entry
+/// points (`glGetString`, `glGetStringi`, `glGetIntegerv`), which guarantees that.
+unsafe fn collect_driver_extensions(out: &mut Vec<Vec<u8>>) -> usize {
+    let mut count = 0i32;
+    if let Some(get) = driver_fn_cached::<GetIntFn>("glGetIntegerv") {
+        get(GL_NUM_EXTENSIONS, &mut count);
+    }
+    let before = out.len();
+    if let Some(stringi) = driver_fn_cached::<GetStringiFn>("glGetStringi") {
+        for i in 0..count.max(0) as u32 {
+            let p = stringi(GL_EXTENSIONS, i);
+            if p.is_null() {
+                break;
+            }
+            push_extension(out, CStr::from_ptr(p as *const c_char).to_bytes());
+        }
+    } else if let Some(get_string) = driver_fn_cached::<GetStringFn>("glGetString") {
+        let p = get_string(GL_EXTENSIONS);
+        if !p.is_null() {
+            for name in CStr::from_ptr(p as *const c_char).to_bytes().split(|c| *c == b' ') {
+                push_extension(out, name);
+            }
+        }
+    }
+    out.len() - before
+}
+
+/// Holds the most recently built list so pointers handed to callers stay valid for as long
+/// as GL promises (until the next `glGetStringi`).
+static MERGED: Mutex<Vec<Vec<u8>>> = Mutex::new(Vec::new());
+/// Set once the driver has reported at least one extension. Until then the query may have
+/// happened before a context existed, so the list is rebuilt instead of cached.
+static DRIVER_LISTED: AtomicBool = AtomicBool::new(false);
+
+/// Every extension name this layer reports, NUL-terminated: the driver's own list first,
+/// then our aliases, without duplicates. `glGetStringi` and `GL_NUM_EXTENSIONS` must agree
+/// on this list — serving the two from different sources makes an iterator stop early.
+fn merged_extensions() -> Vec<Vec<u8>> {
+    {
+        let cached = MERGED.lock().unwrap_or_else(|e| e.into_inner());
+        if DRIVER_LISTED.load(Ordering::Relaxed) && !cached.is_empty() {
+            return cached.clone();
+        }
+    }
+
+    let mut out: Vec<Vec<u8>> = Vec::new();
+    // SAFETY: only reachable from a GL entry point, so a context is current.
+    let driver_count = unsafe { collect_driver_extensions(&mut out) };
+    if driver_count > 0 {
+        DRIVER_LISTED.store(true, Ordering::Relaxed);
+    }
+    for name in compat_extensions() {
+        // The table stores each name NUL-terminated; push_extension adds its own.
+        let name = name.strip_suffix(&[0u8]).unwrap_or(name);
+        push_extension(&mut out, name);
+    }
+    if driver_count > 0 {
+        static LOGGED: AtomicBool = AtomicBool::new(false);
+        if !LOGGED.swap(true, Ordering::Relaxed) {
+            log(&format!(
+                "[GLCompat] advertising {driver_count} driver + {} compatibility extensions",
+                out.len() - driver_count
+            ));
+        }
+    }
+    if !caps::caps().valid {
+        static WARNED: AtomicBool = AtomicBool::new(false);
+        if !WARNED.swap(true, Ordering::Relaxed) {
+            log("[GLCompat] capability probe failed (no context?): only ES 3.0 core aliases advertised");
+        }
+    }
+
+    *MERGED.lock().unwrap_or_else(|e| e.into_inner()) = out.clone();
+    out
+}
+
+/// `GL_EXTENSIONS` as one space-separated string.
+///
+/// GLES 3.0 defines this as an empty string — on GLES, extensions are enumerated through
+/// `glGetStringi`. So this reports the compatibility aliases only; `glGetStringi` plus
+/// `GL_NUM_EXTENSIONS` remain the authoritative, driver-inclusive list.
+fn merged_extension_string() -> &'static [u8] {
+    static STR: OnceLock<Vec<u8>> = OnceLock::new();
+    STR.get_or_init(|| {
+        let mut s = Vec::new();
+        for e in compat_extensions() {
+            if !s.is_empty() {
+                s.push(b' ');
+            }
+            s.extend_from_slice(e.strip_suffix(&[0u8]).unwrap_or(e));
+        }
+        s.push(0);
+        s
     })
 }
 
@@ -465,21 +656,16 @@ fn advertised_extensions() -> &'static [&'static [u8]] {
 pub unsafe extern "C" fn glGetStringi(name: u32, index: u32) -> *const u8 {
     const GL_EXTENSIONS: u32 = 0x1F03;
     if name == GL_EXTENSIONS {
-        // Merge driver list with our advertised set by index: first driver, then ours.
-        // Prefer driver glGetStringi when available.
-        if let Some(f) = driver_fn::<unsafe extern "C" fn(u32, u32) -> *const u8>("glGetStringi") {
-            let p = f(name, index);
-            if !p.is_null() {
-                return p;
-            }
-        }
-        let exts = advertised_extensions();
+        // Indexed access into the same merged list GL_NUM_EXTENSIONS reports, so a caller
+        // that iterates `count` entries never hits an early null.
+        let exts = merged_extensions();
         if (index as usize) < exts.len() {
             return exts[index as usize].as_ptr();
         }
+        errors().set(GL_INVALID_VALUE);
         return std::ptr::null();
     }
-    match driver_fn::<unsafe extern "C" fn(u32, u32) -> *const u8>("glGetStringi") {
+    match driver_fn_cached::<unsafe extern "C" fn(u32, u32) -> *const u8>("glGetStringi") {
         Some(f) => f(name, index),
         None => {
             errors().set(GL_INVALID_OPERATION);
@@ -491,8 +677,18 @@ pub unsafe extern "C" fn glGetStringi(name: u32, index: u32) -> *const u8 {
 /// Desktop `glClearDepth(double)` -> ES `glClearDepthf(float)`.
 #[no_mangle]
 pub unsafe extern "C" fn glClearDepth(depth: f64) {
-    match driver_fn::<unsafe extern "C" fn(f32)>("glClearDepthf") {
+    match driver_fn_cached::<unsafe extern "C" fn(f32)>("glClearDepthf") {
         Some(f) => f(depth as f32),
+        None => errors().set(GL_INVALID_OPERATION),
+    }
+}
+
+/// Desktop `glDepthRange(double, double)` -> ES `glDepthRangef(float, float)`.
+/// The fixed-function path (1.12-1.16) sets its depth range through this call.
+#[no_mangle]
+pub unsafe extern "C" fn glDepthRange(near: f64, far: f64) {
+    match driver_fn_cached::<unsafe extern "C" fn(f32, f32)>("glDepthRangef") {
+        Some(f) => f(near as f32, far as f32),
         None => errors().set(GL_INVALID_OPERATION),
     }
 }
@@ -549,7 +745,7 @@ void main(){ c = vec4(1.0); }
             return;
         }
     };
-    match driver_fn::<unsafe extern "C" fn(u32, i32, *const *const c_char, *const i32)>("glShaderSource") {
+    match driver_fn_cached::<unsafe extern "C" fn(u32, i32, *const *const c_char, *const i32)>("glShaderSource") {
         Some(f) => {
             let ptr = c.as_ptr();
             f(shader, 1, &ptr, std::ptr::null());
@@ -561,17 +757,50 @@ void main(){ c = vec4(1.0); }
 
 // ---- translated entry points (desktop semantics -> GLES) -------------------------------
 
+/// Pixel-unpack state that the upload path depends on.
+///
+/// Tracked locally instead of queried: the previous implementation issued three
+/// `glGetIntegerv` driver round-trips *per texture upload*, which for a texture-atlas-heavy
+/// frame is thousands of needless calls. Every mutation of these enums arrives through
+/// `glPixelStorei`, which updates this state, so the shadow cannot drift from the driver.
+static UNPACK_ROW_LENGTH: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+static UNPACK_SKIP_ROWS: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+static UNPACK_SKIP_PIXELS: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+static UNPACK_ALIGNMENT: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(4);
+
+const GL_UNPACK_ALIGNMENT: u32 = 0x0CF5;
+
+use std::sync::atomic::Ordering as AtomicOrdering;
+
+fn set_unpack_row_length(v: i32) {
+    UNPACK_ROW_LENGTH.store(v, AtomicOrdering::Relaxed);
+}
+fn set_unpack_skip_rows(v: i32) {
+    UNPACK_SKIP_ROWS.store(v, AtomicOrdering::Relaxed);
+}
+fn set_unpack_skip_pixels(v: i32) {
+    UNPACK_SKIP_PIXELS.store(v, AtomicOrdering::Relaxed);
+}
+fn set_unpack_alignment(v: i32) {
+    UNPACK_ALIGNMENT.store(v, AtomicOrdering::Relaxed);
+}
+
 /// True when pixel-unpack state is default (no row length / skip), so a tight copy is valid.
-unsafe fn unpack_default() -> bool {
-    let get = match driver_fn::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
-        Some(f) => f,
-        None => return false,
-    };
-    let mut v = [0i32; 3];
-    get(0x0CF2, &mut v[0]); // GL_UNPACK_ROW_LENGTH
-    get(0x0CF3, &mut v[1]); // GL_UNPACK_SKIP_ROWS
-    get(0x0CF4, &mut v[2]); // GL_UNPACK_SKIP_PIXELS
-    v == [0, 0, 0]
+fn unpack_is_tight() -> bool {
+    UNPACK_ROW_LENGTH.load(AtomicOrdering::Relaxed) == 0
+        && UNPACK_SKIP_ROWS.load(AtomicOrdering::Relaxed) == 0
+        && UNPACK_SKIP_PIXELS.load(AtomicOrdering::Relaxed) == 0
+}
+
+/// Records unpack state changes that matter to the BGRA/BGR conversion path.
+fn track_pixel_store(pname: u32, value: i32) {
+    match pname {
+        0x0CF2 => set_unpack_row_length(value),  // GL_UNPACK_ROW_LENGTH
+        0x0CF3 => set_unpack_skip_rows(value),   // GL_UNPACK_SKIP_ROWS
+        0x0CF4 => set_unpack_skip_pixels(value), // GL_UNPACK_SKIP_PIXELS
+        GL_UNPACK_ALIGNMENT => set_unpack_alignment(value),
+        _ => {}
+    }
 }
 
 /// For BGRA/BGR uploads returns a converted RGB(A) copy; None means use caller data as-is.
@@ -579,7 +808,7 @@ unsafe fn convert_pixel_upload(w: i32, h: i32, f: u32, ty: u32, d: *const c_void
     if d.is_null() || w <= 0 || h <= 0 {
         return None;
     }
-    if !unpack_default() {
+    if !unpack_is_tight() {
         if format_translate::is_bgra8(f, ty) || format_translate::is_bgr8(f, ty) {
             log("[GLCompat] BGR(A) upload with non-default unpack state: passed through");
         }
@@ -605,6 +834,40 @@ unsafe fn convert_pixel_upload(w: i32, h: i32, f: u32, ty: u32, d: *const c_void
     None
 }
 
+/// Renderbuffer storage has no format/type pair, so only the BGRA/BGR internal-format
+/// aliases need translating before the call reaches GLES.
+/// Forwards to the driver and keeps the unpack shadow the BGRA/BGR conversion path reads,
+/// so uploads no longer query the driver for these enums.
+#[no_mangle]
+pub unsafe extern "C" fn glPixelStorei(n: u32, v: i32) {
+    track_pixel_store(n, v);
+    match driver_fn_cached::<unsafe extern "C" fn(u32, i32)>("glPixelStorei") {
+        Some(f) => f(n, v),
+        None => errors().set(GL_INVALID_OPERATION),
+    }
+}
+
+/// Keeps the `GL_ARRAY_BUFFER` shadow in step with the driver.
+#[no_mangle]
+pub unsafe extern "C" fn glBindBuffer(t: u32, b: u32) {
+    if t == 0x8892 /* GL_ARRAY_BUFFER */ {
+        set_array_buffer_binding(b);
+    }
+    match driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindBuffer") {
+        Some(f) => f(t, b),
+        None => errors().set(GL_INVALID_OPERATION),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glRenderbufferStorage(t: u32, f: u32, w: i32, h: i32) {
+    let f2 = format_translate::map_renderbuffer_internal_format(f);
+    match driver_fn_cached::<unsafe extern "C" fn(u32, u32, i32, i32)>("glRenderbufferStorage") {
+        Some(g) => g(t, f2, w, h),
+        None => errors().set(GL_INVALID_OPERATION),
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn glTexImage2D(
     t: u32, l: i32, ifmt: i32, w: i32, h: i32, b: i32, f: u32, ty: u32, d: *const c_void,
@@ -621,7 +884,7 @@ pub unsafe extern "C" fn glTexImage2D(
         None => (format_translate::map_external_format(f), ty, d),
     };
     type F = unsafe extern "C" fn(u32, i32, i32, i32, i32, i32, u32, u32, *const c_void);
-    match driver_fn::<F>("glTexImage2D") {
+    match driver_fn_cached::<F>("glTexImage2D") {
         Some(g) => g(t, l, ifmt2, w, h, b, f2, ty2, ptr),
         None => errors().set(GL_INVALID_OPERATION),
     }
@@ -637,41 +900,112 @@ pub unsafe extern "C" fn glTexSubImage2D(
         None => (format_translate::map_external_format(f), ty, d),
     };
     type F = unsafe extern "C" fn(u32, i32, i32, i32, i32, i32, u32, u32, *const c_void);
-    match driver_fn::<F>("glTexSubImage2D") {
+    match driver_fn_cached::<F>("glTexSubImage2D") {
         Some(g) => g(t, l, x, y, w, h, f2, ty2, ptr),
         None => errors().set(GL_INVALID_OPERATION),
     }
 }
 
+
+/// `GL_TEXTURE_MAX_ANISOTROPY_EXT` only exists where the driver advertises it, and the
+/// usable value is capped by `GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT`. Deciding once keeps the
+/// four `glTexParameter*` wrappers from each re-deriving it.
+fn anisotropy_supported() -> bool {
+    caps::caps().has(b"GL_EXT_texture_filter_anisotropic\0") && caps::caps().max_anisotropy > 1
+}
+
+/// Translates a texture pname using the probed capabilities.
+fn map_tex_parameter(pname: u32) -> Option<u32> {
+    fixed_func::map_tex_parameter_with(pname, anisotropy_supported())
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn glTexParameteri(t: u32, p: u32, v: i32) {
-    let Some(p2) = fixed_func::map_tex_parameter(p) else {
+    let Some(p2) = map_tex_parameter(p) else {
         return; // desktop-only pname — drop silently
     };
     let is_wrap = matches!(p2, 0x2802 | 0x2803 | 0x8072);
-    if is_wrap && v == format_translate::GL_CLAMP_TO_BORDER {
-        log("[GLCompat] GL_CLAMP_TO_BORDER → clamp-to-edge");
+    if is_wrap && v == format_translate::GL_CLAMP_TO_BORDER && !caps::caps().has_border_clamp() {
+        log("[GLCompat] GL_CLAMP_TO_BORDER → clamp-to-edge (driver lacks EXT_texture_border_clamp)");
     }
-    let v2 = if is_wrap { format_translate::map_wrap(v) } else { v };
-    match driver_fn::<unsafe extern "C" fn(u32, u32, i32)>("glTexParameteri") {
+    // Without the border-clamp extension, CLAMP_TO_BORDER is an invalid enum in ES.
+    let v2 = if is_wrap && !caps::caps().has_border_clamp() {
+        format_translate::map_wrap(v)
+    } else if is_wrap {
+        v
+    } else {
+        v
+    };
+    match driver_fn_cached::<unsafe extern "C" fn(u32, u32, i32)>("glTexParameteri") {
         Some(g) => g(t, p2, v2),
         None => errors().set(GL_INVALID_OPERATION),
     }
 }
 #[no_mangle]
 pub unsafe extern "C" fn glTexParameterf(t: u32, p: u32, v: f32) {
-    let Some(p2) = fixed_func::map_tex_parameter(p) else { return; };
+    let Some(p2) = map_tex_parameter(p) else { return; };
     let is_wrap = matches!(p2, 0x2802 | 0x2803 | 0x8072);
     let v2 = if is_wrap { format_translate::map_wrap(v as i32) as f32 } else { v };
-    match driver_fn::<unsafe extern "C" fn(u32, u32, f32)>("glTexParameterf") {
+    match driver_fn_cached::<unsafe extern "C" fn(u32, u32, f32)>("glTexParameterf") {
         Some(g) => g(t, p2, v2),
         None => {
             // fall back to integer path
-            match driver_fn::<unsafe extern "C" fn(u32, u32, i32)>("glTexParameteri") {
+            match driver_fn_cached::<unsafe extern "C" fn(u32, u32, i32)>("glTexParameteri") {
                 Some(g) => g(t, p2, v2 as i32),
                 None => errors().set(GL_INVALID_OPERATION),
             }
         }
+    }
+}
+
+/// Vector forms take the same state as the scalar ones. Wrap modes live in `params[0]`,
+/// and for every other pname GL requires the array length to match, so forwarding the
+/// caller's pointer unchanged is correct once pname has been translated.
+#[no_mangle]
+pub unsafe extern "C" fn glTexParameteriv(t: u32, p: u32, params: *const i32) {
+    if params.is_null() {
+        errors().set(GL_INVALID_VALUE);
+        return;
+    }
+    let Some(p2) = map_tex_parameter(p) else {
+        return; // desktop-only pname — drop silently
+    };
+    if !matches!(p2, 0x2802 | 0x2803 | 0x8072) {
+        match driver_fn_cached::<unsafe extern "C" fn(u32, u32, *const i32)>("glTexParameteriv") {
+            Some(g) => g(t, p2, params),
+            None => errors().set(GL_INVALID_OPERATION),
+        }
+        return;
+    }
+    // CLAMP/CLAMP_TO_BORDER are not in ES 3.x: swap in the translated value. The caller's
+    // buffer is const, so translate through a one-element scratch array.
+    let wrapped = [format_translate::map_wrap(*params)];
+    match driver_fn_cached::<unsafe extern "C" fn(u32, u32, *const i32)>("glTexParameteriv") {
+        Some(g) => g(t, p2, wrapped.as_ptr()),
+        None => errors().set(GL_INVALID_OPERATION),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glTexParameterfv(t: u32, p: u32, params: *const f32) {
+    if params.is_null() {
+        errors().set(GL_INVALID_VALUE);
+        return;
+    }
+    let Some(p2) = map_tex_parameter(p) else {
+        return; // desktop-only pname — drop silently
+    };
+    if !matches!(p2, 0x2802 | 0x2803 | 0x8072) {
+        match driver_fn_cached::<unsafe extern "C" fn(u32, u32, *const f32)>("glTexParameterfv") {
+            Some(g) => g(t, p2, params),
+            None => errors().set(GL_INVALID_OPERATION),
+        }
+        return;
+    }
+    let wrapped = [format_translate::map_wrap(*params as i32) as f32];
+    match driver_fn_cached::<unsafe extern "C" fn(u32, u32, *const f32)>("glTexParameterfv") {
+        Some(g) => g(t, p2, wrapped.as_ptr()),
+        None => errors().set(GL_INVALID_OPERATION),
     }
 }
 
@@ -680,7 +1014,7 @@ pub unsafe extern "C" fn glGetTexLevelParameteriv(target: u32, level: i32, pname
     if fixed_func::handle_get_tex_level_parameter(target, level, pname, params) {
         return;
     }
-    match driver_fn::<unsafe extern "C" fn(u32, i32, u32, *mut i32)>("glGetTexLevelParameteriv") {
+    match driver_fn_cached::<unsafe extern "C" fn(u32, i32, u32, *mut i32)>("glGetTexLevelParameteriv") {
         Some(g) => g(target, level, pname, params),
         None => {
             // ES often lacks this — soft-fail
@@ -696,7 +1030,7 @@ pub unsafe extern "C" fn glGetTexLevelParameteriv(target: u32, level: i32, pname
 /// Desktop `glDrawBuffer(mode)` -> ES `glDrawBuffers(1, &mode)`.
 #[no_mangle]
 pub unsafe extern "C" fn glDrawBuffer(mode: u32) {
-    match driver_fn::<unsafe extern "C" fn(i32, *const u32)>("glDrawBuffers") {
+    match driver_fn_cached::<unsafe extern "C" fn(i32, *const u32)>("glDrawBuffers") {
         Some(g) => g(1, &mode),
         None => errors().set(GL_INVALID_OPERATION),
     }
@@ -712,8 +1046,8 @@ pub unsafe extern "C" fn glMapBuffer(target: u32, access: u32) -> *mut c_void {
             return std::ptr::null_mut();
         }
     };
-    let get = driver_fn::<unsafe extern "C" fn(u32, u32, *mut i32)>("glGetBufferParameteriv");
-    let map = driver_fn::<unsafe extern "C" fn(u32, isize, isize, u32) -> *mut c_void>("glMapBufferRange");
+    let get = driver_fn_cached::<unsafe extern "C" fn(u32, u32, *mut i32)>("glGetBufferParameteriv");
+    let map = driver_fn_cached::<unsafe extern "C" fn(u32, isize, isize, u32) -> *mut c_void>("glMapBufferRange");
     match (get, map) {
         (Some(g), Some(m)) => {
             let mut size = 0i32;
@@ -749,7 +1083,7 @@ macro_rules! forward_all {
             #[no_mangle]
             pub unsafe extern "C" fn $name($($a: $t),*) $(-> $r)? {
                 type F = unsafe extern "C" fn($($t),*) $(-> $r)?;
-                match driver_fn::<F>(stringify!($name)) {
+                match driver_fn_cached::<F>(stringify!($name)) {
                     Some(f) => f($($a),*),
                     None => {
                         errors().set(GL_INVALID_OPERATION);
@@ -769,7 +1103,6 @@ forward_all! {
     glActiveTexture(t: u32);
     glAttachShader(p: u32, s: u32);
     glBindAttribLocation(p: u32, i: u32, n: *const c_char);
-    glBindBuffer(t: u32, b: u32);
     glBindFramebuffer(t: u32, f: u32);
     glBindRenderbuffer(t: u32, r: u32);
     glBindTexture(t: u32, x: u32);
@@ -779,8 +1112,6 @@ forward_all! {
     glBlendEquationSeparate(a: u32, b: u32);
     glBlendFunc(s: u32, d: u32);
     glBlendFuncSeparate(a: u32, b: u32, c: u32, d: u32);
-    glBufferData(t: u32, size: isize, data: *const c_void, usage: u32);
-    glBufferSubData(t: u32, o: isize, size: isize, data: *const c_void);
     glCheckFramebufferStatus(t: u32) -> u32;
     glClearStencil(s: i32);
     glColorMask(r: u8, g: u8, b: u8, a: u8);
@@ -788,7 +1119,6 @@ forward_all! {
     glCreateProgram() -> u32;
     glCreateShader(t: u32) -> u32;
     glCullFace(m: u32);
-    glDeleteBuffers(n: i32, b: *const u32);
     glDeleteFramebuffers(n: i32, f: *const u32);
     glDeleteProgram(p: u32);
     glDeleteRenderbuffers(n: i32, r: *const u32);
@@ -823,11 +1153,9 @@ forward_all! {
     glGetUniformLocation(p: u32, n: *const c_char) -> i32;
     glIsEnabled(c: u32) -> u8;
     glLinkProgram(p: u32);
-    glPixelStorei(n: u32, v: i32);
     glPolygonOffset(f: f32, u: f32);
     glReadBuffer(m: u32);
     glReadPixels(x: i32, y: i32, w: i32, h: i32, f: u32, t: u32, d: *mut c_void);
-    glRenderbufferStorage(t: u32, f: u32, w: i32, h: i32);
     glScissor(x: i32, y: i32, w: i32, h: i32);
     glStencilFunc(f: u32, r: i32, m: u32);
     glStencilMask(m: u32);
@@ -950,6 +1278,36 @@ forward_all! {
     glUniformMatrix4x2fv(loc: i32, count: i32, transpose: u8, value: *const f32);
     glUniformMatrix3x4fv(loc: i32, count: i32, transpose: u8, value: *const f32);
     glUniformMatrix4x3fv(loc: i32, count: i32, transpose: u8, value: *const f32);
+    // --- GL 3.0-3.3 entry points whose ABI GLES 3.x already matches exactly ---
+    // Buffer read-back / query (Minecraft reads VBO contents; the PBO path needs these).
+    glGetBufferSubData(target: u32, offset: isize, size: isize, data: *mut c_void);
+    glGetBufferPointerv(target: u32, pname: u32, params: *mut *mut c_void);
+    // Texture targets/queries.
+    glGetTexLevelParameterfv(target: u32, level: i32, pname: u32, params: *mut f32);
+    glCompressedTexImage3D(t: u32, l: i32, ifmt: u32, w: i32, h: i32, d: i32, b: i32, size: i32, data: *const c_void);
+    glCompressedTexSubImage3D(t: u32, l: i32, x: i32, y: i32, z: i32, w: i32, h: i32, d: i32, ifmt: u32, size: i32, data: *const c_void);
+    glCopyTexSubImage3D(t: u32, l: i32, xoff: i32, yoff: i32, zoff: i32, x: i32, y: i32, w: i32, h: i32);
+    glGetCompressedTexImage(t: u32, l: i32, format: u32, size: i32, data: *mut c_void);
+    // Multisample textures (GL 3.2 / ARB_multisampled_textures).
+    glTexImage2DMultisample(t: u32, samples: i32, ifmt: u32, w: i32, h: i32, fixed: u8);
+    glTexImage3DMultisample(t: u32, samples: i32, ifmt: u32, w: i32, h: i32, d: i32, fixed: u8);
+    glGetMultisamplefv(pname: u32, index: u32, data: *mut f32);
+    // Layered framebuffer attachments without an explicit layer (GL 3.1).
+    glFramebufferTexture(t: u32, a: u32, tex: u32, l: i32);
+    // Generic vertex attributes: the scalar/vector integer setters.
+    glVertexAttribI2i(i: u32, x: i32, y: i32);
+    glVertexAttribI2iv(i: u32, v: *const i32);
+    glVertexAttribI2ui(i: u32, x: u32, y: u32);
+    glVertexAttribI2uiv(i: u32, v: *const u32);
+    glVertexAttribI3i(i: u32, x: i32, y: i32, z: i32);
+    glVertexAttribI3iv(i: u32, v: *const i32);
+    glVertexAttribI3ui(i: u32, x: u32, y: u32, z: u32);
+    glVertexAttribI3uiv(i: u32, v: *const u32);
+    glVertexAttribI4iv(i: u32, v: *const i32);
+    glVertexAttribI4uiv(i: u32, v: *const u32);
+    // Per-draw-buffer state queries.
+    glIsEnabledi(cap: u32, index: u32) -> u8;
+    glGetBooleani_v(pname: u32, index: u32, data: *mut u8);
 }
 
 
@@ -964,24 +1322,12 @@ pub unsafe extern "C" fn glDrawArrays(mode: u32, first: i32, count: i32) {
     }
     let mode = fixed_func::map_draw_mode(mode);
     type F = unsafe extern "C" fn(u32, i32, i32);
-    match driver_fn::<F>("glDrawArrays") {
+    match driver_fn_cached::<F>("glDrawArrays") {
         Some(f) => f(mode, first, count),
         None => errors().set(GL_INVALID_OPERATION),
     }
 }
 
-
-/// Desktop `glBufferStorage` → ES `glBufferData` (no persistent mapping on pure ES).
-#[no_mangle]
-pub unsafe extern "C" fn glBufferStorage(target: u32, size: isize, data: *const c_void, _flags: u32) {
-    // GL_STATIC_DRAW = 0x88E4 — good default when flags are ignored.
-    const GL_STATIC_DRAW: u32 = 0x88E4;
-    if let Some(f) = driver_fn::<unsafe extern "C" fn(u32, isize, *const c_void, u32)>("glBufferData") {
-        f(target, size, data, GL_STATIC_DRAW);
-    } else {
-        errors().set(GL_INVALID_OPERATION);
-    }
-}
 
 fn resolve_legacy_stub(n: &[u8]) -> *const c_void {
     // Fixed-pipeline / 1.x symbols LWJGL enumerates; safe to no-op.
@@ -1064,6 +1410,153 @@ fn resolve_legacy_stub(n: &[u8]) -> *const c_void {
 #[inline(never)]
 pub unsafe extern "C" fn legacy_noop_fn() {}
 
+// ---- immutable buffer storage (GL 4.4 / ARB_buffer_storage) --------------------------------
+
+/// The buffer *binding* enum for a target, when it differs from the target enum itself.
+/// Pure so the table can be unit tested without a context.
+fn buffer_binding_pname(target: u32) -> Option<u32> {
+    const PAIRS: &[(u32, u32)] = &[
+        (0x8892, 0x8894), // GL_ARRAY_BUFFER
+        (0x8893, 0x8895), // GL_ELEMENT_ARRAY_BUFFER
+        (0x8A11, 0x8A28), // GL_UNIFORM_BUFFER
+        (0x90D2, 0x90D3), // GL_SHADER_STORAGE_BUFFER
+        (0x8C8E, 0x8C8F), // GL_TRANSFORM_FEEDBACK_BUFFER
+        (0x8F36, 0x8F36), // GL_COPY_READ_BUFFER (binding shares the target enum)
+        (0x8F37, 0x8F37), // GL_COPY_WRITE_BUFFER
+    ];
+    PAIRS.iter().find(|(t, _)| *t == target).map(|(_, b)| *b)
+}
+
+/// Name currently bound to `target`, or 0 when the target is unknown or nothing is bound.
+unsafe fn bound_buffer_name(target: u32) -> u32 {
+    let Some(pname) = buffer_binding_pname(target) else {
+        return 0;
+    };
+    let mut v = 0i32;
+    if let Some(get) = driver_fn_cached::<GetIntFn>("glGetIntegerv") {
+        get(pname, &mut v);
+    }
+    v.max(0) as u32
+}
+
+/// Usage hint for the `glBufferData` fallback: `GL_DYNAMIC_STORAGE_BIT` asks for a
+/// dynamically-updated buffer, anything else is static.
+fn storage_usage(flags: u32) -> u32 {
+    const GL_DYNAMIC_STORAGE_BIT: u32 = 0x0300;
+    const GL_STATIC_DRAW: u32 = 0x88E4;
+    const GL_DYNAMIC_DRAW: u32 = 0x88E8;
+    if flags & GL_DYNAMIC_STORAGE_BIT != 0 {
+        GL_DYNAMIC_DRAW
+    } else {
+        GL_STATIC_DRAW
+    }
+}
+
+/// Mask of bits in `flags` that ask for mapped/persistent storage, which a driver without
+/// `glBufferStorage` cannot provide. Pure so it can be unit tested.
+const MAPPING_BITS: u32 = 0x0001 /* GL_MAP_READ_BIT */
+    | 0x0002 /* GL_MAP_WRITE_BIT */
+    | 0x0040 /* GL_MAP_PERSISTENT_BIT */
+    | 0x0080; /* GL_MAP_COHERENT_BIT */
+
+fn wants_mapping(flags: u32) -> bool {
+    flags & MAPPING_BITS != 0
+}
+
+/// Buffers the driver created through immutable storage, where re-specifying or updating
+/// the store with `glBufferData`/`glBufferSubData` is a GL_INVALID_OPERATION.
+static IMMUTABLE_BUFFERS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+fn with_immutable<R>(f: impl FnOnce(&mut Vec<u32>) -> R) -> R {
+    let mut g = IMMUTABLE_BUFFERS.lock().unwrap_or_else(|e| e.into_inner());
+    f(g.as_mut())
+}
+
+fn mark_immutable(buffer: u32) {
+    if buffer == 0 {
+        return;
+    }
+    with_immutable(|v| {
+        if !v.contains(&buffer) {
+            v.push(buffer);
+        }
+    });
+}
+
+fn is_immutable(buffer: u32) -> bool {
+    with_immutable(|v| v.contains(&buffer))
+}
+
+/// `glBufferStorage` -> ES 3.1 `glBufferStorage` when the driver has it, otherwise a
+/// `glBufferData` with the closest usage hint. The fallback cannot be immutable and cannot
+/// be persistently mapped, and says so rather than pretending otherwise.
+#[no_mangle]
+pub unsafe extern "C" fn glBufferStorage(target: u32, size: isize, data: *const c_void, flags: u32) {
+    if size <= 0 {
+        errors().set(GL_INVALID_VALUE);
+        return;
+    }
+    if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, isize, *const c_void, u32)>("glBufferStorage") {
+        f(target, size, data, flags);
+        mark_immutable(bound_buffer_name(target));
+        return;
+    }
+    if wants_mapping(flags) {
+        log(
+            "[GLCompat] glBufferStorage: driver has no immutable storage; \
+             mapped/persistent storage request cannot be honoured",
+        );
+    }
+    if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, isize, *const c_void, u32)>("glBufferData") {
+        f(target, size, data, storage_usage(flags));
+    } else {
+        errors().set(GL_INVALID_OPERATION);
+    }
+}
+
+/// `glBufferData` is a GL error on an immutable buffer, and re-specifies the store
+/// everywhere else.
+#[no_mangle]
+pub unsafe extern "C" fn glBufferData(t: u32, size: isize, data: *const c_void, usage: u32) {
+    if is_immutable(bound_buffer_name(t)) {
+        errors().set(GL_INVALID_OPERATION);
+        return;
+    }
+    match driver_fn_cached::<unsafe extern "C" fn(u32, isize, *const c_void, u32)>("glBufferData") {
+        Some(f) => f(t, size, data, usage),
+        None => errors().set(GL_INVALID_OPERATION),
+    }
+}
+
+/// `glBufferSubData` updates the store, which an immutable buffer forbids.
+#[no_mangle]
+pub unsafe extern "C" fn glBufferSubData(t: u32, o: isize, size: isize, data: *const c_void) {
+    if is_immutable(bound_buffer_name(t)) {
+        errors().set(GL_INVALID_OPERATION);
+        return;
+    }
+    match driver_fn_cached::<unsafe extern "C" fn(u32, isize, isize, *const c_void)>("glBufferSubData") {
+        Some(f) => f(t, o, size, data),
+        None => errors().set(GL_INVALID_OPERATION),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glDeleteBuffers(n: i32, b: *const u32) {
+    if n >= 0 && !b.is_null() {
+        with_immutable(|v| {
+            for i in 0..n as usize {
+                let id = *b.add(i);
+                v.retain(|x| *x != id);
+            }
+        });
+    }
+    match driver_fn_cached::<unsafe extern "C" fn(i32, *const u32)>("glDeleteBuffers") {
+        Some(f) => f(n, b),
+        None => errors().set(GL_INVALID_OPERATION),
+    }
+}
+
 fn resolve_proc(n: &[u8]) -> *const c_void {
     match n {
         b"glGetError" => glGetError as *const c_void,
@@ -1076,6 +1569,7 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glGetIntegerv" => glGetIntegerv as *const c_void,
         b"glGetStringi" => glGetStringi as *const c_void,
         b"glClearDepth" => glClearDepth as *const c_void,
+        b"glDepthRange" => glDepthRange as *const c_void,
         b"glShaderSource" => glShaderSource as *const c_void,
         b"glTexImage2D" => glTexImage2D as *const c_void,
         b"glTexSubImage2D" => glTexSubImage2D as *const c_void,
@@ -1083,6 +1577,9 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glDrawBuffer" => glDrawBuffer as *const c_void,
         b"glMapBuffer" => glMapBuffer as *const c_void,
         b"glBufferStorage" => glBufferStorage as *const c_void,
+        b"glBufferData" => glBufferData as *const c_void,
+        b"glBufferSubData" => glBufferSubData as *const c_void,
+        b"glDeleteBuffers" => glDeleteBuffers as *const c_void,
         b"glPolygonMode" => glPolygonMode as *const c_void,
         b"glXGetProcAddress" | b"glXGetProcAddressARB" | b"glGetProcAddress" => {
             glXGetProcAddress as *const c_void
@@ -1126,6 +1623,9 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glMaterialfv" => glMaterialfv as *const c_void,
         b"glColorMaterial" => glColorMaterial as *const c_void,
         b"glTexParameterf" => glTexParameterf as *const c_void,
+        b"glTexParameteriv" => glTexParameteriv as *const c_void,
+        b"glTexParameterfv" => glTexParameterfv as *const c_void,
+        b"glRenderbufferStorage" => glRenderbufferStorage as *const c_void,
         b"glGetTexLevelParameteriv" => glGetTexLevelParameteriv as *const c_void,
         b"eglGetDisplay" => eglGetDisplay as *const c_void,
         b"eglInitialize" => eglInitialize as *const c_void,
@@ -1348,6 +1848,37 @@ where
     Some(*s)
 }
 
+/// Makes a context current and drops every memoized entry point when the context changes.
+///
+/// `eglGetProcAddress` may return context-specific pointers, so cached addresses from a
+/// previous context must not be reused after a switch (or a context loss and recreate).
+/// This is the one EGL entry point where that transition is observable.
+#[no_mangle]
+pub unsafe extern "C" fn eglMakeCurrent(
+    dpy: *mut c_void,
+    draw: *mut c_void,
+    read: *mut c_void,
+    ctx: *mut c_void,
+) -> u32 {
+    type F = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void) -> u32;
+    let previous = match egl_sym::<unsafe extern "C" fn() -> *mut c_void>(b"eglGetCurrentContext\0") {
+        Some(get) => get(),
+        None => std::ptr::null_mut(),
+    };
+    let mut z: u32 = 0;
+    match egl_sym::<F>(b"eglMakeCurrent\0") {
+        Some(f) => {
+            let r = f(dpy, draw, read, ctx);
+            if r != 0 && previous != ctx {
+                clear_driver_cache();
+            }
+            return r;
+        }
+        None => z = 0x3003, // EGL_BAD_MATCH: nothing to call
+    }
+    z
+}
+
 macro_rules! egl_export {
     ($name:ident ( $($arg:ident : $ty:ty),* ) -> $ret:ty) => {
         #[no_mangle]
@@ -1381,7 +1912,6 @@ egl_export!(eglDestroySurface(dpy: *mut c_void, surface: *mut c_void) -> u32);
 egl_export!(eglBindAPI(api: u32) -> u32);
 egl_export!(eglCreateContext(dpy: *mut c_void, config: *mut c_void, share: *mut c_void, attrib: *const i32) -> *mut c_void);
 egl_export!(eglDestroyContext(dpy: *mut c_void, ctx: *mut c_void) -> u32);
-egl_export!(eglMakeCurrent(dpy: *mut c_void, draw: *mut c_void, read: *mut c_void, ctx: *mut c_void) -> u32);
 egl_export!(eglGetCurrentContext() -> *mut c_void);
 egl_export!(eglGetCurrentDisplay() -> *mut c_void);
 egl_export!(eglGetCurrentSurface(readdraw: i32) -> *mut c_void);
@@ -1440,4 +1970,199 @@ pub extern "C" fn __driDriverGetExtensions_zink() -> *const *const c_void {
 #[no_mangle]
 pub extern "C" fn __driDriverGetExtensions_virtio_gpu() -> *const *const c_void {
     __driDriverGetExtensions()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn name_of(entry: &[u8]) -> &[u8] {
+        entry.strip_suffix(&[0u8]).unwrap_or(entry)
+    }
+
+    /// One representative entry point per advertised extension. Claiming an extension
+    /// makes a client bind the call it advertises; if the layer resolves that symbol to
+    /// null, the probe succeeded and the call crashes. `GL_KHR_debug` used to fail this.
+    const ADVERTISED_ENTRY_POINTS: &[(&str, &[&str])] = &[
+        ("GL_ARB_vertex_array_object", &["glGenVertexArrays", "glBindVertexArray", "glDeleteVertexArrays"]),
+        ("GL_ARB_explicit_attrib_location", &["glBindAttribLocation", "glGetAttribLocation"]),
+        ("GL_ARB_explicit_uniform_location", &["glGetUniformLocation"]),
+        ("GL_ARB_instanced_arrays", &["glVertexAttribDivisor", "glDrawArraysInstanced"]),
+        ("GL_ARB_draw_instanced", &["glDrawArraysInstanced", "glDrawElementsInstanced"]),
+        ("GL_ARB_uniform_buffer_object", &["glBindBufferBase", "glBindBufferRange", "glGetUniformBlockIndex", "glUniformBlockBinding"]),
+        ("GL_ARB_map_buffer_range", &["glMapBufferRange", "glFlushMappedBufferRange"]),
+        ("GL_ARB_framebuffer_object", &["glGenFramebuffers", "glBindFramebuffer", "glFramebufferTexture2D", "glGenRenderbuffers"]),
+        ("GL_ARB_texture_storage", &["glTexStorage2D", "glTexStorage3D"]),
+        ("GL_ARB_copy_buffer", &["glCopyBufferSubData"]),
+        ("GL_ARB_sync", &["glFenceSync", "glClientWaitSync", "glDeleteSync", "glWaitSync"]),
+        ("GL_ARB_sampler_objects", &["glGenSamplers", "glBindSampler", "glIsSampler"]),
+        ("GL_ARB_half_float_pixel", &["glTexImage2D", "glRenderbufferStorage"]),
+        ("GL_ARB_half_float_vertex", &["glVertexAttribPointer"]),
+        ("GL_ARB_vertex_type_2_10_10_10_rev", &["glVertexAttribP1ui", "glVertexAttribP4uiv"]),
+        ("GL_ARB_multi_bind", &["glBindTextureUnit"]),
+        ("GL_ARB_get_program_binary", &["glGetProgramBinary", "glProgramBinary"]),
+        ("GL_ARB_direct_state_access", &["glGetTextureParameteriv", "glGetTextureImage", "glGetTextureLevelParameteriv"]),
+        ("GL_ARB_program_interface_query", &["glGetProgramInterfaceiv", "glGetProgramResourceIndex", "glGetProgramResourceName"]),
+        ("GL_EXT_texture_filter_anisotropic", &["glTexParameterf", "glTexParameteri"]),
+        ("GL_OES_element_index_uint", &["glDrawElements", "glDrawElementsBaseVertex"]),
+        ("GL_EXT_color_buffer_float", &["glTexImage2D", "glRenderbufferStorage"]),
+        ("GL_EXT_color_buffer_half_float", &["glTexImage2D", "glRenderbufferStorage"]),
+        ("GL_EXT_texture_format_BGRA8888", &["glTexImage2D", "glTexSubImage2D", "glRenderbufferStorage"]),
+    ];
+
+    #[test]
+    fn every_advertised_extension_exports_its_entry_points() {
+        // Aliases are now capability-filtered, so "advertised" depends on the probed device.
+        // With no GL context the probe is invalid and only the always-on set is offered;
+        // check the entry points for whatever is actually advertised, and additionally
+        // require the always-on set to be present unconditionally.
+        let advertised_now: Vec<&[u8]> = compat_extensions();
+        for (ext, entry_points) in ADVERTISED_ENTRY_POINTS {
+            for entry in *entry_points {
+                assert!(
+                    !resolve_proc(entry.as_bytes()).is_null(),
+                    "{ext} may be advertised but {entry} resolves to null"
+                );
+            }
+        }
+        // Whatever we did advertise must have a backing entry point, and every always-on
+        // alias must be advertised even with no context.
+        for ext in ADVERTISED_ENTRY_POINTS {
+            let is_always_on = caps::supported_aliases(&caps::Caps {
+                valid: true,
+                ..Default::default()
+            })
+            .iter()
+            .any(|e| name_of(e) == ext.0.as_bytes());
+            if is_always_on {
+                assert!(
+                    advertised_now.iter().any(|e| name_of(e) == ext.0.as_bytes()),
+                    "{} should be advertised unconditionally",
+                    ext.0
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn advertised_list_is_covered_by_the_entry_point_table() {
+        for ext in compat_extensions() {
+            let name = name_of(ext);
+            let listed = ADVERTISED_ENTRY_POINTS
+                .iter()
+                .any(|(e, _)| e.as_bytes() == name);
+            assert!(
+                listed,
+                "{} is advertised without a tested entry point in ADVERTISED_ENTRY_POINTS",
+                String::from_utf8_lossy(name)
+            );
+        }
+    }
+
+    #[test]
+    fn push_extension_dedups_and_terminates() {
+        let mut out: Vec<Vec<u8>> = Vec::new();
+        push_extension(&mut out, b"GL_ARB_sync");
+        push_extension(&mut out, b"GL_ARB_sync");
+        push_extension(&mut out, b"");
+        push_extension(&mut out, b"has\0nul");
+        push_extension(&mut out, b"GL_OES_element_index_uint");
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0], b"GL_ARB_sync\0");
+        assert_eq!(out[1], b"GL_OES_element_index_uint\0");
+        assert!(out.iter().all(|e| *e.last().unwrap() == 0));
+    }
+
+    #[test]
+    fn driver_entry_points_are_resolved_once_and_reused() {
+        // The regression this guards: driver_fn used to run dlsym (plus a CString malloc)
+        // on every forwarded GL call, so a draw-heavy frame paid it per draw. The cache is
+        // keyed by the address of the name literal, so repeated lookups must not re-resolve.
+        fn cache_len() -> usize {
+            // Scoped so the guard is released: std::sync::Mutex is not reentrant.
+            DRIVER_CACHE.lock().unwrap().len()
+        }
+        let _ = driver_fn_cached::<unsafe extern "C" fn(u32)>("glCullFace");
+        let after_first = cache_len();
+        for _ in 0..1000 {
+            let _ = driver_fn_cached::<unsafe extern "C" fn(u32)>("glCullFace");
+        }
+        assert_eq!(
+            cache_len(),
+            after_first,
+            "repeated lookups must not grow the cache (each one is re-resolving)"
+        );
+        // A cached miss stays a miss instead of retrying dlsym every call.
+        let _ = driver_fn_cached::<unsafe extern "C" fn()>("glDefinitelyNotAGLFunction");
+        let after_miss = cache_len();
+        let _ = driver_fn_cached::<unsafe extern "C" fn()>("glDefinitelyNotAGLFunction");
+        assert_eq!(cache_len(), after_miss);
+    }
+
+    #[test]
+    fn clearing_the_driver_cache_forgets_every_entry() {
+        driver_fn_cached::<unsafe extern "C" fn(u32)>("glCullFace");
+        clear_driver_cache();
+        assert!(DRIVER_CACHE.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn unpack_state_is_tracked_without_querying_the_driver() {
+        // Default is a tight copy.
+        assert!(unpack_is_tight(), "fresh state must be tight");
+        for (set, pname) in [
+            (set_unpack_row_length as fn(i32), 0x0CF2u32),
+            (set_unpack_skip_rows, 0x0CF3),
+            (set_unpack_skip_pixels, 0x0CF4),
+        ] {
+            set(7);
+            assert!(!unpack_is_tight(), "pname 0x{pname:04X} must affect the upload path");
+            track_pixel_store(pname, 0);
+            assert!(unpack_is_tight(), "pname 0x{pname:04X} must be resettable");
+        }
+    }
+
+    #[test]
+    fn array_buffer_shadow_tracks_binding() {
+        set_array_buffer_binding(17);
+        assert_eq!(current_array_buffer(), 17);
+        // and back to default for other tests
+        set_array_buffer_binding(0);
+        assert_eq!(current_array_buffer(), 0);
+    }
+
+    #[test]
+    fn immutable_buffer_targets_resolve_to_their_binding_enums() {
+        assert_eq!(buffer_binding_pname(0x8892), Some(0x8894)); // ARRAY_BUFFER
+        assert_eq!(buffer_binding_pname(0x8893), Some(0x8895)); // ELEMENT_ARRAY_BUFFER
+        assert_eq!(buffer_binding_pname(0x8A11), Some(0x8A28)); // UNIFORM_BUFFER
+        assert_eq!(buffer_binding_pname(0x8F36), Some(0x8F36)); // COPY_READ_BUFFER
+        assert_eq!(buffer_binding_pname(0x1234), None);
+    }
+
+    #[test]
+    fn storage_flags_pick_the_matching_usage() {
+        const GL_DYNAMIC_STORAGE_BIT: u32 = 0x0300;
+        assert_eq!(storage_usage(0), 0x88E4); // static draw
+        assert_eq!(storage_usage(GL_DYNAMIC_STORAGE_BIT), 0x88E8); // dynamic draw
+    }
+
+    #[test]
+    fn only_mapped_storage_triggers_the_fallback_warning() {
+        assert!(!wants_mapping(0));
+        assert!(!wants_mapping(0x0300)); // dynamic storage alone is honoured
+        assert!(wants_mapping(0x0040)); // GL_MAP_PERSISTENT_BIT
+        assert!(wants_mapping(0x0002)); // GL_MAP_WRITE_BIT
+    }
+
+    #[test]
+    fn immutable_buffers_are_tracked_and_released() {
+        mark_immutable(7);
+        mark_immutable(7);
+        assert!(is_immutable(7));
+        assert!(!is_immutable(8));
+        let ids = [7u32, 8u32];
+        unsafe { glDeleteBuffers(2, ids.as_ptr()) };
+        assert!(!is_immutable(7));
+    }
 }

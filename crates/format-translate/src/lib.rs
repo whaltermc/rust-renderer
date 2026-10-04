@@ -68,6 +68,11 @@ pub fn map_internal_format(internal: i32, format: u32, ty: u32) -> i32 {
         (GL_RG, GL_FLOAT) => GL_RG32F,
         (GL_RED, GL_HALF_FLOAT) => GL_R16F,
         (GL_RG, GL_HALF_FLOAT) => GL_RG16F,
+        // Sized internal formats from GL_EXT_texture_format_BGRA8888. GLES 3 core has no
+        // BGRA storage, and glTexImage2D already swizzles BGRA uploads to RGBA, so
+        // storing RGBA keeps bindings, uploads and render targets consistent.
+        (GL_BGRA, _) => GL_RGBA8,
+        (GL_BGR, _) => GL_RGB8,
         // unsized depth-stencil
         (0x84F9, _) => GL_DEPTH24_STENCIL8, // GL_DEPTH_STENCIL
         _ => {
@@ -88,6 +93,16 @@ pub fn map_external_format(format: u32) -> u32 {
     match format {
         GL_BGRA => GL_RGBA,
         GL_BGR => GL_RGB,
+        other => other,
+    }
+}
+
+/// Internal format for renderbuffer targets, which take no format/type pair. Only the
+/// BGRA/BGR aliases need translating; unsized depth and depth-stencil are legal in ES 3.
+pub fn map_renderbuffer_internal_format(internalformat: u32) -> u32 {
+    match internalformat {
+        GL_BGRA => GL_RGBA8 as u32,
+        GL_BGR => GL_RGB8 as u32,
         other => other,
     }
 }
@@ -148,5 +163,29 @@ mod tests {
         assert_eq!(map_wrap(GL_CLAMP), GL_CLAMP_TO_EDGE);
         assert_eq!(map_external_format(GL_BGRA), GL_RGBA);
         assert!(is_bgra8(GL_BGRA, GL_UNSIGNED_BYTE));
+    }
+
+    #[test]
+    fn bgra_internal_format_becomes_rgba() {
+        // GL_EXT_texture_format_BGRA8888 sized formats are stored as RGBA so that the
+        // upload swizzle, the binding and the render target all agree.
+        assert_eq!(
+            map_internal_format(GL_BGRA as i32, GL_BGRA, GL_UNSIGNED_BYTE),
+            GL_RGBA8
+        );
+        assert_eq!(map_internal_format(GL_BGRA as i32, 0, 0), GL_RGBA8);
+        assert_eq!(map_internal_format(GL_BGR as i32, 0, 0), GL_RGB8);
+    }
+
+    #[test]
+    fn renderbuffer_internal_formats_are_translated() {
+        assert_eq!(map_renderbuffer_internal_format(GL_BGRA), GL_RGBA8 as u32);
+        assert_eq!(map_renderbuffer_internal_format(GL_BGR), GL_RGB8 as u32);
+        // Unsized depth is legal for ES 3 renderbuffers and must pass through.
+        assert_eq!(
+            map_renderbuffer_internal_format(GL_DEPTH_COMPONENT),
+            GL_DEPTH_COMPONENT
+        );
+        assert_eq!(map_renderbuffer_internal_format(GL_RGBA8 as u32), GL_RGBA8 as u32);
     }
 }

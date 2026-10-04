@@ -48,6 +48,9 @@ val pluginRendererConfig = buildJsonValue {
         env = buildEnvs {
             // Real backend is GLES 3.x passthrough — do NOT claim Mesa/Zink/GL 4.6.
             normal("LIBGL_ES", "3")
+            // Default stays gles: the GL entry points the game calls are served by the
+            // GLES driver. `vulkan` and `hybrid` are selectable below but cannot render the
+            // game yet (see vulkan-backend docs); the code logs why and stays on GLES.
             normal("RENDERER_BACKEND", "gles")
             // Our glGetString spoof (see gl-compat) reports 3.3 / GLSL 330.
             normal("RENDERER_SPOOF_GL", "1")
@@ -70,7 +73,9 @@ val pluginRendererConfig = buildJsonValue {
                     defaultValue = "gles",
                     values = listOf(
                         "gles",
-                        "vulkan"
+                        "vulkan",
+                        "hybrid",
+                        "auto"
                     )
                 )
             )
@@ -91,8 +96,8 @@ android {
         minSdk = 26
         targetSdk = 34
 
-        versionCode = 22
-        versionName = "0.2.3"
+        versionCode = 23
+        versionName = "0.3.0"
 
         resValue(
             "string",

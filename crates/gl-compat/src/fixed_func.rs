@@ -401,7 +401,13 @@ pub extern "C" fn gl_tex_envi(_target: u32, _pname: u32, _param: i32) {}
 pub extern "C" fn gl_tex_envfv(_target: u32, _pname: u32, _params: *const f32) {}
 
 /// Map desktop-only tex parameter names; return None if the call should be dropped.
-pub fn map_tex_parameter(pname: u32) -> Option<u32> {
+/// Translates a texture pname, returning `None` when it must be dropped.
+///
+/// `supports_anisotropy` comes from the capability probe: `GL_TEXTURE_MAX_ANISOTROPY_EXT`
+/// is not a core ES enum, so on a device without the extension forwarding it produces
+/// GL_INVALID_ENUM. Dropping it is better than a spurious error, and the caller keeps the
+/// value clamped to 1 instead of losing the state silently.
+pub fn map_tex_parameter_with(pname: u32, supports_anisotropy: bool) -> Option<u32> {
     match pname {
         GL_TEXTURE_MAG_FILTER | GL_TEXTURE_MIN_FILTER | GL_TEXTURE_WRAP_S | GL_TEXTURE_WRAP_T => {
             Some(pname)
@@ -409,10 +415,16 @@ pub fn map_tex_parameter(pname: u32) -> Option<u32> {
         GL_TEXTURE_MAX_LEVEL | GL_TEXTURE_BASE_LEVEL | GL_TEXTURE_MAX_LOD | GL_TEXTURE_MIN_LOD => {
             Some(pname) // valid in ES3
         }
-        GL_TEXTURE_MAX_ANISOTROPY_EXT => Some(pname), // if extension present; else driver errors soft
+        GL_TEXTURE_MAX_ANISOTROPY_EXT if supports_anisotropy => Some(pname),
         GL_TEXTURE_LOD_BIAS | GL_GENERATE_MIPMAP => None, // drop — not in core ES
         _ => Some(pname),
     }
+}
+
+/// Convenience wrapper assuming anisotropy is available; the probe-aware entry point is
+/// [`map_tex_parameter_with`].
+pub fn map_tex_parameter(pname: u32) -> Option<u32> {
+    map_tex_parameter_with(pname, true)
 }
 
 /// Desktop proxy-texture probe used by Minecraft to find max texture size.

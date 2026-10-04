@@ -55,6 +55,7 @@ dependencies = [
  "android_logger",
  "format-translate",
  "gles-backend",
+ "libloading",
  "log",
  "renderer-core",
  "shader-translate",
@@ -132,6 +133,7 @@ version = "0.1.0"
 name = "vulkan-backend"
 version = "0.1.0"
 dependencies = [
+ "libloading",
  "renderer-core",
 ]
 

@@ -1,0 +1,22 @@
+# Rust build output
+/target/
+
+# Gradle / Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.apk
+*.aab
+
+# Native library installed into jniLibs by build.sh.
+# The .gitkeep in that directory stays tracked.
+android/app/src/main/jniLibs/**/*.so
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+
+# Editor and tool noise
+*.rs.bk
+*.log
