@@ -882,8 +882,16 @@ pub const EXPORTS: &[&str] = &[
 mod tests {
     use super::*;
 
+    /// Serialises tests that mutate the shared texture/buffer/VAO tables. Without it they
+    /// race: one test's `clear()` wipes another's entry between setup and assertion.
+    fn table_guard() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     #[test]
     fn create_buffers_records_exactly_the_names_it_generated() {
+        let _guard = table_guard();
         // Written to hold with or without a GL driver: the earlier version assumed no driver
         // was present, so it passed only until Mesa was installed.
         with_buffers(|v| v.clear());
@@ -904,6 +912,7 @@ mod tests {
 
     #[test]
     fn invalid_arguments_are_rejected() {
+        let _guard = table_guard();
         unsafe { glCreateBuffers(0, std::ptr::null_mut()) };
         assert_ne!(unsafe { errors().take() }, 0);
         unsafe { super::dsa_named::glCreateTextures(0x0DE1, 0, std::ptr::null_mut()) };
@@ -914,6 +923,7 @@ mod tests {
 
     #[test]
     fn cross_target_buffer_lookup_only_mirrors_known_buffers() {
+        let _guard = table_guard();
         // note_buffer_target must ignore names it has never allocated storage for, otherwise
         // it would bind and allocate arbitrary names.
         with_buffers(|v| v.clear());
@@ -926,6 +936,7 @@ mod tests {
 
     #[test]
     fn buffer_table_records_size_and_usage() {
+        let _guard = table_guard();
         with_buffers(|v| v.clear());
         with_buffers(|v| v.push((7, 4096, 0x88E8)));
         assert!(with_buffers(|v| v.iter().any(|(id, size, usage)| *id == 7 && *size == 4096 && *usage == 0x88E8)));
@@ -933,6 +944,7 @@ mod tests {
 
     #[test]
     fn every_export_is_reachable_through_the_resolver() {
+        let _guard = table_guard();
         for name in EXPORTS {
             assert!(
                 !super::super::resolve_proc(name.as_bytes()).is_null(),

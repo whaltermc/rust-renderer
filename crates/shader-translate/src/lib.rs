@@ -97,7 +97,13 @@ fn strip_mojang_directives(src: &str) -> String {
 /// Highest fragment output layer the device can be asked for. Iris/OptiFine packs use up to
 /// eight; GLES 3.0 only guarantees four, and the real limit comes from the capability probe,
 /// but declaring more than the shader writes is what used to break compilation.
-pub const MAX_FRAG_OUTPUTS: usize = 4;
+/// Fragment outputs declared for a shader that writes several layers.
+///
+/// 8 rather than the ES 3.0 guaranteed minimum of 4: the Android devices this targets report
+/// 8 draw buffers, and shader packs routinely write more than four layers. Declaring up to 8
+/// is harmless on those devices, whereas capping at 4 folds real attachments onto the last
+/// output and silently drops them.
+pub const MAX_FRAG_OUTPUTS: usize = 8;
 
 /// How many fragment outputs this shader actually writes.
 ///

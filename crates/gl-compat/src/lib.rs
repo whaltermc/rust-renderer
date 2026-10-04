@@ -2010,6 +2010,7 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glTexParameteriv" => glTexParameteriv as *const c_void,
         b"glTexParameterfv" => glTexParameterfv as *const c_void,
         b"glRenderbufferStorage" => glRenderbufferStorage as *const c_void,
+        b"glLightModeliv" => glLightModeliv as *const c_void,
         b"glFramebufferTexture2D" => glFramebufferTexture2D as *const c_void,
         b"glFogColor" => fixed_func::glFogColor as *const c_void,
         b"glGetTexLevelParameteriv" => glGetTexLevelParameteriv as *const c_void,
@@ -2232,6 +2233,7 @@ fn warn_once(name: &'static str) {
 #[no_mangle] pub extern "C" fn glLightf(_l: u32, _p: u32, _v: f32) { warn_once("glLightf"); }
 #[no_mangle] pub unsafe extern "C" fn glLightfv(_l: u32, _p: u32, _v: *const f32) { warn_once("glLightfv"); }
 #[no_mangle] pub extern "C" fn glLightModeli(_p: u32, _v: i32) { warn_once("glLightModeli"); }
+#[no_mangle] pub extern "C" fn glLightModeliv(_p: u32, _v: *const i32) { warn_once("glLightModeliv"); }
 #[no_mangle] pub extern "C" fn glLightModelf(_p: u32, _v: f32) { warn_once("glLightModelf"); }
 #[no_mangle] pub unsafe extern "C" fn glLightModelfv(_p: u32, _v: *const f32) { warn_once("glLightModelfv"); }
 #[no_mangle] pub extern "C" fn glMaterialf(_f: u32, _p: u32, _v: f32) { warn_once("glMaterialf"); }
@@ -2533,6 +2535,33 @@ mod tests {
         driver_fn_cached::<unsafe extern "C" fn(u32)>("glCullFace");
         clear_driver_cache();
         assert!(DRIVER_CACHE.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn fixed_function_calls_do_not_resolve_to_the_no_op_stub() {
+        // Regression guard. These are all implemented by ES 3.x and are what the 1.12-1.16
+        // fixed-function path draws through. A name can be exported *and* still resolve to the
+        // shared legacy no-op when it only appears in the stub table -- the call then silently
+        // does nothing, which is how glLightModeliv was lost. Comparing against the stub's own
+        // address catches that, where a null check would not.
+        let stub = legacy_noop_fn as *const c_void;
+        for name in [
+            "glBegin", "glEnd", "glVertex3f", "glVertex4f", "glColor3f", "glColor4f",
+            "glTexCoord2f", "glTexCoord4f", "glNormal3f", "glArrayElement", "glAlphaFunc",
+            "glShadeModel", "glPushAttrib", "glPopAttrib", "glPushClientAttrib",
+            "glPopClientAttrib", "glColorMaterial", "glTexGenfv", "glTexGenf", "glTexGeni",
+            "glTexGeniv", "glLightModeli", "glLightModeliv", "glGetTexEnvfv", "glGetTexEnviv",
+            "glGetTexGenfv", "glGetTexGeniv", "glLineStipple", "glPolygonStipple", "glFogfv",
+            "glFogf", "glFogi", "glLightfv", "glMaterialfv", "glTexEnvfv", "glTexEnvi",
+            "glMatrixMode", "glLoadMatrixf", "glPushMatrix", "glPopMatrix", "glTranslatef",
+            "glRotatef", "glScalef", "glOrtho", "glFrustum", "glVertexPointer",
+            "glColorPointer", "glTexCoordPointer", "glNormalPointer", "glEnableClientState",
+            "glDisableClientState",
+        ] {
+            let fp = resolve_proc(name.as_bytes());
+            assert!(!fp.is_null(), "{name} resolves to null");
+            assert_ne!(fp, stub, "{name} resolves to the legacy no-op stub");
+        }
     }
 
     #[test]

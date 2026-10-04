@@ -110,49 +110,45 @@ impl Capabilities {
 
 /// Parses "OpenGL ES 3.2 V@..." into (3, 2).
 pub fn parse_es_version(s: &str) -> Option<(u32, u32)> {
-    // Accepts every shape a driver actually reports, not just "OpenGL ES 3.2 ...":
+    // Scans for the first `digits.digits` in the string rather than stripping known prefixes,
+    // because drivers report several shapes and the prefix is not reliable:
     //
-    //   "OpenGL ES 3.2 v1.r32p1-01eac"      -> (3, 2)   Android GLES
-    //   "OpenGL ES-CM 1.1"                   -> (1, 1)   old GLES
-    //   "3.3 (Compatibility Profile) Mesa ..." -> (3, 3)  desktop GL, compatibility
-    //   "4.6 (Core Profile) ..."              -> (4, 6)   desktop GL, core
+    //   "OpenGL ES 3.2 v1.r32p1-01eac"       Android GLES
+    //   "OpenGL ES-CM 1.1"                   old GLES, hyphenated and not a prefix of "OpenGL ES"
+    //   "3.3 (Compatibility Profile) Mesa ..." desktop GL, compatibility profile
+    //   "4.6 (Core Profile) ..."              desktop GL, core profile
     //
-    // The desktop forms matter when the spoof is off: a driver that reports
+    // The desktop forms matter when the spoof is off: a driver reporting
     // "3.3 (Compatibility Profile) Mesa 25.2.8" previously failed to parse, the GLES backend
     // refused to initialise, and every code path that consults the backend silently did
-    // nothing -- which is a black frame rather than an error.
-    let cleaned = s
-        .trim()
-        .trim_start_matches("OpenGL ES")
-        .trim_start_matches("OpenGL")
-        .trim_start();
-    let mut chars = cleaned.chars().peekable();
-    let mut major = String::new();
-    while let Some(&c) = chars.peek() {
-        if c.is_ascii_digit() {
-            major.push(c);
-            chars.next();
-        } else {
-            break;
+    // nothing -- a black frame rather than an error.
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if !bytes[i].is_ascii_digit() {
+            i += 1;
+            continue;
         }
-    }
-    if major.is_empty() || chars.peek() != Some(&'.') {
-        return None;
-    }
-    chars.next();
-    let mut minor = String::new();
-    while let Some(&c) = chars.peek() {
-        if c.is_ascii_digit() {
-            minor.push(c);
-            chars.next();
-        } else {
-            break;
+        let major_start = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
         }
+        if i >= bytes.len() || bytes[i] != b'.' {
+            continue;
+        }
+        i += 1;
+        let minor_start = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i == minor_start {
+            continue;
+        }
+        let major = s[major_start..minor_start - 1].parse().ok()?;
+        let minor = s[minor_start..i].parse().ok()?;
+        return Some((major, minor));
     }
-    if minor.is_empty() {
-        return None;
-    }
-    Some((major.parse().ok()?, minor.parse().ok()?))
+    None
 }
 
 pub fn gl_error_name(code: u32) -> &'static str {
