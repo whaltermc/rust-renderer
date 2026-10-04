@@ -645,13 +645,28 @@ int main(int argc, char **argv) {
                 }
             }
         }
+        /* The regression that killed 1.16.5 on device: LWJGL resolved a function pointer
+         * once and called it, so a null there was SIGSEGV at address 0 with no GL error.
+         * Nothing named gl* may ever resolve to null again. */
+        static const char *made_up[] = {
+            "glNotARealFunctionAtAll", "glSomethingNobodyHas", "gl",
+        };
+        int synth_null = 0;
+        for (size_t i = 0; i < sizeof made_up / sizeof made_up[0]; i++)
+            if (!getproc(made_up[i])) synth_null++;
         char d[2100];
-        snprintf(d, sizeof d, "%d of %zu legacy entry points resolve to NULL%s%s",
-                 nulls, sizeof legacy / sizeof legacy[0], nulls ? ": " : "", missing);
-        if (nulls == 0) ok(1, "every legacy fixed-function entry point resolves");
-        else { failures++; printf("  FAIL  every legacy fixed-function entry point resolves\n");
-               record("every legacy fixed-function entry point resolves", "fail", d); }
-        record("legacy audit summary", nulls ? "fail" : "pass", d);
+        snprintf(d, sizeof d,
+                 "%d of %zu legacy entry points null, %d of %zu unknown gl* names null%s%s",
+                 nulls, sizeof legacy / sizeof legacy[0], synth_null,
+                 sizeof made_up / sizeof made_up[0], nulls ? ": " : "", missing);
+        if (nulls == 0 && synth_null == 0) {
+            ok(1, "no GL entry point resolves to NULL (unknown names included)");
+        } else {
+            failures++;
+            printf("  FAIL  no GL entry point resolves to NULL (unknown names included)\n");
+            record("no GL entry point resolves to NULL (unknown names included)", "fail", d);
+        }
+        record("legacy audit summary", (nulls || synth_null) ? "fail" : "pass", d);
     }
 
     /* ---- reported identity ---- */

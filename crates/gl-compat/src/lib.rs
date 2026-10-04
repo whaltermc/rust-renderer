@@ -1919,6 +1919,30 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
             if !core.is_null() {
                 return core;
             }
+            // Never hand back NULL for a GL name. LWJGL resolves a function pointer once and
+            // calls it directly, so a null here is SIGSEGV at address 0 on the render thread
+            // with no GL error to explain it -- which is how glFogfv killed 1.16.5. A no-op
+            // stub costs the feature this one entry point provides and nothing else, so
+            // degrade and say so loudly instead of killing the process.
+            if name.starts_with("gl") {
+                static MISSING_ONCE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+                let first_time = MISSING_ONCE
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .iter()
+                    .all(|s| s.as_str() != name.as_ref());
+                if first_time {
+                    MISSING_ONCE
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .push(name.to_string());
+                    log(&format!(
+                        "[GLBridge] unresolved entry point '{name}': returning a no-op stub. \
+                         Whatever needs it will misbehave, but the process survives."
+                    ));
+                }
+                return legacy_noop_fn as *const c_void;
+            }
             log(&format!("[GLBridge] Missing entry point: {name}"));
             std::ptr::null()
         }
