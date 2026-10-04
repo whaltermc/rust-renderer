@@ -387,6 +387,40 @@ shader against a real compiler, and the DSA vertex-array path 1.20.5+ uses. A sh
 fails to compile, a state call that no-ops, or a mis-bound attribute shows up as wrong pixels
 rather than as a black screen much later.
 
+### Replaying real Minecraft captures
+
+`tools/trace-replay.sh` replays genuine Minecraft GL captures **through `librust_gl.so`**.
+apitrace's `eglretrace` recreates the context the trace recorded and re-issues every call;
+preloading the library puts this bridge in the path, because `eglretrace` resolves GL entry
+points through `eglGetProcAddress`, which the library exports. The frames are therefore
+rendered by the same code Android runs.
+
+```bash
+sudo apt-get install -y apitrace xvfb libgl1-mesa-dri
+./tools/trace-replay.sh                                  # default fixtures
+./tools/trace-replay.sh <fixture.tgz>:<recorded-gl-ver>   # specific ones
+```
+
+Two settings are load-bearing, and both were found by hitting the failure:
+
+- **`RENDERER_SPOOF_GL=0`.** eglretrace checks the replay context reports the same version the
+  trace recorded (ES 3.0 for the 1.17 capture). Spoofing 3.3 makes replay refuse to start.
+- **`MESA_GL_VERSION_OVERRIDE` / `MESA_GLSL_VERSION_OVERRIDE`.** The 1.21.x captures were
+  recorded against a 4.6 core context -- which is exactly why Zalith sets
+  `MESA_GL_VERSION_OVERRIDE=4.6` -- so the version has to be overridden for the context request
+  to be satisfiable on a software rasteriser.
+
+Current status, on Mesa llvmpipe:
+
+| Capture | Result |
+|---|---|
+| Minecraft 1.17 main menu | 2 frames rendered |
+| Minecraft 1.21.1 NeoForge, world render | 2 frames rendered |
+
+It runs in the `gl-smoke` workflow and fails the job if a capture does not replay. The 1.21.11
+capture that shows a black screen on device is the obvious next one to add: replaying it here
+would reproduce that failure without a phone.
+
 ### Trace coverage against real Minecraft captures
 
 `tools/trace-coverage.sh` measures entry-point coverage against genuine Minecraft apitrace

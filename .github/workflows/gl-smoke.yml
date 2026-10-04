@@ -108,6 +108,18 @@ jobs:
               > target/reports-angle/NOT-RUN.txt
           fi
 
+      # Replay real Minecraft GL captures through librust_gl.so. eglretrace recreates the
+      # recorded context and re-issues every call; preloading the library puts this bridge in
+      # the path, so the frames are rendered by the code Android actually runs.
+      - name: Replay Minecraft traces through the bridge
+        run: |
+          sudo apt-get install -y --no-install-recommends apitrace xvfb libgl1-mesa-dri
+          mkdir -p target/reports
+          set +e
+          ./tools/trace-replay.sh 2>&1 | tee target/reports/trace-replay.log
+          echo "trace replay exit: $?"
+          set -e
+
       # Entry-point coverage measured against real Minecraft apitrace captures, from the
       # MobileGL fixture set. A name a real run calls but the library does not export is a
       # NULL function pointer for a client that resolves by dlsym, which is how 1.16.5 died.
@@ -155,6 +167,7 @@ jobs:
             target/reports/screenshots/
             target/reports-angle/
             target/reports/trace-coverage.log
+            target/reports/trace-replay.log
             target/reports/lane-comparison.md
           if-no-files-found: error
 
