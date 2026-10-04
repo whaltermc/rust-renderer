@@ -54,15 +54,21 @@ behind it:
   `glTexImage2DARB`, `glFramebufferTexture2DEXT`, `glRenderbufferStorageEXT`,
   `glGenerateMipmapEXT` and more. None were exported.
 - **The fixed-function surface was never exported either.** `glBegin`, `glEnd`, `glVertex3f`,
-  `glColor4f`, `glTexCoord2f`, the matrix stack and the client-array pointers existed only in
-  the resolver's stub table, and were stubbed rather than forwarded. ES 3.x implements all of
-  them, so 1.12-1.16 were drawing through calls that did nothing.
+  `glColor4f`, `glTexCoord2f` and friends existed only in the resolver's stub table.
 
-`crates/gl-compat/src/aliases.rs` exports the whole surface and **forwards** the calls ES
-implements, instead of stubbing them. Names ES genuinely lacks (`glTexImage1D`, `glSelectBuffer`,
-the evaluators, display lists, pixel maps) are exported as announcing stubs, so a client that
-depends on one is visible in the log instead of silently getting nothing. Exported entry points
-went from 453 to 569.
+  **Correction.** An earlier revision of this section said ES 3.x implements all of these and
+  that they were now forwarded. That was wrong: OpenGL ES 2.0 and 3.x have **no immediate
+  mode, no matrix stack and no fixed-function state** (that was ES 1.x). Forwarding them to
+  the driver dropped every call after one log line. `immediate.rs` now implements
+  `glBegin`/`glEnd`/`glVertex*`/`glColor*`/`glTexCoord*` for real: vertices are collected on
+  the CPU and `glEnd` draws them through the same path as client-array draws
+  (`QUAD_STRIP` -> `TRIANGLE_STRIP`, `POLYGON` -> `TRIANGLE_FAN`, `QUADS` expanded as before).
+
+  Names ES genuinely lacks (`glTexImage1D`, `glSelectBuffer`, the evaluators, display lists,
+  pixel maps) are exported as announcing stubs, so a client that depends on one is visible
+  in the log. `glGenLists` used to be declared as a void function taking a pointer, so
+  callers read garbage out of the return register; it now returns a real id range.
+  Display lists are still **not** recorded or replayed (1.12 entity models use them).
 
 ### The follow-up `0x0502`: depth formats paired with a type ES rejects
 
@@ -663,3 +669,30 @@ see *Sodium: why "pass Sodium conformance" is not a goal that can be met here*.
 
 ### Minecraft 1.16 compatibility
 The Android plugin sets `JAVA_TOOL_OPTIONS=-Dorg.lwjgl.util.NoChecks=true`. Minecraft 1.16 can pass a null fog buffer through its deprecated `RenderSystem.fog` path; LWJGL 3.3.3 normally rejects that at `Checks.check()` before the native compatibility shim is reached. The renderer's `glFogfv` shim safely ignores a null parameter, so disabling the Java-side LWJGL pointer check lets the compatibility layer handle the call instead of crashing.
+
+
+## Fixed-function emulation: what is and is not covered (1.12-1.16)
+
+Covered by `ff_draw.rs` / `fixed_func.rs` / `immediate.rs`:
+matrix stacks, client arrays, `glBegin`/`glEnd`, colour, texture unit 0, alpha test, **fog**
+(linear/exp/exp2, from the recorded `glFog*` state), the **lightmap** (unit 1 on 1.12-1.14,
+unit 2 on 1.15/1.16, with that unit's texture matrix applied) and the unit-0 texture matrix.
+Per-unit `GL_TEXTURE_2D` enable and `glActiveTexture` are now tracked, so enabling texturing
+on the lightmap unit no longer switches it on for unit 0.
+
+The extended program is compiled first; if it fails, the previous program is used and the log
+says `extended program failed`. Look for `fixed-function emulation program ready (extended...)`.
+
+**Not covered** (visible as flat or missing effects, not crashes):
+- lighting (`GL_LIGHTING`, `glLight*`, `glMaterial*`, normals) -- entities are not shaded
+- texture environment modes (`glTexEnv`), including the 1.15/1.16 entity overlay (unit 1,
+  `GL_COMBINE`) -- the hurt-flash tint is missing
+- display lists, `glPushAttrib`/`glPopAttrib` (announced, not applied)
+- compat-profile shader built-ins (`gl_Vertex`, `gl_ModelViewMatrix`, `ftransform()`,
+  `gl_Color`, ...) used by `#version 120` OptiFine shader packs. `shader-translate` rewrites the
+  matrices to `mat4(1.0)` and leaves `gl_Vertex` undeclared, so those packs either fail to
+  compile or draw wrong geometry. Supporting them means declaring `rust_*` attributes and
+  uniforms in the translator and feeding them from the FF state at draw time.
+
+**None of this has been compiled or run by the author of this change** (no Rust toolchain was
+available). Run `cargo test --workspace` and `tools/run-glsmoke.sh` first.

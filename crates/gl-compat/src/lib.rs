@@ -14,6 +14,7 @@ mod caps;
 mod dsa;
 mod dsa_named;
 mod ff_draw;
+mod immediate;
 mod fixed_func;
 mod gl33;
 
@@ -1265,7 +1266,6 @@ macro_rules! forward_all {
 }
 
 forward_all! {
-    glActiveTexture(t: u32);
     glAttachShader(p: u32, s: u32);
     glBindAttribLocation(p: u32, i: u32, n: *const c_char);
     glBindFramebuffer(t: u32, f: u32);
@@ -1974,6 +1974,9 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glTexCoordPointer" => glTexCoordPointer as *const c_void,
         b"glNormalPointer" => glNormalPointer as *const c_void,
         b"glClientActiveTexture" => glClientActiveTexture as *const c_void,
+        b"glActiveTexture" => glActiveTexture as *const c_void,
+        b"glActiveTextureARB" => glActiveTexture as *const c_void,
+        b"glClientActiveTextureARB" => glClientActiveTexture as *const c_void,
         b"glColor4f" => glColor4f as *const c_void,
         b"glColor3f" => glColor3f as *const c_void,
         b"glAlphaFunc" => glAlphaFunc as *const c_void,
@@ -2024,6 +2027,11 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"eglGetError" => eglGetError as *const c_void,
         b"eglReleaseThread" => eglReleaseThread as *const c_void,
         _ => {
+            // Immediate mode is implemented here; it must win over the stub table below.
+            let imm = immediate::resolve(n);
+            if !imm.is_null() {
+                return imm;
+            }
             let compat = gl33::resolve(n);
             if !compat.is_null() {
                 return compat;
@@ -2161,6 +2169,16 @@ pub extern "C" fn wglGetProcAddress(name: *const c_char) -> *const c_void {
 #[no_mangle] pub unsafe extern "C" fn glColorPointer(size: i32, ty: u32, stride: i32, ptr: *const c_void) { fixed_func::gl_color_pointer(size, ty, stride, ptr); }
 #[no_mangle] pub unsafe extern "C" fn glTexCoordPointer(size: i32, ty: u32, stride: i32, ptr: *const c_void) { fixed_func::gl_tex_coord_pointer(size, ty, stride, ptr); }
 #[no_mangle] pub unsafe extern "C" fn glNormalPointer(ty: u32, stride: i32, ptr: *const c_void) { fixed_func::gl_normal_pointer(ty, stride, ptr); }
+/// Tracks the active unit for the fixed-function emulation (texture matrices and the
+/// per-unit `GL_TEXTURE_2D` enable), then forwards to the driver.
+#[no_mangle]
+pub unsafe extern "C" fn glActiveTexture(texture: u32) {
+    fixed_func::set_active_texture(texture);
+    match driver_fn_cached::<unsafe extern "C" fn(u32)>("glActiveTexture") {
+        Some(f) => f(texture),
+        None => errors().set(GL_INVALID_OPERATION),
+    }
+}
 #[no_mangle] pub extern "C" fn glClientActiveTexture(texture: u32) { fixed_func::gl_client_active_texture(texture); }
 #[no_mangle] pub extern "C" fn glColor4f(r: f32, g: f32, b: f32, a: f32) { fixed_func::gl_color4f(r, g, b, a); }
 #[no_mangle] pub extern "C" fn glColor3f(r: f32, g: f32, b: f32) { fixed_func::gl_color3f(r, g, b); }

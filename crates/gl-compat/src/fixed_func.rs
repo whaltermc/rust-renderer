@@ -83,6 +83,16 @@ struct FfState {
     vertex: ClientArray,
     color: ClientArray,
     texcoord: ClientArray,
+    /// Texture coordinate arrays for units 1 and 2. 1.12-1.14 carry the lightmap on unit 1;
+    /// 1.15/1.16 move it to unit 2 and put the entity overlay on unit 1.
+    texcoord_x: [ClientArray; 2],
+    /// Texture matrix stacks for units 1 and 2 (`texture` is unit 0).
+    texture_x: [Vec<Mat4>; 2],
+    /// Server-side active unit (`glActiveTexture`); selects the texture matrix stack and the
+    /// unit that `glEnable(GL_TEXTURE_2D)` applies to.
+    active_unit: usize,
+    /// Per-unit `GL_TEXTURE_2D` enable for units 0..=2.
+    tex_enabled: [bool; 3],
     normal: ClientArray,
     client_active_texture: u32, // 0 = GL_TEXTURE0
     color4: [f32; 4],
@@ -110,13 +120,18 @@ impl FfState {
             vertex: ClientArray::default(),
             color: ClientArray::default(),
             texcoord: ClientArray::default(),
+            texcoord_x: [ClientArray::default(); 2],
+            texture_x: [vec![Mat4::identity()], vec![Mat4::identity()]],
+            active_unit: 0,
+            tex_enabled: [false; 3],
             normal: ClientArray::default(),
             client_active_texture: 0,
             color4: [1.0, 1.0, 1.0, 1.0],
             alpha_func: (0x0207, 0.0), // GL_ALWAYS
             fog_enabled: false,
-            // GL_FOG_MODE defaults to GL_EXP (0x0801), matching GL's own initial state.
-            fog_mode: 0x0801,
+            // GL_FOG_MODE defaults to GL_EXP. That is 0x0800; GL_EXP2 is 0x0801, which this used
+            // to return, so a game that queried the default saw the wrong mode.
+            fog_mode: 0x0800,
             fog_start: 0.0,
             fog_end: 1.0,
             fog_density: 1.0,
@@ -130,7 +145,11 @@ impl FfState {
     fn stack(&mut self) -> &mut Vec<Mat4> {
         match self.mode {
             GL_PROJECTION => &mut self.projection,
-            GL_TEXTURE => &mut self.texture,
+            GL_TEXTURE => match self.active_unit {
+                1 => &mut self.texture_x[0],
+                2 => &mut self.texture_x[1],
+                _ => &mut self.texture,
+            },
             _ => &mut self.modelview,
         }
     }
@@ -326,11 +345,12 @@ pub extern "C" fn gl_enable_client_state(cap: u32) {
     with_ff(|s| match cap {
         GL_VERTEX_ARRAY => s.vertex.enabled = true,
         GL_COLOR_ARRAY => s.color.enabled = true,
-        GL_TEXTURE_COORD_ARRAY => {
-            if s.client_active_texture == 0 {
-                s.texcoord.enabled = true;
-            }
-        }
+        GL_TEXTURE_COORD_ARRAY => match s.client_active_texture {
+            0 => s.texcoord.enabled = true,
+            1 => s.texcoord_x[0].enabled = true,
+            2 => s.texcoord_x[1].enabled = true,
+            _ => {}
+        },
         GL_NORMAL_ARRAY => s.normal.enabled = true,
         _ => {}
     });
@@ -340,11 +360,12 @@ pub extern "C" fn gl_disable_client_state(cap: u32) {
     with_ff(|s| match cap {
         GL_VERTEX_ARRAY => s.vertex.enabled = false,
         GL_COLOR_ARRAY => s.color.enabled = false,
-        GL_TEXTURE_COORD_ARRAY => {
-            if s.client_active_texture == 0 {
-                s.texcoord.enabled = false;
-            }
-        }
+        GL_TEXTURE_COORD_ARRAY => match s.client_active_texture {
+            0 => s.texcoord.enabled = false,
+            1 => s.texcoord_x[0].enabled = false,
+            2 => s.texcoord_x[1].enabled = false,
+            _ => {}
+        },
         GL_NORMAL_ARRAY => s.normal.enabled = false,
         _ => {}
     });
@@ -370,12 +391,14 @@ pub extern "C" fn gl_color_pointer(size: i32, ty: u32, stride: i32, ptr: *const 
 }
 
 pub extern "C" fn gl_tex_coord_pointer(size: i32, ty: u32, stride: i32, ptr: *const c_void) {
-    // Only texture unit 0 is emulated; unit 1 (lightmap) must not overwrite the base UVs.
+    // Units 1 and 2 keep their own arrays (lightmap / overlay); they must never overwrite the
+    // base UVs of unit 0.
     let buf = unsafe { crate::current_array_buffer() };
-    with_ff(|s| {
-        if s.client_active_texture == 0 {
-            set_array(&mut s.texcoord, size, ty, stride, ptr, buf)
-        }
+    with_ff(|s| match s.client_active_texture {
+        0 => set_array(&mut s.texcoord, size, ty, stride, ptr, buf),
+        1 => set_array(&mut s.texcoord_x[0], size, ty, stride, ptr, buf),
+        2 => set_array(&mut s.texcoord_x[1], size, ty, stride, ptr, buf),
+        _ => {}
     });
 }
 
@@ -564,6 +587,121 @@ pub fn matrix_for_pname(pname: u32) -> Option<[f32; 16]> {
     })
 }
 
+/// `glActiveTexture` hook: tracks which unit texture matrices and `GL_TEXTURE_2D` apply to.
+pub fn set_active_texture(texture: u32) {
+    with_ff(|s| s.active_unit = texture.saturating_sub(0x84C0) as usize);
+}
+
+/// Texture coordinate array of unit 1 or 2.
+pub fn texcoord_unit(unit: usize) -> ArraySnap {
+    with_ff(|s| match unit {
+        1 => snap(&s.texcoord_x[0]),
+        2 => snap(&s.texcoord_x[1]),
+        _ => snap(&s.texcoord),
+    })
+}
+
+/// Whether `glEnable(GL_TEXTURE_2D)` is in effect on `unit`.
+pub fn unit_texture_enabled(unit: usize) -> bool {
+    with_ff(|s| s.tex_enabled.get(unit).copied().unwrap_or(false))
+}
+
+/// Current texture matrix of unit 0, 1 or 2 (identity when never touched).
+pub fn texture_matrix(unit: usize) -> [f32; 16] {
+    with_ff(|s| {
+        let st = match unit {
+            1 => &s.texture_x[0],
+            2 => &s.texture_x[1],
+            _ => &s.texture,
+        };
+        st.last().copied().unwrap_or_else(Mat4::identity).0
+    })
+}
+
+pub fn modelview_matrix() -> [f32; 16] {
+    with_ff(|s| s.modelview.last().copied().unwrap_or_else(Mat4::identity).0)
+}
+
+/// Fog as the shader needs it. `mode`: 1 = linear, 2 = exp, 3 = exp2.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FogSnap {
+    pub mode: i32,
+    pub start: f32,
+    pub end: f32,
+    pub density: f32,
+    pub color: [f32; 4],
+}
+
+/// `None` when fog is disabled or the mode is not one fixed-function fog defines.
+pub fn fog() -> Option<FogSnap> {
+    with_ff(|s| {
+        if !s.fog_enabled {
+            return None;
+        }
+        let mode = match s.fog_mode {
+            0x2601 => 1, // GL_LINEAR
+            0x0800 => 2, // GL_EXP
+            0x0801 => 3, // GL_EXP2
+            _ => return None,
+        };
+        Some(FogSnap {
+            mode,
+            start: s.fog_start,
+            end: s.fog_end,
+            density: s.fog_density,
+            color: s.fog_color,
+        })
+    })
+}
+
+/// Client-array state saved while immediate mode points the arrays at its own buffers.
+pub struct SavedArrays {
+    vertex: ClientArray,
+    color: ClientArray,
+    texcoord: ClientArray,
+    texcoord_x: [ClientArray; 2],
+}
+
+/// Points the position / colour / unit-0 UV arrays at client memory owned by the caller
+/// (interleaving: position = 4 floats, colour = 4 floats, UV = 2 floats, all tightly packed).
+/// The caller must keep that memory alive until after the draw and then call [`pop_arrays`].
+pub fn push_arrays(pos: *const f32, col: *const f32, uv: Option<*const f32>) -> SavedArrays {
+    with_ff(|s| {
+        let saved = SavedArrays {
+            vertex: s.vertex,
+            color: s.color,
+            texcoord: s.texcoord,
+            texcoord_x: s.texcoord_x,
+        };
+        let arr = |size: i32, stride: i32, p: *const f32| ClientArray {
+            size,
+            ty: GL_FLOAT,
+            stride,
+            ptr: p as usize,
+            enabled: true,
+            buffer: 0,
+        };
+        s.vertex = arr(4, 16, pos);
+        s.color = arr(4, 16, col);
+        s.texcoord = match uv {
+            Some(p) => arr(2, 8, p),
+            None => ClientArray { enabled: false, ..s.texcoord },
+        };
+        s.texcoord_x[0].enabled = false;
+        s.texcoord_x[1].enabled = false;
+        saved
+    })
+}
+
+pub fn pop_arrays(saved: SavedArrays) {
+    with_ff(|s| {
+        s.vertex = saved.vertex;
+        s.color = saved.color;
+        s.texcoord = saved.texcoord;
+        s.texcoord_x = saved.texcoord_x;
+    });
+}
+
 pub fn client_vertex_enabled() -> bool {
     with_ff(|s| s.vertex.enabled)
 }
@@ -605,6 +743,16 @@ pub fn handle_cap(cap: u32, on: bool) -> bool {
         return false;
     }
     with_ff(|s| {
+        if cap == GL_TEXTURE_2D {
+            // Enable state is per texture unit. Recording it globally let `glEnable` on the
+            // lightmap unit switch texturing on for unit 0 (and `glDisable` switch it off).
+            if s.active_unit < 3 {
+                s.tex_enabled[s.active_unit] = on;
+            }
+            if s.active_unit != 0 {
+                return;
+            }
+        }
         if on {
             if !s.legacy_caps.contains(&cap) {
                 s.legacy_caps.push(cap);

@@ -7,15 +7,17 @@
 //!    historical names. They were reachable through `resolve_proc` only, so a client that
 //!    `dlsym`s the library got null -- `SIGSEGV pc=0x0`.
 //! 2. **The fixed-function surface was not exported at all.** `glBegin`, `glVertex3f`,
-//!    `glColor4f` and friends existed only in the resolver's stub table. ES 3.x implements
-//!    every one of them, so they are exported *and* forwarded: the 1.12-1.16 path draws
-//!    through exactly these calls, which is why stubbing them drew nothing.
+//!    `glColor4f` and friends existed only in the resolver's stub table. Note that OpenGL ES
+//!    does **not** implement them (ES 2.0 and 3.x have no immediate mode, matrix stack or
+//!    fixed-function state), so forwarding them to the driver drops every call. Immediate
+//!    mode is implemented for real in `immediate.rs`; what remains here is only what ES
+//!    can forward, plus names that are announced when used.
 //!
 //! Nothing here is a silent no-op. Names ES genuinely lacks are exported so a `dlsym`
 //! resolves them, and they announce themselves once so dependence is visible.
 
 use super::*;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 
 /// Announces a name that has no OpenGL ES implementation, once.
 fn announce_missing(name: &str) {
@@ -95,29 +97,6 @@ macro_rules! no_es_equivalent {
 // ---- immediate mode: ES implements all of this, and 1.12-1.16 draw through it -----------
 
 passthrough!(
-    glBegin(mode: u32);
-    glEnd();
-    glVertex2f(x: f32, y: f32);
-    glVertex3f(x: f32, y: f32, z: f32);
-    glVertex4f(x: f32, y: f32, z: f32, w: f32);
-    glVertex2d(x: f64, y: f64);
-    glVertex3d(x: f64, y: f64, z: f64);
-    glColor3b(r: i8, g: i8, b: i8);
-    glColor4b(r: i8, g: i8, b: i8, a: i8);
-    glColor3ub(r: u8, g: u8, b: u8);
-    glColor4ub(r: u8, g: u8, b: u8, a: u8);
-    glColor3s(r: i16, g: i16, b: i16);
-    glColor4s(r: i16, g: i16, b: i16, a: i16);
-    glColor3us(r: u16, g: u16, b: u16);
-    glColor4us(r: u16, g: u16, b: u16, a: u16);
-    glColor3i(r: i32, g: i32, b: i32);
-    glColor4i(r: i32, g: i32, b: i32, a: i32);
-    glColor3ui(r: u32, g: u32, b: u32);
-    glColor4ui(r: u32, g: u32, b: u32, a: u32);
-    glNormal3f(x: f32, y: f32, z: f32);
-    glTexCoord2f(s: f32, t: f32);
-    glTexCoord4f(s: f32, t: f32, r: f32, q: f32);
-    glMultiTexCoord2f(target: u32, s: f32, t: f32);
     glArrayElement(i: i32);
     glWindowPos2i(x: i32, y: i32);
     glPointSize(size: f32);
@@ -132,14 +111,42 @@ passthrough!(
     glPopAttrib();
     glPushClientAttrib(mask: u32);
     glPopClientAttrib();
-    glNewList(list: u32, mode: u32);
-    glEndList(list: u32);
-    glCallList(list: u32);
-    glGenLists(n: i32, lists: *mut i32);
-    glDeleteLists(n: i32, lists: *const i32);
     glLineStipple(factor: i32, pattern: u16);
-    glPolygonStipple(factor: i32, pattern: *const u16);
 );
+
+// ---- display lists ----------------------------------------------------------------------
+// Lists are not recorded or replayed (1.12 entity models are the main user). What matters
+// here is the ABI: `glGenLists` returns the first id of a range, and it used to be declared
+// as a void function taking a pointer, so callers read garbage out of the return register.
+
+static NEXT_LIST: AtomicU32 = AtomicU32::new(1);
+
+#[no_mangle]
+pub unsafe extern "C" fn glGenLists(range: i32) -> u32 {
+    if range <= 0 {
+        return 0;
+    }
+    NEXT_LIST.fetch_add(range as u32, Ordering::Relaxed)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glNewList(_list: u32, _mode: u32) {
+    announce_missing("glNewList (display lists are not recorded)");
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glEndList() {}
+
+#[no_mangle]
+pub unsafe extern "C" fn glCallList(_list: u32) {
+    announce_missing("glCallList (display lists are not replayed)");
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glDeleteLists(_list: u32, _range: i32) {}
+
+#[no_mangle]
+pub unsafe extern "C" fn glPolygonStipple(_mask: *const u8) {}
 
 // ---- ARB / EXT historical spellings ------------------------------------------------------
 // OptiFine reaches for these; each is the modern call under an older name.
@@ -154,7 +161,7 @@ forwards!(glTexParameterfvARB, glTexParameterfv, (t: u32, p: u32, v: *const f32)
 forwards!(glTexParameterivARB, glTexParameteriv, (t: u32, p: u32, v: *const i32));
 passthrough_as!(glGetTexImageARB, "glGetTexImage", (t: u32, l: i32, f: u32, ty: u32, p: *mut c_void));
 forwards!(glActiveTextureARB, glActiveTexture, (t: u32));
-forwards!(glClientActiveTextureARB, glActiveTexture, (t: u32));
+forwards!(glClientActiveTextureARB, glClientActiveTexture, (t: u32));
 forwards!(glGenerateMipmapEXT, glGenerateMipmap, (t: u32));
 forwards!(glDeleteTexturesEXT, glDeleteTextures, (n: i32, out: *const u32));
 forwards!(glGenFramebuffersEXT, glGenFramebuffers, (n: i32, out: *mut u32));
