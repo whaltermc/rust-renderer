@@ -77,9 +77,12 @@ val pluginRendererConfig = buildJsonValue {
                         "auto"
                     )
                 )
-            ),
+            )
             // 1 = report OpenGL 3.3 / GLSL 330 so version checks pass; 0 = report the real
             // GLES strings (useful when diagnosing a driver-specific problem).
+            // Explicit values rather than `toggleable`, because this variable defaults to
+            // "on" in code: an unset value means spoof enabled, so a switch that removes the
+            // variable when disabled could not turn it off.
             selectable(
                 key = "RENDERER_SPOOF_GL",
                 items = RendererConfig.EnvItems(
@@ -89,7 +92,7 @@ val pluginRendererConfig = buildJsonValue {
                         "0"
                     )
                 )
-            ),
+            )
             selectable(
                 key = "RENDERER_DEBUG",
                 items = RendererConfig.EnvItems(
