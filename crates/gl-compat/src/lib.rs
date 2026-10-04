@@ -50,6 +50,14 @@ pub(crate) fn current_array_buffer() -> u32 {
     ARRAY_BUFFER_BINDING.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Runs `f` only the first time it is called. Used for one-time diagnostics that would
+/// otherwise repeat per frame.
+pub(crate) fn log_once(flag: &std::sync::atomic::AtomicBool, msg: &str) {
+    if !flag.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        log(msg);
+    }
+}
+
 fn log(msg: &str) {
     #[cfg(target_os = "android")]
     {
@@ -1055,6 +1063,36 @@ pub unsafe extern "C" fn glGetTexLevelParameteriv(target: u32, level: i32, pname
 
 
 /// Desktop `glDrawBuffer(mode)` -> ES `glDrawBuffers(1, &mode)`.
+/// MRT draw-buffer selection, clamped to what the device actually supports.
+///
+/// Shader packs ask for as many layers as they declare (Complementary uses up to eight).
+/// ES 3.0 only guarantees four colour attachments, and passing the pack's full count to a
+/// driver that cannot honour it raises GL_INVALID_OPERATION — which shows up as a black or
+/// half-rendered world rather than a diagnosable error. Clamping keeps the frame drawing.
+#[no_mangle]
+pub unsafe extern "C" fn glDrawBuffers(n: i32, b: *const u32) {
+    if n < 0 || (n > 0 && b.is_null()) {
+        errors().set(GL_INVALID_VALUE);
+        return;
+    }
+    let max = caps::caps().max_draw_buffers;
+    let mut n = n;
+    if max > 0 && n > max {
+        static ONCE: AtomicBool = AtomicBool::new(false);
+        if !ONCE.swap(true, Ordering::Relaxed) {
+            log(&format!(
+                "[GLCompat] glDrawBuffers: device supports {max} draw buffers, \
+                 clamping the requested {n} (shader pack declares more layers than the GPU has)"
+            ));
+        }
+        n = max;
+    }
+    match driver_fn_cached::<unsafe extern "C" fn(i32, *const u32)>("glDrawBuffers") {
+        Some(g) => g(n, b),
+        None => errors().set(GL_INVALID_OPERATION),
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn glDrawBuffer(mode: u32) {
     match driver_fn_cached::<unsafe extern "C" fn(i32, *const u32)>("glDrawBuffers") {
@@ -1156,7 +1194,6 @@ forward_all! {
     glDepthMask(m: u8);
     glDetachShader(p: u32, s: u32);
     glDisableVertexAttribArray(i: u32);
-        glDrawBuffers(n: i32, b: *const u32);
     glDrawElements(m: u32, c: i32, t: u32, i: *const c_void);
     glEnableVertexAttribArray(i: u32);
     glFinish();
@@ -1608,6 +1645,7 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glBufferSubData" => glBufferSubData as *const c_void,
         b"glDeleteBuffers" => glDeleteBuffers as *const c_void,
         b"glBindBuffer" => glBindBuffer as *const c_void,
+        b"glDrawRangeElementsBaseVertex" => gl33::glDrawRangeElementsBaseVertex as *const c_void,
         // Direct State Access (GL 4.5 / ARB_DSA), emulated in dsa.rs
         b"glCreateBuffers" => dsa::glCreateBuffers as *const c_void,
         b"glCreateTextures" => dsa::glCreateTextures as *const c_void,

@@ -109,6 +109,52 @@ pub unsafe extern "C" fn glDrawElementsInstanced(mode:u32,count:i32,ty:u32,indic
     if let Some(x)=f::<unsafe extern "C" fn(u32,i32,u32,*const c_void,i32)>("glDrawElementsInstanced"){x(mode,count,ty,indices,primcount)}else{err(GL_INVALID_OPERATION)}
 }
 
+// GL 3.2 ranged draw with a base vertex. ES 3.2 defines this directly, so use it when the
+// driver has it. Otherwise the cases separate cleanly: with `base_vertex == 0` the call is
+// exactly `glDrawElements` at a byte offset of `start * stride`. A base vertex is a *vertex*
+// offset, not a byte offset, so it cannot be folded into that offset -- doing so would read
+// entirely different indices. That case needs the index data rewritten, so it is reported
+// rather than mis-rendered.
+#[no_mangle]
+pub unsafe extern "C" fn glDrawRangeElementsBaseVertex(
+    mode: u32,
+    start: i32,
+    count: i32,
+    ty: u32,
+    indices: *const c_void,
+    base_vertex: i32,
+) {
+    if count <= 0 {
+        return;
+    }
+    if let Some(direct) = f::<unsafe extern "C" fn(u32, i32, i32, u32, *const c_void, i32)>(
+        "glDrawElementsBaseVertex",
+    ) {
+        return direct(mode, start, count, ty, indices, base_vertex);
+    }
+    if base_vertex == 0 {
+        let stride = match ty {
+            0x1401 => 1usize, // GL_UNSIGNED_BYTE
+            0x1403 => 2,      // GL_UNSIGNED_SHORT
+            0x1405 => 4,      // GL_UNSIGNED_INT
+            _ => {
+                err(GL_INVALID_ENUM);
+                return;
+            }
+        };
+        if let Some(draw) = f::<unsafe extern "C" fn(u32, i32, u32, usize)>("glDrawElements") {
+            return draw(mode, count, ty, start.max(0) as usize * stride);
+        }
+    }
+    static ONCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    crate::log_once(
+        &ONCE,
+        "[gl33] glDrawRangeElementsBaseVertex with a non-zero base vertex needs ES 3.2 \
+         (glDrawElementsBaseVertex); this driver does not provide it",
+    );
+    err(GL_INVALID_OPERATION);
+}
+
 // GL 3.3's double-precision vertex attribute API has no GLES 3.0 equivalent.
 // Reject it explicitly rather than forwarding an incompatible ABI.
 #[no_mangle]
