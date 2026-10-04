@@ -813,14 +813,32 @@ fn egl_lib() -> Option<&'static EglLib> {
     static EGL: EglOnce<Option<EglLib>> = EglOnce::new();
     EGL.get_or_init(|| {
         // SAFETY: loading the system EGL library; failure is handled.
-        let lib = unsafe {
-            libloading::Library::new("libEGL.so")
-                .or_else(|_| libloading::Library::new("libEGL.so.1"))
-        };
-        let lib = match lib {
-            Ok(l) => l,
-            Err(e) => {
-                log(&format!("[EGL] cannot load libEGL.so: {e}"));
+        // Try absolute paths first — Android linker namespaces often block bare "libEGL.so"
+        // when called from an app-private .so.
+        let candidates = [
+            "/system/lib64/libEGL.so",
+            "/vendor/lib64/libEGL.so",
+            "/system/lib/libEGL.so",
+            "/vendor/lib/libEGL.so",
+            "libEGL.so",
+            "libEGL.so.1",
+        ];
+        let mut last_err = String::new();
+        let mut lib_opt = None;
+        for path in candidates {
+            match unsafe { libloading::Library::new(path) } {
+                Ok(l) => {
+                    log(&format!("[EGL] loaded {path}"));
+                    lib_opt = Some(l);
+                    break;
+                }
+                Err(e) => last_err = format!("{path}: {e}"),
+            }
+        }
+        let lib = match lib_opt {
+            Some(l) => l,
+            None => {
+                log(&format!("[EGL] cannot load libEGL.so ({last_err})"));
                 return None;
             }
         };

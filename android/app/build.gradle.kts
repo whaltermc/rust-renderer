@@ -33,7 +33,7 @@ val pluginRendererConfig = buildJsonValue {
         rendererGLPath = nativePath("librust_gl.so"),
 
         // If librust_gl.so provides EGL as well:
-        rendererEGLPath = "libEGL.so",
+        rendererEGLPath = nativePath("librust_gl.so"),
 
         dlopenLibPaths = emptyList(),
 
@@ -69,8 +69,8 @@ android {
         minSdk = 26
         targetSdk = 34
 
-        versionCode = 5
-        versionName = "0.1.4"
+        versionCode = 6
+        versionName = "0.1.5"
 
         resValue(
             "string",
