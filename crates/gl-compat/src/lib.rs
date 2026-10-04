@@ -1474,6 +1474,82 @@ fn resolve_legacy_stub(n: &[u8]) -> *const c_void {
 #[inline(never)]
 pub unsafe extern "C" fn legacy_noop_fn() {}
 
+// ---- core GL 1.x-3.3 entry points that used to resolve to NULL --------------------------------
+// LWJGL resolves every GL11..GL33 function at startup. With `-Dorg.lwjgl.util.NoChecks=true`
+// a NULL pointer is *called* instead of rejected, which is the `SIGSEGV pc=0x0` the 1.16.5
+// OptiFine launch died with. Everything below resolves to something callable.
+
+/// Desktop `glGetDoublev` -> ES `glGetFloatv`, widened. Matrices come from the emulated
+/// fixed-function stack. Unknown pnames write one value (the safest count for the caller).
+#[no_mangle]
+pub unsafe extern "C" fn glGetDoublev(pname: u32, data: *mut f64) {
+    if data.is_null() {
+        errors().set(GL_INVALID_VALUE);
+        return;
+    }
+    if let Some(m) = fixed_func::matrix_for_pname(pname) {
+        for (i, v) in m.iter().enumerate() {
+            *data.add(i) = *v as f64;
+        }
+        return;
+    }
+    let count = match pname {
+        0x0BA8 => 16,                       // GL_TEXTURE_MATRIX
+        0x0B70 | 0x0B21 | 0x0B12 | 0x0B22 => 2, // DEPTH_RANGE, LINE_WIDTH range/point size range
+        0x0C22 | 0x0B13 | 0x0B03 | 0x0BA2 | 0x0C23 => 4, // CLEAR_COLOR, VIEWPORT, ...
+        _ => 1,
+    };
+    let mut tmp = [0f32; 16];
+    if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, *mut f32)>("glGetFloatv") {
+        f(pname, tmp.as_mut_ptr());
+    }
+    for i in 0..count {
+        *data.add(i) = tmp[i] as f64;
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glPixelStoref(pname: u32, param: f32) {
+    glPixelStorei(pname, param as i32);
+}
+
+/// Desktop-only core calls with no GLES 3.0 equivalent. They are accepted, logged once, and
+/// raise nothing, so a mod that probes them keeps running instead of dying in native code.
+pub unsafe extern "C" fn core_unsupported_noop() -> usize {
+    static ONCE: AtomicBool = AtomicBool::new(false);
+    if !ONCE.swap(true, Ordering::Relaxed) {
+        log("[GLCompat] a desktop-only core GL call (1D textures / double attribs / conditional render) was made and ignored");
+    }
+    0
+}
+
+const CORE_UNSUPPORTED: &[&[u8]] = &[
+    b"glTexImage1D", b"glCopyTexImage1D", b"glCopyTexSubImage1D",
+    b"glCompressedTexImage1D", b"glCompressedTexSubImage1D",
+    b"glPointParameteri", b"glPointParameteriv",
+    b"glVertexAttrib1s", b"glVertexAttrib1d", b"glVertexAttrib2s", b"glVertexAttrib2d",
+    b"glVertexAttrib3s", b"glVertexAttrib3d", b"glVertexAttrib4s", b"glVertexAttrib4d",
+    b"glVertexAttrib1sv", b"glVertexAttrib1dv", b"glVertexAttrib2sv", b"glVertexAttrib2dv",
+    b"glVertexAttrib3sv", b"glVertexAttrib3dv", b"glVertexAttrib4sv", b"glVertexAttrib4dv",
+    b"glVertexAttrib4iv", b"glVertexAttrib4bv", b"glVertexAttrib4ubv", b"glVertexAttrib4usv",
+    b"glVertexAttrib4uiv", b"glVertexAttrib4Nbv", b"glVertexAttrib4Nsv", b"glVertexAttrib4Niv",
+    b"glVertexAttrib4Nubv", b"glVertexAttrib4Nusv", b"glVertexAttrib4Nuiv",
+    b"glGetVertexAttribdv",
+    b"glVertexAttribI1i", b"glVertexAttribI1ui", b"glVertexAttribI1iv", b"glVertexAttribI1uiv",
+    b"glVertexAttribI4bv", b"glVertexAttribI4sv", b"glVertexAttribI4ubv", b"glVertexAttribI4usv",
+    b"glBeginConditionalRender", b"glEndConditionalRender",
+    b"glFramebufferTexture1D", b"glFramebufferTexture3D",
+    b"glMultiDrawElementsBaseVertex",
+];
+
+fn resolve_core_unsupported(n: &[u8]) -> *const c_void {
+    if CORE_UNSUPPORTED.iter().any(|s| *s == n) {
+        core_unsupported_noop as *const c_void
+    } else {
+        std::ptr::null()
+    }
+}
+
 // ---- immutable buffer storage (GL 4.4 / ARB_buffer_storage) --------------------------------
 
 /// The buffer *binding* enum for a target, when it differs from the target enum itself.
@@ -1724,6 +1800,8 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glMaterialf" => glMaterialf as *const c_void,
         b"glMaterialfv" => glMaterialfv as *const c_void,
         b"glColorMaterial" => glColorMaterial as *const c_void,
+        b"glGetDoublev" => glGetDoublev as *const c_void,
+        b"glPixelStoref" => glPixelStoref as *const c_void,
         b"glTexParameterf" => glTexParameterf as *const c_void,
         b"glTexParameteriv" => glTexParameteriv as *const c_void,
         b"glTexParameterfv" => glTexParameterfv as *const c_void,
@@ -1802,6 +1880,10 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
             let stub = resolve_legacy_stub(n);
             if !stub.is_null() {
                 return stub;
+            }
+            let core = resolve_core_unsupported(n);
+            if !core.is_null() {
+                return core;
             }
             log(&format!("[GLBridge] Missing entry point: {name}"));
             std::ptr::null()

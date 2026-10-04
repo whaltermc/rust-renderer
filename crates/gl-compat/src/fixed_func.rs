@@ -481,6 +481,16 @@ pub fn mvp_matrix() -> [f32; 16] {
     })
 }
 
+/// Current fixed-function matrix for `GL_MODELVIEW_MATRIX` (0x0BA6) / `GL_PROJECTION_MATRIX`
+/// (0x0BA7), so `glGetDoublev` answers from the emulated stack instead of the ES driver.
+pub fn matrix_for_pname(pname: u32) -> Option<[f32; 16]> {
+    with_ff(|s| match pname {
+        0x0BA6 => Some(s.modelview.last().copied().unwrap_or_else(Mat4::identity).0),
+        0x0BA7 => Some(s.projection.last().copied().unwrap_or_else(Mat4::identity).0),
+        _ => None,
+    })
+}
+
 pub fn client_vertex_enabled() -> bool {
     with_ff(|s| s.vertex.enabled)
 }
