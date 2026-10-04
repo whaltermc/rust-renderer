@@ -11,6 +11,7 @@
 
 mod ff_draw;
 mod fixed_func;
+mod gl33;
 
 use renderer_core::{Backend, BackendKind, Config, GlErrorState};
 use std::ffi::{c_char, c_void, CStr, CString};
@@ -217,7 +218,7 @@ const GL_SHADING_LANGUAGE_VERSION: u32 = 0x8B8C;
 const GL_MAJOR_VERSION: u32 = 0x821B;
 const GL_MINOR_VERSION: u32 = 0x821C;
 
-static SPOOF_VERSION: &[u8] = b"3.3 (Compatibility Profile) RustRenderer GLES passthrough\0";
+static SPOOF_VERSION: &[u8] = b"3.3 (Core Profile) RustRenderer GLES translation\0";
 static SPOOF_GLSL: &[u8] = b"3.30\0";
 
 /// OPT-IN, EXPERIMENTAL: `RENDERER_SPOOF_GL=1` makes the renderer claim OpenGL 3.3 core.
@@ -399,7 +400,7 @@ pub unsafe extern "C" fn glGetIntegerv(pname: u32, data: *mut i32) {
         match pname {
             GL_MAJOR_VERSION => { *data = 3; return; }
             GL_MINOR_VERSION => { *data = 3; return; }
-            0x9126 => { *data = 0x0002; return; } // GL_CONTEXT_PROFILE_MASK = COMPATIBILITY_BIT
+            0x9126 => { *data = 0x0001; return; } // GL_CONTEXT_PROFILE_MASK = CORE_PROFILE_BIT
             GL_NUM_EXTENSIONS => {
                 // Prefer driver count; otherwise our advertised list length.
                 if let Some(f) = driver_fn::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
@@ -429,39 +430,28 @@ pub unsafe extern "C" fn glGetIntegerv(pname: u32, data: *mut i32) {
 fn advertised_extensions() -> &'static [&'static [u8]] {
     static EXTS: OnceLock<Vec<&'static [u8]>> = OnceLock::new();
     EXTS.get_or_init(|| {
-        // Core-ish ES3 + common desktop aliases Sodium / Iris probe for.
+        // Only advertise aliases whose semantics are backed by GLES 3.x or by
+        // an implementation in gl-compat. Do not claim timer queries, geometry,
+        // multisample-texture, or other desktop-only functionality merely because
+        // a mod checks for the extension string.
         let list: &[&[u8]] = &[
             b"GL_ARB_vertex_array_object\0",
             b"GL_ARB_explicit_attrib_location\0",
             b"GL_ARB_explicit_uniform_location\0",
             b"GL_ARB_instanced_arrays\0",
             b"GL_ARB_draw_instanced\0",
-            b"GL_ARB_draw_elements_base_vertex\0",
             b"GL_ARB_uniform_buffer_object\0",
             b"GL_ARB_map_buffer_range\0",
             b"GL_ARB_framebuffer_object\0",
-            b"GL_ARB_framebuffer_sRGB\0",
             b"GL_ARB_texture_storage\0",
-            b"GL_ARB_texture_float\0",
-            b"GL_ARB_texture_rg\0",
-            b"GL_ARB_texture_swizzle\0",
             b"GL_ARB_copy_buffer\0",
             b"GL_ARB_sync\0",
             b"GL_ARB_sampler_objects\0",
-            b"GL_ARB_timer_query\0",
-            b"GL_ARB_occlusion_query\0",
-            b"GL_ARB_occlusion_query2\0",
             b"GL_ARB_half_float_pixel\0",
             b"GL_ARB_half_float_vertex\0",
-            b"GL_ARB_provoking_vertex\0",
-            b"GL_ARB_seamless_cube_map\0",
-            b"GL_ARB_texture_multisample\0",
-            b"GL_ARB_blend_func_extended\0",
             b"GL_ARB_vertex_type_2_10_10_10_rev\0",
             b"GL_EXT_texture_filter_anisotropic\0",
             b"GL_KHR_debug\0",
-            b"GL_OES_texture_float\0",
-            b"GL_OES_texture_half_float\0",
             b"GL_OES_element_index_uint\0",
             b"GL_EXT_color_buffer_float\0",
             b"GL_EXT_color_buffer_half_float\0",
@@ -816,10 +806,8 @@ forward_all! {
     glDepthMask(m: u8);
     glDetachShader(p: u32, s: u32);
     glDisableVertexAttribArray(i: u32);
-        glDrawArraysInstanced(m: u32, f: i32, c: i32, n: i32);
-    glDrawBuffers(n: i32, b: *const u32);
+        glDrawBuffers(n: i32, b: *const u32);
     glDrawElements(m: u32, c: i32, t: u32, i: *const c_void);
-    glDrawElementsInstanced(m: u32, c: i32, t: u32, i: *const c_void, n: i32);
     glEnableVertexAttribArray(i: u32);
     glFinish();
     glFlush();
@@ -841,8 +829,6 @@ forward_all! {
     glGetShaderInfoLog(s: u32, b: i32, l: *mut i32, log: *mut c_char);
     glGetShaderiv(s: u32, n: u32, v: *mut i32);
     glGetUniformLocation(p: u32, n: *const c_char) -> i32;
-    glGetUniformBlockIndex(p: u32, n: *const c_char) -> u32;
-    glUniformBlockBinding(p: u32, i: u32, b: u32);
     glIsEnabled(c: u32) -> u8;
     glLinkProgram(p: u32);
     glPixelStorei(n: u32, v: i32);
@@ -874,7 +860,6 @@ forward_all! {
     glUseProgram(p: u32);
     glVertexAttribPointer(i: u32, s: i32, t: u32, n: u8, st: i32, p: *const c_void);
     glVertexAttribIPointer(i: u32, s: i32, t: u32, st: i32, p: *const c_void);
-    glVertexAttribDivisor(i: u32, d: u32);
     glUnmapBuffer(t: u32) -> u8;
     // --- additional ES 3.0 / desktop-common entry points ---
     glMapBufferRange(t: u32, o: isize, l: isize, a: u32) -> *mut c_void;
@@ -882,8 +867,6 @@ forward_all! {
     glCopyBufferSubData(r: u32, w: u32, ro: isize, wo: isize, s: isize);
     glGetBufferParameteriv(t: u32, n: u32, v: *mut i32);
     glGetBufferParameteri64v(t: u32, n: u32, v: *mut i64);
-    glTexStorage2D(t: u32, levels: i32, ifmt: u32, w: i32, h: i32);
-    glTexStorage3D(t: u32, levels: i32, ifmt: u32, w: i32, h: i32, d: i32);
     glTexSubImage3D(t: u32, l: i32, x: i32, y: i32, z: i32, w: i32, h: i32, d: i32, f: u32, ty: u32, data: *const c_void);
     glCompressedTexImage2D(t: u32, l: i32, ifmt: u32, w: i32, h: i32, b: i32, size: i32, data: *const c_void);
     glCompressedTexSubImage2D(t: u32, l: i32, x: i32, y: i32, w: i32, h: i32, f: u32, size: i32, data: *const c_void);
@@ -916,9 +899,6 @@ forward_all! {
     glInvalidateFramebuffer(t: u32, n: i32, attachments: *const u32);
     glInvalidateSubFramebuffer(t: u32, n: i32, attachments: *const u32, x: i32, y: i32, w: i32, h: i32);
     glRenderbufferStorageMultisample(t: u32, samples: i32, ifmt: u32, w: i32, h: i32);
-    glGetInteger64v(p: u32, d: *mut i64);
-    glGetIntegeri_v(p: u32, i: u32, d: *mut i32);
-    glGetInteger64i_v(p: u32, i: u32, d: *mut i64);
     glVertexAttrib1f(i: u32, x: f32);
     glVertexAttrib2f(i: u32, x: f32, y: f32);
     glVertexAttrib3f(i: u32, x: f32, y: f32, z: f32);
@@ -938,7 +918,6 @@ forward_all! {
     glClientWaitSync(s: *mut c_void, f: u32, timeout: u64) -> u32;
     glWaitSync(s: *mut c_void, f: u32, timeout: u64);
     glGetSynciv(s: *mut c_void, p: u32, buf: i32, len: *mut i32, v: *mut i32);
-    glDrawRangeElements(m: u32, start: u32, end: u32, c: i32, t: u32, i: *const c_void);
     glClearDepthf(d: f32);
     glDepthRangef(n: f32, f: f32);
     glGetProgramBinary(p: u32, buf: i32, len: *mut i32, format: *mut u32, binary: *mut c_void);
@@ -966,17 +945,10 @@ forward_all! {
     glUniform2ui(l: i32, a: u32, b: u32);
     glUniform3ui(l: i32, a: u32, b: u32, c: u32);
     glUniform4ui(l: i32, a: u32, b: u32, c: u32, d: u32);
-    glGetActiveUniformBlockiv(p: u32, i: u32, n: u32, v: *mut i32);
-    glGetActiveUniformBlockName(p: u32, i: u32, buf: i32, len: *mut i32, name: *mut c_char);
-    glGetUniformIndices(p: u32, count: i32, names: *const *const c_char, indices: *mut u32);
-    glGetActiveUniformsiv(p: u32, count: i32, indices: *const u32, n: u32, params: *mut i32);
     glDrawArraysInstancedBaseInstance(m: u32, f: i32, c: i32, n: i32, base: u32);
     glDrawElementsInstancedBaseVertex(m: u32, c: i32, t: u32, i: *const c_void, n: i32, base: i32);
     glDrawElementsBaseVertex(m: u32, c: i32, t: u32, i: *const c_void, base: i32);
-    glBindFragDataLocation(p: u32, color: u32, name: *const c_char);
     glGetFragDataLocation(p: u32, name: *const c_char) -> i32;
-    glMultiDrawArrays(mode: u32, first: *const i32, count: *const i32, drawcount: i32);
-    glMultiDrawElements(mode: u32, count: *const i32, ty: u32, indices: *const *const c_void, drawcount: i32);
     glGenQueries(n: i32, ids: *mut u32);
     glDeleteQueries(n: i32, ids: *const u32);
     glIsQuery(id: u32) -> u8;
@@ -985,11 +957,7 @@ forward_all! {
     glGetQueryiv(target: u32, pname: u32, params: *mut i32);
     glGetQueryObjectuiv(id: u32, pname: u32, params: *mut u32);
     glGetQueryObjectiv(id: u32, pname: u32, params: *mut i32);
-    glGetQueryObjectui64v(id: u32, pname: u32, params: *mut u64);
-    glGetQueryObjecti64v(id: u32, pname: u32, params: *mut i64);
-    glQueryCounter(id: u32, target: u32);
     glPrimitiveRestartIndex(index: u32);
-    glProvokingVertex(mode: u32);
     glBindFragDataLocationIndexed(program: u32, colorNumber: u32, index: u32, name: *const c_char);
     glGetFragDataIndex(program: u32, name: *const c_char) -> i32;
     glColorMaski(buf: u32, r: u8, g: u8, b: u8, a: u8);
@@ -1218,6 +1186,10 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"eglGetError" => eglGetError as *const c_void,
         b"eglReleaseThread" => eglReleaseThread as *const c_void,
         _ => {
+            let compat = gl33::resolve(n);
+            if !compat.is_null() {
+                return compat;
+            }
             let f = forwarded(n);
             if !f.is_null() {
                 return f;

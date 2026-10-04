@@ -11,10 +11,10 @@ renderer plugin APK.
 | `renderer-core` | Backend trait, config, error state, unit tests |
 | `gles-backend` | Full resource Backend over system GLES 3.0+ (dlopen) |
 | `vulkan-backend` | **not implemented** — `auto` falls back to GLES |
-| `gl-compat` `librust_gl.so` | Large GLES 3 forward set + desktop shims (see below) |
+| `gl-compat` `librust_gl.so` | GLES 3.x backend + OpenGL 3.3 compatibility entry-point layer + legacy fixed-function shims |
 | Shader translate | Version rewrite, precision, texture2D→texture, gl_FragColor, attribute/varying |
 | Format translate | BGRA swizzle, depth internal formats, clamp-to-border |
-| Desktop-only APIs / full MC parity | **incomplete** — expect missing entry points / shader failures |
+| OpenGL 3.3 core API surface | Broad entry-point coverage; unsupported desktop-only features return real GL errors instead of lying |
 | Vulkan path | not started |
 
 **Will Minecraft launch?** It *may* get past GL version checks and compile simple shaders.
@@ -22,6 +22,12 @@ Complex packs (Sodium, Iris, modern core-profile shaders, MRT, geometry shaders)
 fail. Treat every successful frame as a bonus and file the log line that broke.
 
 ## Compatibility shims (gl-compat)
+
+The 3.3 layer is a translation layer, not a fake desktop driver: GLES-compatible 3.3 calls are forwarded directly, desktop-only calls are emulated where practical, and features with no GLES 3.x equivalent fail explicitly.
+
+Covered 3.3-era paths include VAO/VBO/UBO state, sampler objects, instanced and range draws, multi-draw fallback loops, indexed buffer bindings, sync objects, query objects, texture storage, layered FBOs, multisample renderbuffers, clear-buffer APIs, integer/64-bit queries, transform-feedback/UBO forwarding, and packed vertex attributes.
+
+The shader translator also rewrites common GLSL 3.30 desktop constructs to GLSL ES 3.00, including desktop version headers, precision, `attribute`/`varying`, texture functions, explicit layout cleanup, `noperspective`, and double-precision type fallbacks.
 
 - `glShaderSource` — desktop GLSL → GLSL ES (header, precision, texture2D, FragColor, attr/varying)
 - `glTexImage2D` / `glTexSubImage2D` — BGRA → RGBA swizzle when unpack state is default
