@@ -395,9 +395,21 @@ pub unsafe extern "C" fn glGetIntegerv(pname: u32, data: *mut i32) {
         return;
     }
     if spoof_gl() {
+        const GL_NUM_EXTENSIONS: u32 = 0x821D;
         match pname {
             GL_MAJOR_VERSION => { *data = 3; return; }
             GL_MINOR_VERSION => { *data = 3; return; }
+            GL_NUM_EXTENSIONS => {
+                // Prefer driver count; otherwise our advertised list length.
+                if let Some(f) = driver_fn::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
+                    f(pname, data);
+                    if *data > 0 {
+                        return;
+                    }
+                }
+                *data = advertised_extensions().len() as i32;
+                return;
+            }
             _ => {}
         }
     }
@@ -410,8 +422,64 @@ pub unsafe extern "C" fn glGetIntegerv(pname: u32, data: *mut i32) {
     errors().set(GL_INVALID_OPERATION);
 }
 
+/// Extensions we advertise for modern MC / Sodium feature probes.
+/// Prefer real driver extensions; fall back to this curated list so mods that only
+/// check the string still enable their fast paths when the GLES driver has the feature.
+fn advertised_extensions() -> &'static [&'static [u8]] {
+    static EXTS: OnceLock<Vec<&'static [u8]>> = OnceLock::new();
+    EXTS.get_or_init(|| {
+        // Core-ish ES3 + common desktop aliases Sodium / Iris probe for.
+        let list: &[&[u8]] = &[
+            b"GL_ARB_vertex_array_object\0",
+            b"GL_ARB_explicit_attrib_location\0",
+            b"GL_ARB_instanced_arrays\0",
+            b"GL_ARB_draw_instanced\0",
+            b"GL_ARB_uniform_buffer_object\0",
+            b"GL_ARB_map_buffer_range\0",
+            b"GL_ARB_framebuffer_object\0",
+            b"GL_ARB_texture_storage\0",
+            b"GL_ARB_copy_buffer\0",
+            b"GL_ARB_sync\0",
+            b"GL_ARB_half_float_pixel\0",
+            b"GL_ARB_half_float_vertex\0",
+            b"GL_ARB_texture_float\0",
+            b"GL_ARB_texture_rg\0",
+            b"GL_ARB_draw_elements_base_vertex\0",
+            b"GL_ARB_provoking_vertex\0",
+            b"GL_ARB_seamless_cube_map\0",
+            b"GL_ARB_texture_swizzle\0",
+            b"GL_ARB_timer_query\0",
+            b"GL_ARB_occlusion_query\0",
+            b"GL_EXT_texture_filter_anisotropic\0",
+            b"GL_KHR_debug\0",
+            b"GL_OES_texture_float\0",
+            b"GL_OES_texture_half_float\0",
+            b"GL_OES_element_index_uint\0",
+            b"GL_EXT_color_buffer_float\0",
+            b"GL_EXT_color_buffer_half_float\0",
+        ];
+        list.to_vec()
+    })
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn glGetStringi(name: u32, index: u32) -> *const u8 {
+    const GL_EXTENSIONS: u32 = 0x1F03;
+    if name == GL_EXTENSIONS {
+        // Merge driver list with our advertised set by index: first driver, then ours.
+        // Prefer driver glGetStringi when available.
+        if let Some(f) = driver_fn::<unsafe extern "C" fn(u32, u32) -> *const u8>("glGetStringi") {
+            let p = f(name, index);
+            if !p.is_null() {
+                return p;
+            }
+        }
+        let exts = advertised_extensions();
+        if (index as usize) < exts.len() {
+            return exts[index as usize].as_ptr();
+        }
+        return std::ptr::null();
+    }
     match driver_fn::<unsafe extern "C" fn(u32, u32) -> *const u8>("glGetStringi") {
         Some(f) => f(name, index),
         None => {
@@ -887,7 +955,16 @@ forward_all! {
     glDrawElementsBaseVertex(m: u32, c: i32, t: u32, i: *const c_void, base: i32);
     glBindFragDataLocation(p: u32, color: u32, name: *const c_char);
     glGetFragDataLocation(p: u32, name: *const c_char) -> i32;
+    glMultiDrawArrays(mode: u32, first: *const i32, count: *const i32, drawcount: i32);
+    glMultiDrawElements(mode: u32, count: *const i32, ty: u32, indices: *const *const c_void, drawcount: i32);
+    glCopyBufferSubData(r: u32, w: u32, ro: isize, wo: isize, size: isize);
+    glInvalidateFramebuffer(t: u32, n: i32, att: *const u32);
+    glInvalidateSubFramebuffer(t: u32, n: i32, att: *const u32, x: i32, y: i32, w: i32, h: i32);
+    glTexStorage2D(t: u32, levels: i32, ifmt: u32, w: i32, h: i32);
+    glTexStorage3D(t: u32, levels: i32, ifmt: u32, w: i32, h: i32, d: i32);
+    glFenceSync(c: u32, f: u32) -> *mut c_void;
 }
+
 
 /// Symbol lookup used by LWJGL/GLFW-style loaders (`glXGetProcAddress` flavour).
 /// Returns null for anything unimplemented -- never a stub that pretends to work.
@@ -906,6 +983,18 @@ pub unsafe extern "C" fn glDrawArrays(mode: u32, first: i32, count: i32) {
     }
 }
 
+
+/// Desktop `glBufferStorage` → ES `glBufferData` (no persistent mapping on pure ES).
+#[no_mangle]
+pub unsafe extern "C" fn glBufferStorage(target: u32, size: isize, data: *const c_void, _flags: u32) {
+    // GL_STATIC_DRAW = 0x88E4 — good default when flags are ignored.
+    const GL_STATIC_DRAW: u32 = 0x88E4;
+    if let Some(f) = driver_fn::<unsafe extern "C" fn(u32, isize, *const c_void, u32)>("glBufferData") {
+        f(target, size, data, GL_STATIC_DRAW);
+    } else {
+        errors().set(GL_INVALID_OPERATION);
+    }
+}
 fn resolve_proc(n: &[u8]) -> *const c_void {
     match n {
         b"glGetError" => glGetError as *const c_void,
@@ -924,6 +1013,7 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glTexParameteri" => glTexParameteri as *const c_void,
         b"glDrawBuffer" => glDrawBuffer as *const c_void,
         b"glMapBuffer" => glMapBuffer as *const c_void,
+        b"glBufferStorage" => glBufferStorage as *const c_void,
         b"glPolygonMode" => glPolygonMode as *const c_void,
         b"glXGetProcAddress" | b"glXGetProcAddressARB" | b"glGetProcAddress" => {
             glXGetProcAddress as *const c_void

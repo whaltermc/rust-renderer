@@ -26,6 +26,10 @@ fn looks_like_fragment(src: &str) -> bool {
             && !src.contains("gl_PointSize"))
 }
 
+
+fn looks_like_compute(src: &str) -> bool {
+    src.contains("layout(local_size") || src.contains("#extension GL_ARB_compute_shader")
+}
 fn looks_like_geometry_or_tess(src: &str) -> bool {
     let lower = src.to_ascii_lowercase();
     lower.contains("#extension gl_ext_geometry_shader")
@@ -125,11 +129,15 @@ pub fn translate(src: &str) -> Result<String, String> {
     if es {
         return Ok(src.to_string());
     }
-    if num > 330 {
-        return Err(format!("GLSL {num} is not supported (maximum 330)"));
+    // Desktop GLSL 140–460 → GLSL ES 300. Higher versions may use features we cannot
+    // emulate (geometry/tess already rejected above; compute rejected separately).
+    // Sodium / modern MC often ships #version 150–410 core shaders that are still ES-able
+    // after attribute/varying/texture rewrite.
+    if num > 460 {
+        return Err(format!("GLSL {num} is not supported"));
     }
-    if num >= 400 {
-        return Err(format!("GLSL {num} requires desktop features unavailable on GLES"));
+    if looks_like_compute(src) {
+        return Err("compute shaders are not supported on GLES passthrough".into());
     }
 
     let use_300 = num >= 130;

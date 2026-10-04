@@ -201,7 +201,7 @@ pub unsafe fn try_draw_arrays(mode: u32, first: i32, count: i32) -> bool {
     };
 
     let n = DRAWS.fetch_add(1, Ordering::Relaxed);
-    if n == 0 || n % 5000 == 0 {
+    if (n == 0 || n % 10000 == 0) && std::env::var("RENDERER_DEBUG").map(|v| v == "1").unwrap_or(false) {
         crate::log(&format!(
             "[FFDraw] draw #{n}: mode=0x{mode:04X} first={first} count={count} pos(size={} ty=0x{:04X} stride={} vbo={}) color={} uv={}",
             pos.size, pos.ty, pos.stride, pos.buffer, col.enabled, uv.enabled
@@ -253,7 +253,9 @@ pub unsafe fn try_draw_arrays(mode: u32, first: i32, count: i32) -> bool {
 
     let d = DIAG.fetch_add(1, Ordering::Relaxed);
     let suspect = !use_tex && !has_color;
-    if d < 40 || (suspect && SUSPECT.fetch_add(1, Ordering::Relaxed) < 20) {
+    if std::env::var("RENDERER_DEBUG").map(|v| v == "1").unwrap_or(false)
+        && (d < 20 || (suspect && SUSPECT.fetch_add(1, Ordering::Relaxed) < 10))
+    {
         let c = fixed_func::current_color();
         crate::log(&format!(
             "[FFDraw] diag #{d}: mode=0x{mode:04X} count={count} tex={use_tex} texbind={tex_binding} color_array={has_color} uv_array={has_uv} alpha_mode={alpha_mode} cur_color=({:.2},{:.2},{:.2},{:.2})",

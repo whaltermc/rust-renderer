@@ -70,3 +70,28 @@ Logs: `adb logcat -s RustRenderer RendererV2Plugin`
 ## License / honesty
 
 Do not claim Minecraft compatibility until a concrete version has been tested and logged.
+
+## Support status
+
+| Target | Status |
+|--------|--------|
+| Vanilla MC 1.16 | **Works** — world render verified |
+| Vanilla MC 1.12–1.15 | Likely works (fixed-function path) |
+| Vanilla MC 1.17–1.20 | Partial — modern shaders via GLES3 passthrough + GLSL rewrite; test per version |
+| Vanilla MC 1.21+ | Experimental — needs more GL 4.x / DSA coverage |
+| Sodium | **Not yet** — needs multi-draw, buffer storage semantics, full extension set; shims started |
+| Iris / shader packs | **Not yet** — needs broader GLSL + extension surface (shadow, compute later) |
+| Performance | GLES driver does the heavy lifting; FF path is only used when no program is bound |
+
+### Enabling debug logs
+```
+RENDERER_DEBUG=1
+```
+
+### Roadmap toward Sodium / modern MC
+1. Extension string + `glGetStringi` advertising (started)
+2. `glBufferStorage` / multi-draw shims (started)
+3. Persistent mapped buffers / fence-heavy paths Sodium uses
+4. Full GLSL 410+ → ES 320 rewrite
+5. Optional Desktop-GL-on-Vulkan path long-term
+
