@@ -16,6 +16,28 @@ use std::sync::{Mutex, OnceLock};
 const GL_INVALID_VALUE: u32 = 0x0501;
 const GL_INVALID_OPERATION: u32 = 0x0502;
 
+
+/// Runs as soon as the dynamic linker maps this library (before any GL call).
+#[cfg(target_os = "android")]
+#[used]
+#[link_section = ".init_array"]
+static ANDROID_LOAD_LOG: extern "C" fn() = {
+    extern "C" fn on_load() {
+        // Direct Android log — no OnceLock / logger init required.
+        extern "C" {
+            fn __android_log_print(prio: i32, tag: *const u8, fmt: *const u8, ...) -> i32;
+        }
+        unsafe {
+            __android_log_print(
+                4, // INFO
+                b"RustRenderer\0".as_ptr(),
+                b"[RustRenderer] librust_gl.so loaded (init_array)\0".as_ptr(),
+            );
+        }
+    }
+    on_load
+};
+
 static BACKEND: OnceLock<Box<dyn Backend>> = OnceLock::new();
 static ERRORS: OnceLock<GlErrorState> = OnceLock::new();
 static INIT_LOCK: Mutex<()> = Mutex::new(());

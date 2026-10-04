@@ -32,8 +32,12 @@ val pluginRendererConfig = buildJsonValue {
         // Your actual native renderer library
         rendererGLPath = nativePath("librust_gl.so"),
 
-        // If librust_gl.so provides EGL as well:
-        rendererEGLPath = nativePath("librust_gl.so"),
+        // RELATIVE name only (no nativePath). Zalith does:
+        //   SDL_EGL_LIBRARY = "$nativeLibPath/$eglName"
+        // If eglName is already absolute, the path is doubled and dlopen fails.
+        // Relative "librust_gl.so" → correct pluginDir/librust_gl.so for SDL,
+        // and POJAVEXEC_EGL falls back to system libEGL.so if relative dlopen fails.
+        rendererEGLPath = "librust_gl.so",
 
         dlopenLibPaths = emptyList(),
 
@@ -69,8 +73,8 @@ android {
         minSdk = 26
         targetSdk = 34
 
-        versionCode = 6
-        versionName = "0.1.5"
+        versionCode = 7
+        versionName = "0.1.6"
 
         resValue(
             "string",
