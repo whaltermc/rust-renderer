@@ -111,22 +111,47 @@ jobs:
           fi
 
       # The project's own replay tool: loads librust_gl.so, replays a Minecraft capture and
-      # compares the rendered frame with a golden reference. Bundled fixtures cover the 1.17
-      # and 26.3 boundaries.
+      # compares the rendered frame with a golden reference (SSIM).
       - name: Replay Minecraft traces (tools/trace_replay)
         run: |
           sudo apt-get install -y --no-install-recommends cmake libegl1-mesa-dev libgles2-mesa-dev
-          set +e
-          for fixture in 1.17 26.3; do
-            echo "== fixture $fixture"
-            tools/trace_replay/run_fixture.sh "$fixture" 2>&1 | tee -a "target/replay-$fixture.log" | tail -20
-            echo "fixture $fixture exit: ${PIPESTATUS[0]}"
-          done
-          set -e
           mkdir -p target/reports/trace-replay
-          cp -r target/trace-replay/results target/reports/trace-replay/ 2>/dev/null || true
-          for f in target/replay-*.log; do [ -f "$f" ] && cp "$f" target/reports/trace-replay/; done
-          echo "::notice::trace_replay results are uploaded as artifacts; see result.json per fixture"
+          set +e
+          tools/trace_replay/run_fixture.sh 1.17 2>&1 | tee target/reports/trace-replay/1.17.log
+          vanilla=$?
+          # 26.3 is a shader-pack capture and does not currently match; it is reported every
+          # run so progress is visible, but it does not gate the job until it passes.
+          tools/trace_replay/run_fixture.sh 26.3 2>&1 | tee target/reports/trace-replay/26.3.log
+          shader=$?
+          set -e
+          cp -r target/trace-replay/results/. target/reports/trace-replay/ 2>/dev/null || true
+          {
+            echo "| fixture | scene | SSIM | threshold | verdict |"
+            echo "|---|---|---|---|---|"
+            for f in 1.17 26.3; do
+              r="target/trace-replay/results/$f/result.json"
+              [ -f "$r" ] || { echo "| $f | - | - | - | no result |"; continue; }
+              python3 - "$r" "$f" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          scene = "vanilla" if sys.argv[2] == "1.17" else "shader pack"
+          ssim = d.get("ssim")
+          thr = d.get("ssimThreshold", "?")
+          verdict = "PASS" if d.get("passed") else "FAIL"
+          print(f"| {sys.argv[2]} | {scene} | {ssim:.6f} | {thr} | {verdict} |")
+          PY
+            done
+          } > target/reports/trace-replay/summary.md
+          cat target/reports/trace-replay/summary.md
+          # Gate on the vanilla capture, which passes today. The shader-pack capture is
+          # reported but not yet a gate.
+          if [ "$vanilla" -ne 0 ]; then
+            echo "::error::the 1.17 vanilla replay regressed (exit $vanilla)"
+            exit 1
+          fi
+          if [ "$shader" -ne 0 ]; then
+            echo "::warning::the 26.3 shader-pack replay does not match yet (exit $shader); reported, not gating"
+          fi
 
       # Entry-point coverage measured against real Minecraft apitrace captures, from the
       # MobileGL fixture set. A name a real run calls but the library does not export is a

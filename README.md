@@ -387,6 +387,33 @@ shader against a real compiler, and the DSA vertex-array path 1.20.5+ uses. A sh
 fails to compile, a state call that no-ops, or a mis-bound attribute shows up as wrong pixels
 rather than as a black screen much later.
 
+### Visual replay: a real Minecraft frame, compared to a golden reference
+
+`tools/trace_replay/run_fixture.sh <1.17|26.3>` builds the replay tool, replays a bundled
+Minecraft capture **through `librust_gl.so`**, and scores the rendered frame against a golden
+PNG with SSIM. This is a real end-to-end visual test, not a smoke check.
+
+One setting is essential and was found by hitting the failure: **`RENDERER_SPOOF_GL=0`**. The
+replay must see the context the capture recorded, which is an ES context. With the spoof on,
+`glGetString` reports a desktop "3.3 (Core Profile)" string, the tool takes a desktop
+framebuffer-readback path against an ES context, and the snapshot comes back empty
+(`failed to get snapshot`) even though every call replayed. The runner now sets it.
+
+Current results on Mesa llvmpipe:
+
+| Fixture | Scene | SSIM | Threshold | Verdict |
+|---|---|---|---|---|
+| 1.17 main menu | vanilla | 0.999962 | 0.99 | **PASS** |
+| 26.3 improved-transparency | **shader pack** | 0.000006 | 0.995 | **FAIL** |
+
+The vanilla capture matching a golden frame is the strongest evidence so far that the GL
+translation is faithful for ordinary rendering.
+
+The shader-pack capture failing this badly — `mismatchPixels` is the whole frame, so it is not
+a subtle colour difference but a completely different image — is a measured answer to "can this
+run Complementary/Derivative": **not yet**, and it is now reproducible without a device. CI runs
+both, gates on 1.17, and reports 26.3 as a warning until it passes.
+
 ### Replaying real Minecraft captures
 
 `tools/trace-replay.sh` replays genuine Minecraft GL captures **through `librust_gl.so`**.

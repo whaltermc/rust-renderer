@@ -41,6 +41,13 @@ if [[ ! -f "$TOOL_DIR/vendor/apitrace/thirdparty/snappy/COPYING" ]]; then
 fi
 
 cargo build --release -p gl-compat
+
+# The retrace has to see the context the capture recorded, which is an ES context. With the
+# spoof on, glGetString reports a desktop "3.3 (Core Profile)" string, the replay tool takes a
+# desktop framebuffer readback path against an ES context, and the snapshot comes back empty
+# ("failed to get snapshot") even though every call replayed. Spoofing is for the game, not
+# for a recorded capture.
+export RENDERER_SPOOF_GL=0
 cmake -S "$TOOL_DIR" -B "$BUILD_DIR"
 cmake --build "$BUILD_DIR" --target rust_renderer_trace_replay --parallel
 
