@@ -237,7 +237,13 @@ pub unsafe fn try_draw_arrays(mode: u32, first: i32, count: i32) -> bool {
         }
     }
 
-    let use_tex = has_uv && fixed_func::legacy_cap_enabled(GL_TEXTURE_2D);
+    // Prefer real texture binding over legacy glEnable(GL_TEXTURE_2D).
+    // 1.16 often binds a 2D texture without the fixed-function enable bit.
+    const GL_TEXTURE_BINDING_2D: u32 = 0x8069;
+    let mut tex_binding = 0i32;
+    get_int(GL_TEXTURE_BINDING_2D, &mut tex_binding);
+    let use_tex = has_uv
+        && (fixed_func::legacy_cap_enabled(GL_TEXTURE_2D) || tex_binding != 0);
     let (afunc, aref) = fixed_func::alpha();
     let alpha_mode = if fixed_func::legacy_cap_enabled(GL_ALPHA_TEST) && (0x200..=0x207).contains(&afunc) {
         (afunc - 0x200 + 1) as i32
@@ -245,17 +251,19 @@ pub unsafe fn try_draw_arrays(mode: u32, first: i32, count: i32) -> bool {
         0
     };
 
-    // Diagnostics: the first 60 draws, plus untextured draws with no color array (these fall
-    // back to the current color, white by default -- the prime suspect for a white screen).
     let d = DIAG.fetch_add(1, Ordering::Relaxed);
     let suspect = !use_tex && !has_color;
-    if d < 60 || (suspect && SUSPECT.fetch_add(1, Ordering::Relaxed) < 40) {
+    if d < 40 || (suspect && SUSPECT.fetch_add(1, Ordering::Relaxed) < 20) {
         let c = fixed_func::current_color();
         crate::log(&format!(
-            "[FFDraw] diag #{d}: mode=0x{mode:04X} count={count} tex={use_tex} color_array={has_color} uv_array={has_uv} alpha_mode={alpha_mode} cur_color=({:.2},{:.2},{:.2},{:.2})",
+            "[FFDraw] diag #{d}: mode=0x{mode:04X} count={count} tex={use_tex} texbind={tex_binding} color_array={has_color} uv_array={has_uv} alpha_mode={alpha_mode} cur_color=({:.2},{:.2},{:.2},{:.2})",
             c[0], c[1], c[2], c[3]
         ));
     }
+
+    // Save program so we do not leave the FF shader bound for the game's next draw.
+    let mut prev_prog = 0i32;
+    get_int(GL_CURRENT_PROGRAM, &mut prev_prog);
 
     be.use_program(Some(gpu.prog));
     be.uniform_matrix_4(gpu.loc_mvp, &fixed_func::mvp_matrix(), false);
@@ -287,5 +295,11 @@ pub unsafe fn try_draw_arrays(mode: u32, first: i32, count: i32) -> bool {
     }
 
     restore(be, prev_vao, prev_abuf);
+    // Restore the game's program (0 = fixed-function / none).
+    if prev_prog != 0 {
+        be.use_program(Some(ProgramId(prev_prog as u32)));
+    } else {
+        be.use_program(None);
+    }
     true
 }
