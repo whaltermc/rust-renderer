@@ -96,23 +96,48 @@ pub extern "C" fn glGetError() -> u32 {
     if ours != 0 {
         return ours;
     }
-    backend().map(|b| b.get_error()).unwrap_or(0)
+    if let Some(b) = backend() {
+        return b.get_error();
+    }
+    unsafe {
+        type F = unsafe extern "C" fn() -> u32;
+        if let Some(f) = driver_fn::<F>("glGetError") {
+            return f();
+        }
+    }
+    0
 }
 
 #[no_mangle]
 pub extern "C" fn glClearColor(r: f32, g: f32, b: f32, a: f32) {
-    match backend() {
-        Some(be) => be.clear_color(r, g, b, a),
-        None => errors().set(GL_INVALID_OPERATION),
+    if let Some(be) = backend() {
+        be.clear_color(r, g, b, a);
+        return;
     }
+    unsafe {
+        type F = unsafe extern "C" fn(f32, f32, f32, f32);
+        if let Some(f) = driver_fn::<F>("glClearColor") {
+            f(r, g, b, a);
+            return;
+        }
+    }
+    errors().set(GL_INVALID_OPERATION);
 }
 
 #[no_mangle]
 pub extern "C" fn glClear(mask: u32) {
-    match backend() {
-        Some(be) => be.clear(mask),
-        None => errors().set(GL_INVALID_OPERATION),
+    if let Some(be) = backend() {
+        be.clear(mask);
+        return;
     }
+    unsafe {
+        type F = unsafe extern "C" fn(u32);
+        if let Some(f) = driver_fn::<F>("glClear") {
+            f(mask);
+            return;
+        }
+    }
+    errors().set(GL_INVALID_OPERATION);
 }
 
 #[no_mangle]
@@ -121,26 +146,50 @@ pub extern "C" fn glViewport(x: i32, y: i32, w: i32, h: i32) {
         errors().set(GL_INVALID_VALUE);
         return;
     }
-    match backend() {
-        Some(be) => be.viewport(x, y, w, h),
-        None => errors().set(GL_INVALID_OPERATION),
+    if let Some(be) = backend() {
+        be.viewport(x, y, w, h);
+        return;
     }
+    unsafe {
+        type F = unsafe extern "C" fn(i32, i32, i32, i32);
+        if let Some(f) = driver_fn::<F>("glViewport") {
+            f(x, y, w, h);
+            return;
+        }
+    }
+    errors().set(GL_INVALID_OPERATION);
 }
 
 #[no_mangle]
 pub extern "C" fn glEnable(cap: u32) {
-    match backend() {
-        Some(be) => be.enable(cap),
-        None => errors().set(GL_INVALID_OPERATION),
+    if let Some(be) = backend() {
+        be.enable(cap);
+        return;
     }
+    unsafe {
+        type F = unsafe extern "C" fn(u32);
+        if let Some(f) = driver_fn::<F>("glEnable") {
+            f(cap);
+            return;
+        }
+    }
+    errors().set(GL_INVALID_OPERATION);
 }
 
 #[no_mangle]
 pub extern "C" fn glDisable(cap: u32) {
-    match backend() {
-        Some(be) => be.disable(cap),
-        None => errors().set(GL_INVALID_OPERATION),
+    if let Some(be) = backend() {
+        be.disable(cap);
+        return;
     }
+    unsafe {
+        type F = unsafe extern "C" fn(u32);
+        if let Some(f) = driver_fn::<F>("glDisable") {
+            f(cap);
+            return;
+        }
+    }
+    errors().set(GL_INVALID_OPERATION);
 }
 
 const GL_VERSION: u32 = 0x1F02;
@@ -207,7 +256,10 @@ fn gles_driver() -> Option<&'static GlesDriver> {
 
 /// Resolve a GLES driver symbol by name. Safe to call before a context exists.
 unsafe fn driver_fn<T: Copy>(name: &str) -> Option<T> {
-    assert_eq!(std::mem::size_of::<T>(), std::mem::size_of::<*const c_void>());
+    if std::mem::size_of::<T>() != std::mem::size_of::<*const c_void>() {
+        log(&format!("[GLBridge] bad fn size for {name}"));
+        return None;
+    }
     // 1) dlsym from libGLESv3/v2
     if let Some(drv) = gles_driver() {
         let mut buf = [0u8; 128];
@@ -261,43 +313,81 @@ fn sys_egl_get_proc(name: &str) -> Option<*const c_void> {
     Some(unsafe { f(c.as_ptr()) })
 }
 
+static SPOOF_VENDOR: &[u8] = b"RustRenderer\0";
+static SPOOF_RENDERER: &[u8] = b"RustRenderer GLES passthrough\0";
+static SPOOF_EXTENSIONS: &[u8] = b"\0"; // empty; use glGetStringi when needed
+
 #[no_mangle]
 pub extern "C" fn glGetString(name: u32) -> *const u8 {
+    // Never return null for the strings LWJGL/Minecraft always query — null here = instant crash.
+    const GL_VENDOR: u32 = 0x1F00;
+    const GL_RENDERER: u32 = 0x1F01;
+    const GL_EXTENSIONS: u32 = 0x1F03;
+
     if spoof_gl() {
         match name {
             GL_VERSION => return SPOOF_VERSION.as_ptr(),
             GL_SHADING_LANGUAGE_VERSION => return SPOOF_GLSL.as_ptr(),
+            GL_VENDOR => return SPOOF_VENDOR.as_ptr(),
+            GL_RENDERER => return SPOOF_RENDERER.as_ptr(),
+            GL_EXTENSIONS => return SPOOF_EXTENSIONS.as_ptr(),
             _ => {}
         }
     }
-    match backend() {
-        Some(be) => be.get_string(name),
-        None => {
-            errors().set(GL_INVALID_OPERATION);
-            std::ptr::null()
+
+    // Prefer live driver if a context is up
+    if let Some(be) = backend() {
+        let p = be.get_string(name);
+        if !p.is_null() {
+            return p;
+        }
+    }
+
+    // Direct driver call (works once a GLES context is current)
+    unsafe {
+        type F = unsafe extern "C" fn(u32) -> *const u8;
+        if let Some(f) = driver_fn::<F>("glGetString") {
+            let p = f(name);
+            if !p.is_null() {
+                return p;
+            }
+        }
+    }
+
+    // Last-resort non-null fallbacks
+    match name {
+        GL_VENDOR => SPOOF_VENDOR.as_ptr(),
+        GL_RENDERER => SPOOF_RENDERER.as_ptr(),
+        GL_VERSION => SPOOF_VERSION.as_ptr(),
+        GL_SHADING_LANGUAGE_VERSION => SPOOF_GLSL.as_ptr(),
+        GL_EXTENSIONS => SPOOF_EXTENSIONS.as_ptr(),
+        _ => {
+            errors().set(GL_INVALID_VALUE);
+            SPOOF_EXTENSIONS.as_ptr()
         }
     }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn glGetIntegerv(pname: u32, data: *mut i32) {
-    if spoof_gl() && !data.is_null() {
+    if data.is_null() {
+        errors().set(GL_INVALID_VALUE);
+        return;
+    }
+    if spoof_gl() {
         match pname {
-            GL_MAJOR_VERSION => {
-                *data = 3;
-                return;
-            }
-            GL_MINOR_VERSION => {
-                *data = 3;
-                return;
-            }
+            GL_MAJOR_VERSION => { *data = 3; return; }
+            GL_MINOR_VERSION => { *data = 3; return; }
             _ => {}
         }
     }
-    match driver_fn::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
-        Some(f) => f(pname, data),
-        None => errors().set(GL_INVALID_OPERATION),
+    if let Some(f) = driver_fn::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
+        f(pname, data);
+        return;
     }
+    // Safe zeros rather than leaving uninitialized memory for the caller
+    *data = 0;
+    errors().set(GL_INVALID_OPERATION);
 }
 
 #[no_mangle]
@@ -974,4 +1064,27 @@ pub unsafe extern "C" fn eglGetProcAddress(name: *const c_char) -> *const c_void
         Some(f) => f(name),
         None => std::ptr::null(),
     }
+}
+
+
+// =============================================================================
+// Mesa DRI stubs — Zalith may set LIB_MESA_NAME to our .so when the V2 plugin
+// is not counted as selectedRendererPlugin. Returning null extensions avoids
+// a hard crash inside the Mesa loader.
+// =============================================================================
+
+#[no_mangle]
+pub extern "C" fn __driDriverGetExtensions() -> *const *const c_void {
+    log("[GLBridge] __driDriverGetExtensions stub (not a Mesa driver)");
+    std::ptr::null()
+}
+
+#[no_mangle]
+pub extern "C" fn __driDriverGetExtensions_zink() -> *const *const c_void {
+    __driDriverGetExtensions()
+}
+
+#[no_mangle]
+pub extern "C" fn __driDriverGetExtensions_virtio_gpu() -> *const *const c_void {
+    __driDriverGetExtensions()
 }

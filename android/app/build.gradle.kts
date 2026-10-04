@@ -27,7 +27,7 @@ val pluginRendererConfig = buildJsonValue {
         displayName = "Rust Renderer",
 
         // This becomes POJAV_RENDERER
-        rendererId = "rust_renderer",
+        rendererId = "opengles3_rust",
 
         // Your actual native renderer library
         rendererGLPath = nativePath("librust_gl.so"),
@@ -39,7 +39,7 @@ val pluginRendererConfig = buildJsonValue {
         // and POJAVEXEC_EGL falls back to system libEGL.so if relative dlopen fails.
         // MobileGL-style relative basename:
         // POJAVEXEC_EGL=librust_gl.so  SDL_EGL_LIBRARY=<pluginDir>/librust_gl.so
-        rendererEGLPath = "librust_gl.so",
+        rendererEGLPath = nativePath("librust_gl.so"),
 
         dlopenLibPaths = emptyList(),
 
@@ -88,8 +88,8 @@ android {
         minSdk = 26
         targetSdk = 34
 
-        versionCode = 14
-        versionName = "0.1.13"
+        versionCode = 15
+        versionName = "0.1.14"
 
         resValue(
             "string",
