@@ -119,7 +119,7 @@ val pluginRendererConfig = buildJsonValue {
                         "1"
                     )
                 )
-            ),
+            )
             selectable(
                 key = "RENDERER_DEBUG",
                 items = RendererConfig.EnvItems(
