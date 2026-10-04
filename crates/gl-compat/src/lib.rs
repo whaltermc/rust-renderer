@@ -945,7 +945,6 @@ forward_all! {
     glUniform2ui(l: i32, a: u32, b: u32);
     glUniform3ui(l: i32, a: u32, b: u32, c: u32);
     glUniform4ui(l: i32, a: u32, b: u32, c: u32, d: u32);
-    glDrawArraysInstancedBaseInstance(m: u32, f: i32, c: i32, n: i32, base: u32);
     glDrawElementsInstancedBaseVertex(m: u32, c: i32, t: u32, i: *const c_void, n: i32, base: i32);
     glDrawElementsBaseVertex(m: u32, c: i32, t: u32, i: *const c_void, base: i32);
     glGetFragDataLocation(p: u32, name: *const c_char) -> i32;
