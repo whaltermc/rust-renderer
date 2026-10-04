@@ -129,12 +129,37 @@ impl Backend for VulkanBackend {
 
     fn compile_shader(
         &self,
-        _kind: u32,
-        _source: &str,
+        kind: u32,
+        source: &str,
     ) -> Result<renderer_core::ShaderId, BackendError> {
-        Err(BackendError::Unsupported(
-            "Vulkan needs GLSL compiled to SPIR-V; no SPIR-V compiler is linked".into(),
-        ))
+        #[cfg(not(feature = "spirv"))]
+        {
+            Err(BackendError::Unsupported(
+                "Vulkan needs GLSL compiled to SPIR-V; build with the `spirv` feature to \
+                 enable the compiler"
+                    .into(),
+            ))
+        }
+        #[cfg(feature = "spirv")]
+        {
+            let stage = crate::spirv::stage_for_gl_enum(kind)
+                .map_err(BackendError::Unsupported)?;
+            match crate::spirv::compile(source, stage, &[]) {
+                Ok(words) => {
+                    // Words in hand, but nothing consumes them yet: there is no
+                    // VkShaderModule, pipeline layout or submit path. Handing back an id
+                    // would pretend otherwise, so this stays unsupported -- and says why.
+                    crate::log(&format!(
+                        "[Vulkan] compiled {} SPIR-V words, but cannot create a pipeline yet",
+                        words.len()
+                    ));
+                    Err(BackendError::Unsupported(
+                        "Vulkan can compile SPIR-V but has no pipeline path yet".into(),
+                    ))
+                }
+                Err(e) => Err(BackendError::Unsupported(e)),
+            }
+        }
     }
     fn delete_shader(&self, _id: renderer_core::ShaderId) {}
     fn link_program(

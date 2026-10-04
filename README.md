@@ -570,6 +570,24 @@ GL_VERTEX_ATTRIB_ARRAY_STRIDE)` returns 0 even for an attribute that demonstrabl
 correctly, so stride cannot be used to diagnose anything here. That is why the harness no
 longer reports stride as data.
 
+### GLSL to SPIR-V (naga)
+
+`crates/backend/src/spirv.rs` compiles GLSL to SPIR-V using `naga`, behind a cargo feature
+that is **off by default**. Verified: a vertex shader compiles to a real SPIR-V module (the
+test asserts the `0x07230203` magic word, so it is genuinely SPIR-V and not empty output).
+
+Trunk is used rather than the published crate because `naga 30.0.1`'s `glsl-in` feature does
+not compile — the front-end calls `apply_default_interpolation`, which no longer exists on the
+interpolation enum. Trunk has that fixed and renamed the front-end API (`Options { stage,
+defines }` replaces `Version`). The dependency is pinned to an exact revision for that reason.
+It resolves from git, so it is optional: an offline or NDK-only build is not forced to fetch it.
+
+This does **not** make Vulkan able to draw. Words in hand are not a renderer: there is still no
+`VkShaderModule`, pipeline layout, descriptor sets, render pass, command buffer or swapchain,
+which is why `can_render()` stays `false` and `compile_shader` still returns `Unsupported` —
+now with an accurate reason instead of "no compiler linked". Geometry shaders are rejected
+explicitly, since naga has no Geometry stage.
+
 ### Vendored native dependencies
 
 `third_party/glslang` (Khronos, Apache-2.0, pinned at 15.0.0) is vendored as a submodule for

@@ -14,7 +14,14 @@
 //! They were separate crates until they shared enough to be worth one module; the split was
 //! costing a dependency edge and two import paths for no isolation either of them used.
 
+/// Diagnostic output, mirroring the bridge's own logging so both appear in the same stream.
+pub(crate) fn log(msg: &str) {
+    eprintln!("[Backend] {msg}");
+}
+
 pub mod gles;
+#[cfg(feature = "spirv")]
+pub mod spirv;
 pub mod vulkan;
 
 pub use gles::GlesBackend;

@@ -6,3 +6,17 @@ edition = "2021"
 [dependencies]
 renderer-core = { path = "../renderer-core" }
 libloading = "0.8"
+
+# GLSL -> SPIR-V. Off by default: it resolves from git, so an offline or NDK-only build
+# should not be forced to fetch it. Pinned to a revision because the published 30.0.1 has a
+# broken `glsl-in` (it calls a method that no longer exists), and trunk renamed the front-end
+# API. Trunk is what compiles; see backend/src/spirv.rs.
+[features]
+spirv = ["dep:naga"]
+
+[dependencies.naga]
+git = "https://github.com/gfx-rs/wgpu"
+rev = "14685942a11755e4581c40729dd44591d1d73680"
+package = "naga"
+features = ["glsl-in", "spv-out"]
+optional = true
