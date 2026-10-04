@@ -101,3 +101,6 @@ RENDERER_DEBUG=1
 4. Full GLSL 410+ → ES 320 rewrite
 5. Optional Desktop-GL-on-Vulkan path long-term
 
+
+### Minecraft 1.16 compatibility
+The Android plugin sets `JAVA_TOOL_OPTIONS=-Dorg.lwjgl.util.NoChecks=true`. Minecraft 1.16 can pass a null fog buffer through its deprecated `RenderSystem.fog` path; LWJGL 3.3.3 normally rejects that at `Checks.check()` before the native compatibility shim is reached. The renderer's `glFogfv` shim safely ignores a null parameter, so disabling the Java-side LWJGL pointer check lets the compatibility layer handle the call instead of crashing.

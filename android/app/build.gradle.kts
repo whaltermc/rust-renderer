@@ -51,6 +51,7 @@ val pluginRendererConfig = buildJsonValue {
             normal("RENDERER_BACKEND", "gles")
             // Our glGetString spoof (see gl-compat) reports 3.3 / GLSL 330.
             normal("RENDERER_SPOOF_GL", "1")
+            normal("JAVA_TOOL_OPTIONS", "-Dorg.lwjgl.util.NoChecks=true")
 
             // Override Zalith defaults that otherwise inject Mesa 4.6 + zink for
             // non-GL4ES renderers. Those contradict GLES passthrough and confuse
