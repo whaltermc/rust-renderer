@@ -303,6 +303,30 @@ Logs: `adb logcat -s RustRenderer RendererV2Plugin`
 5. Standalone triangle / FBO test APK — the cheapest way to test a GL path
    without a full Minecraft launch
 
+### Testing the build without a device
+
+`tools/run-glsmoke.sh` renders a triangle **through the built `librust_gl.so`** on a headless
+GLES context and checks the resulting pixels. It links only EGL and resolves every GL entry
+point from the bridge at runtime, so no check can pass by quietly reaching the driver instead.
+Needs Mesa's software rasteriser:
+
+```bash
+sudo apt-get install -y libegl1 libgles2 libegl1-mesa-dev libgles2-mesa-dev
+./tools/run-glsmoke.sh
+```
+
+It covers what unit tests cannot: the spoofed version string, extension enumeration agreeing
+with `GL_NUM_EXTENSIONS`, FBO completeness, desktop-GLSL-to-ES translation of a 120-era MRT
+shader against a real compiler, and the DSA vertex-array path 1.20.5+ uses. A shader that
+fails to compile, a state call that no-ops, or a mis-bound attribute shows up as wrong pixels
+rather than as a black screen much later.
+
+**Known issue, tracked by the harness:** the DSA path renders nothing. The attribute's buffer
+binding is correct (`attrib_buffer` matches) but its stride stays 0, and an explicit
+`glVertexAttribPointer` on a DSA-created vertex array is rejected with `GL_INVALID_ENUM` — so
+the fault is in how the DSA vertex array is created, not in the format bookkeeping. The check
+is reported as a known issue so it stays visible; flip it to a hard assertion once fixed.
+
 ### How to actually verify a GL change
 
 The 3.3 layer can only be trusted against a real device. Loop for each entry-point change:

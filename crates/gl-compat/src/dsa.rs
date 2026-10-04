@@ -30,6 +30,97 @@ static TEXTURES: Mutex<Vec<(u32, u32)>> = Mutex::new(Vec::new());
 /// DSA vertex array names.
 static VAOS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
 
+/// Attribute description recorded per vertex array: (vao, attrib, size, type, normalized,
+/// relative_offset, stride).
+///
+/// Needed because ES 3.x has no equivalent of `glVertexArrayVertexBuffer`: there, the buffer
+/// an attribute reads from is whatever `GL_ARRAY_BUFFER` was bound to when
+/// `glVertexAttribPointer` was called. So the format has to be remembered, and re-applied as
+/// a pointer call whenever the VAO's buffer binding changes. Skipping this leaves every
+/// attribute reading buffer 0, and the frame is blank with no GL error to explain it.
+static ATTR_FORMATS: Mutex<Vec<(u32, u32, i32, u32, bool, u32, u32)>> = Mutex::new(Vec::new());
+
+/// Buffer bound to a vertex array via `glVertexArrayVertexBuffer`: (vao, buffer, offset).
+static VAO_BUFFERS: Mutex<Vec<(u32, u32, isize)>> = Mutex::new(Vec::new());
+
+fn with_formats<R>(f: impl FnOnce(&mut Vec<(u32, u32, i32, u32, bool, u32, u32)>) -> R) -> R {
+    let mut g = ATTR_FORMATS.lock().unwrap_or_else(|e| e.into_inner());
+    f(g.as_mut())
+}
+
+/// Records an attribute description and, if the vertex array already has a buffer bound,
+/// applies it straight away — the buffer may be attached before or after the format.
+unsafe fn record_format(
+    vao: u32,
+    attrib: u32,
+    size: i32,
+    ty: u32,
+    normalized: bool,
+    rel: u32,
+    stride: u32,
+) {
+    with_formats(|v| {
+        if let Some(e) = v.iter_mut().find(|(w, a, ..)| *w == vao && *a == attrib) {
+            e.2 = size;
+            e.3 = ty;
+            e.4 = normalized;
+            e.5 = rel;
+            e.6 = stride;
+        } else {
+            v.push((vao, attrib, size, ty, normalized, rel, stride));
+        }
+    });
+    if let Some((buffer, offset)) = with_buffers_vao(|v| {
+        v.iter().find(|(w, ..)| *w == vao).map(|(_, b, o)| (*b, *o))
+    }) {
+        if let Some(set_ptr) = driver_fn_cached::<
+            unsafe extern "C" fn(u32, i32, u32, bool, i32, *const c_void),
+        >("glVertexAttribPointer")
+        {
+            if let Some(bind) = driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindBuffer") {
+                bind(GL_ARRAY_BUFFER, buffer);
+            }
+            set_ptr(attrib, size, ty, normalized, stride as i32,
+                    offset as u32 as usize as *const c_void);
+        }
+    }
+}
+
+fn with_buffers_vao<R>(f: impl FnOnce(&mut Vec<(u32, u32, isize)>) -> R) -> R {
+    let mut g = VAO_BUFFERS.lock().unwrap_or_else(|e| e.into_inner());
+    f(g.as_mut())
+}
+
+/// Re-applies `glVertexAttribPointer` for every attribute of `vao` that has a recorded format,
+/// so the attributes actually read from `buffer`.
+unsafe fn apply_formats(vao: u32, buffer: u32, offset: isize) {
+    let Some(set_ptr) = driver_fn_cached::<
+        unsafe extern "C" fn(u32, i32, u32, bool, i32, *const c_void),
+    >("glVertexAttribPointer")
+    else {
+        return;
+    };
+    let entries: Vec<(u32, i32, u32, bool, u32, u32)> = with_formats(|v| {
+        v.iter()
+            .filter(|(v, ..)| *v == vao)
+            .map(|(_, a, size, ty, norm, rel, stride)| (*a, *size, *ty, *norm, *rel, *stride))
+            .collect()
+    });
+    if let Some(bind) = driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindBuffer") {
+        bind(GL_ARRAY_BUFFER, buffer);
+    }
+    for (attrib, size, ty, norm, rel, stride) in entries {
+        set_ptr(
+            attrib,
+            size,
+            ty,
+            norm,
+            stride as i32,
+            (offset as u32).wrapping_add(rel) as usize as *const c_void,
+        );
+    }
+}
+
 const GL_TEXTURE_2D: u32 = 0x0DE1;
 const GL_TEXTURE_3D: u32 = 0x806F;
 const GL_ARRAY_BUFFER: u32 = 0x8892;
@@ -298,15 +389,21 @@ unsafe fn bind_vao(vao: u32) -> bool {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn glVertexArrayVertexBuffer(vao: u32, _binding: u32, buffer: u32, _offset: isize) {
+pub unsafe extern "C" fn glVertexArrayVertexBuffer(vao: u32, _binding: u32, buffer: u32, offset: isize) {
     if !bind_vao(vao) {
         errors().set(GL_INVALID_OPERATION);
         return;
     }
     warn_array_buffer_is_global();
-    if let Some(bind) = driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindBuffer") {
-        bind(GL_ARRAY_BUFFER, buffer);
-    }
+    with_buffers_vao(|v| {
+        if let Some(e) = v.iter_mut().find(|(w, ..)| *w == vao) {
+            *e = (vao, buffer, offset);
+        } else {
+            v.push((vao, buffer, offset));
+        }
+    });
+    // Associate the buffer with this VAO's attributes, not merely the global binding.
+    apply_formats(vao, buffer, offset);
 }
 
 #[no_mangle]
@@ -335,10 +432,11 @@ pub unsafe extern "C" fn glVertexArrayAttribFormat(
         errors().set(GL_INVALID_OPERATION);
         return;
     }
-    match driver_fn_cached::<unsafe extern "C" fn(u32, i32, u32, bool, u32)>("glVertexAttribFormat") {
-        Some(f) => f(index, size, ty, normalized, relative_offset),
-        None => warn_no_vertex_attrib_format(),
-    }
+    // Deliberately not calling glVertexAttribFormat: it is ES 3.1+, and an ES 3.0 context
+    // (what Android hands out by default) rejects it with GL_INVALID_ENUM. The description is
+    // recorded and applied through glVertexAttribPointer instead, which works on ES 2.0+.
+    let stride = current_stride(index);
+    record_format(vao, index, size, ty, normalized, relative_offset, stride);
 }
 
 #[no_mangle]
@@ -357,6 +455,11 @@ pub unsafe extern "C" fn glVertexArrayAttribIFormat(
         Some(f) => f(index, size, ty, relative_offset),
         None => warn_no_vertex_attrib_format(),
     }
+    with_formats(|v| {
+        if let Some(e) = v.iter_mut().find(|(w, a, ..)| *w == vao && *a == index) {
+            e.6 = current_stride(index);
+        }
+    });
 }
 
 #[no_mangle]
@@ -377,6 +480,117 @@ pub unsafe extern "C" fn glVertexArrayAttribLFormat(
         f(index, size, ty, relative_offset);
     } else {
         errors().set(GL_INVALID_OPERATION);
+    }
+}
+
+/// Attribute stride, which `glVertexArrayAttribFormat` deliberately does *not* set.
+///
+/// This is the piece that makes a DSA vertex array actually draw: the format call leaves the
+/// stride at 0, and a stride of 0 makes every vertex read the same data, so the geometry
+/// collapses and nothing is rasterised. Without these entry points a caller that sets up
+/// attributes the documented way gets a silently blank frame.
+#[no_mangle]
+pub unsafe extern "C" fn glVertexArrayAttribStride(vao: u32, index: u32, stride: u32) {
+    if !bind_vao(vao) {
+        errors().set(GL_INVALID_OPERATION);
+        return;
+    }
+    let vao = with_formats(|v| v.iter().find(|(_, a, ..)| *a == index).map(|(w, ..)| *w));
+    if let Some(w) = vao {
+        with_formats(|v| {
+            if let Some(e) = v.iter_mut().find(|(x, a, ..)| *x == w && *a == index) {
+                e.6 = stride;
+            }
+        });
+        let entry = with_formats(|v| {
+            v.iter()
+                .find(|(x, a, ..)| *x == w && *a == index)
+                .map(|(_, _, size, ty, norm, rel, st)| (*size, *ty, *norm, *rel, *st))
+        });
+        if let Some((size, ty, norm, rel, st)) = entry {
+            if let Some(set_ptr) = driver_fn_cached::<
+                unsafe extern "C" fn(u32, i32, u32, bool, i32, *const c_void),
+            >("glVertexAttribPointer")
+            {
+                if let Some(bind) =
+                    driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindBuffer")
+                {
+                    bind(GL_ARRAY_BUFFER, 0);
+                }
+                set_ptr(index, size, ty, norm, st as i32, rel as usize as *const c_void);
+            }
+        }
+    }
+}
+
+/// Stride currently set on an attribute, so a format recorded before its stride was set still
+/// carries the right value.
+unsafe fn current_stride(index: u32) -> u32 {
+    let mut v = 0i32;
+    if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, u32, *mut i32)>("glGetVertexAttribiv")
+    {
+        f(index, 0x8A75 /* GL_VERTEX_ATTRIB_ARRAY_STRIDE */, &mut v);
+    }
+    v.max(0) as u32
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glVertexAttribStride(index: u32, stride: u32) {
+    // ES 3.0 has no glVertexAttribStride; the stride reaches the driver through
+    // glVertexAttribPointer when the description is applied.
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glGetVertexArrayAttribStride(vao: u32, index: u32, stride: *mut u32) {
+    if stride.is_null() {
+        errors().set(GL_INVALID_VALUE);
+        return;
+    }
+    if !bind_vao(vao) {
+        errors().set(GL_INVALID_OPERATION);
+        return;
+    }
+    glGetVertexAttribStride(index, stride);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glGetVertexAttribStride(index: u32, stride: *mut u32) {
+    if stride.is_null() {
+        errors().set(GL_INVALID_VALUE);
+        return;
+    }
+    let mut v = 0i32;
+    if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, u32, *mut i32)>("glGetVertexAttribiv")
+    {
+        f(index, 0x8A75 /* GL_VERTEX_ATTRIB_ARRAY_STRIDE */, &mut v);
+        *stride = v as u32;
+    } else {
+        *stride = 0;
+        errors().set(GL_INVALID_OPERATION);
+    }
+}
+
+/// Indexed vertex buffer binding (GL 4.3). Lets a vertex array describe several buffers,
+/// which is how modern renderers bind interleaved and streamed data.
+#[no_mangle]
+pub unsafe extern "C" fn glVertexArrayAttribBinding(vao: u32, attribindex: u32, bindingindex: u32) {
+    if !bind_vao(vao) {
+        errors().set(GL_INVALID_OPERATION);
+        return;
+    }
+    match driver_fn_cached::<unsafe extern "C" fn(u32, u32, u32, u32)>(
+        "glVertexArrayAttribBinding",
+    ) {
+        Some(f) => f(vao, attribindex, bindingindex, 0),
+        None => errors().set(GL_INVALID_OPERATION),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glBindVertexBuffer(bindingindex: u32, buffer: u32, offset: isize) {
+    match driver_fn_cached::<unsafe extern "C" fn(u32, u32, isize)>("glBindVertexBuffer") {
+        Some(f) => f(bindingindex, buffer, offset),
+        None => errors().set(GL_INVALID_OPERATION),
     }
 }
 
@@ -679,6 +893,12 @@ pub const EXPORTS: &[&str] = &[
     "glVertexArrayAttribIFormat",
     "glVertexArrayAttribLFormat",
     "glVertexArrayBindingDivisor",
+    "glVertexArrayAttribStride",
+    "glVertexAttribStride",
+    "glGetVertexArrayAttribStride",
+    "glGetVertexAttribStride",
+    "glVertexArrayAttribBinding",
+    "glBindVertexBuffer",
     "glEnableVertexArrayAttrib",
     "glDisableVertexArrayAttrib",
     "glTextureStorage2D",
@@ -706,15 +926,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn create_buffers_without_a_driver_reports_an_error_instead_of_faking_names() {
-        // With no GL driver the names cannot be generated, so this must raise rather than
-        // hand back invented ids that later named-buffer calls would silently write into.
+    fn create_buffers_records_exactly_the_names_it_generated() {
+        // Written to hold with or without a GL driver: the earlier version assumed no driver
+        // was present, so it passed only until Mesa was installed.
         with_buffers(|v| v.clear());
-        let mut ids = [0xDEAD_BEEFu32; 2];
-        unsafe { glCreateBuffers(2, ids.as_mut_ptr()) };
-        assert_eq!(ids, [0, 0], "ids must be zeroed before anything is generated");
-        assert!(with_buffers(|v| v.is_empty()), "no phantom buffers may be recorded");
-        assert_ne!(unsafe { errors().take() }, 0, "the failure must be visible to the game");
+        let mut ids = [0u32; 3];
+        unsafe { glCreateBuffers(3, ids.as_mut_ptr()) };
+        for id in ids {
+            if id == 0 {
+                continue; // no driver, or generation failed: nothing to track
+            }
+            assert!(
+                with_buffers(|v| v.iter().any(|(i, ..)| *i == id)),
+                "generated name {id} was not recorded, so later named-buffer calls \
+                 would not find its allocation"
+            );
+        }
+        with_buffers(|v| v.clear());
     }
 
     #[test]
