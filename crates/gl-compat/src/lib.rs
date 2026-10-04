@@ -130,9 +130,17 @@ fn log(msg: &str) {
 
 /// Lazily selects/initializes a backend on the first GL call (a context must be current by
 /// then). Never selects a backend that fails to initialize.
+static BACKEND_FAILED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 fn backend() -> Option<&'static dyn Backend> {
     if let Some(b) = BACKEND.get() {
         return Some(b.as_ref());
+    }
+    // A failed initialisation is remembered too. Without this the whole probe reran on every
+    // GL call, which during a trace replay was 51972 attempts and buried every other message.
+    if BACKEND_FAILED.load(Ordering::Relaxed) {
+        return None;
     }
     let _g = INIT_LOCK.lock().ok()?;
     if let Some(b) = BACKEND.get() {
@@ -235,7 +243,8 @@ fn backend() -> Option<&'static dyn Backend> {
             BACKEND.get().map(|b| b.as_ref())
         }
         None => {
-            log("[Renderer] No backend could be initialized");
+            BACKEND_FAILED.store(true, Ordering::Relaxed);
+            log("[Renderer] No backend could be initialized; the bridge will run in passthrough-only mode");
             None
         }
     }

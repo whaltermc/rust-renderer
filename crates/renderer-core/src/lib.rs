@@ -110,12 +110,49 @@ impl Capabilities {
 
 /// Parses "OpenGL ES 3.2 V@..." into (3, 2).
 pub fn parse_es_version(s: &str) -> Option<(u32, u32)> {
-    let rest = s.strip_prefix("OpenGL ES ")?;
-    let v: String = rest.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
-    let mut it = v.split('.');
-    let major = it.next()?.parse().ok()?;
-    let minor = it.next()?.parse().ok()?;
-    Some((major, minor))
+    // Accepts every shape a driver actually reports, not just "OpenGL ES 3.2 ...":
+    //
+    //   "OpenGL ES 3.2 v1.r32p1-01eac"      -> (3, 2)   Android GLES
+    //   "OpenGL ES-CM 1.1"                   -> (1, 1)   old GLES
+    //   "3.3 (Compatibility Profile) Mesa ..." -> (3, 3)  desktop GL, compatibility
+    //   "4.6 (Core Profile) ..."              -> (4, 6)   desktop GL, core
+    //
+    // The desktop forms matter when the spoof is off: a driver that reports
+    // "3.3 (Compatibility Profile) Mesa 25.2.8" previously failed to parse, the GLES backend
+    // refused to initialise, and every code path that consults the backend silently did
+    // nothing -- which is a black frame rather than an error.
+    let cleaned = s
+        .trim()
+        .trim_start_matches("OpenGL ES")
+        .trim_start_matches("OpenGL")
+        .trim_start();
+    let mut chars = cleaned.chars().peekable();
+    let mut major = String::new();
+    while let Some(&c) = chars.peek() {
+        if c.is_ascii_digit() {
+            major.push(c);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+    if major.is_empty() || chars.peek() != Some(&'.') {
+        return None;
+    }
+    chars.next();
+    let mut minor = String::new();
+    while let Some(&c) = chars.peek() {
+        if c.is_ascii_digit() {
+            minor.push(c);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+    if minor.is_empty() {
+        return None;
+    }
+    Some((major.parse().ok()?, minor.parse().ok()?))
 }
 
 pub fn gl_error_name(code: u32) -> &'static str {
@@ -283,6 +320,20 @@ mod tests {
     }
 
     #[test]
+    fn parses_every_version_shape_drivers_report() {
+        // The desktop forms matter when the spoof is off. A driver reporting
+        // "3.3 (Compatibility Profile) Mesa ..." used to fail this parse, the GLES backend
+        // refused to start, and every backend-dependent call silently did nothing.
+        assert_eq!(parse_es_version("OpenGL ES 3.2 v1.r32p1-01eac"), Some((3, 2)));
+        assert_eq!(parse_es_version("OpenGL ES 3.0"), Some((3, 0)));
+        assert_eq!(parse_es_version("OpenGL ES-CM 1.1"), Some((1, 1)));
+        assert_eq!(parse_es_version("3.3 (Compatibility Profile) Mesa 25.2.8"), Some((3, 3)));
+        assert_eq!(parse_es_version("4.6 (Core Profile) Mesa 25.2.8"), Some((4, 6)));
+        assert_eq!(parse_es_version("3.3 (Core Profile) 0x0000"), Some((3, 3)));
+        assert_eq!(parse_es_version("nonsense"), None);
+    }
+
+#[test]
     fn parses_backend() {
         assert_eq!(BackendKind::parse(" Vulkan "), Some(BackendKind::Vulkan));
         assert_eq!(BackendKind::parse("metal"), None);
