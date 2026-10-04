@@ -766,8 +766,6 @@ pub extern "C" fn glGetProcAddress(name: *const c_char) -> *const c_void {
 // No DT_NEEDED on libEGL (avoids linker/constructor fights in the game process).
 // =============================================================================
 
-use std::sync::OnceLock;
-
 struct SysEgl {
     lib: libloading::Library,
 }
