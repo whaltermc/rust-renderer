@@ -570,6 +570,18 @@ GL_VERTEX_ATTRIB_ARRAY_STRIDE)` returns 0 even for an attribute that demonstrabl
 correctly, so stride cannot be used to diagnose anything here. That is why the harness no
 longer reports stride as data.
 
+### Entry points are split by the GL version that introduced them
+
+`crates/gl-compat/src/gl/` owns the surface per version rather than as one undifferentiated
+list, so a name can be traced to the version that requires it. `gl::v1_0` (immediate mode,
+matrix stack, fog, lighting, texture environment) and `gl::v1_1` (display lists) are moved so
+far; 1.2-2.0 and 3.x/4.x follow.
+
+Each module publishes an `EXPORTS` manifest, and two tests hold it honest: every claimed name
+must resolve to something that is **not** the shared legacy no-op, and a name must belong to
+exactly one version. That is the invariant whose absence let `glLightModeliv` sit in the
+resolver's stub table looking handled while every call was silently discarded.
+
 ### DSA / named-object entry points (`dsa_named.rs`)
 
 Minecraft 1.20.5+ and every mod on top of it use the DSA spellings: the object is named rather

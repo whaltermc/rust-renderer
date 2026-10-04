@@ -9,6 +9,8 @@
 //! This is still incomplete for full Minecraft parity (no Vulkan, limited shader rewrite,
 //! missing some desktop-only APIs). Expect crash/black-screen on unhandled paths.
 
+#[macro_use]
+mod gl;
 mod aliases;
 mod caps;
 mod dsa;
@@ -2407,6 +2409,14 @@ pub extern "C" fn __driDriverGetExtensions_virtio_gpu() -> *const *const c_void 
 mod tests {
     use super::*;
 
+    /// Serialises tests that touch process-global state -- the driver entry-point cache and
+    /// the merged extension list. They raced once a new test began resolving names, which made
+    /// an unrelated cache assertion fail intermittently.
+    pub(crate) fn global_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     fn name_of(entry: &[u8]) -> &[u8] {
         entry.strip_suffix(&[0u8]).unwrap_or(entry)
     }
@@ -2506,6 +2516,7 @@ mod tests {
 
     #[test]
     fn driver_entry_points_are_resolved_once_and_reused() {
+        let _lock = global_test_lock();
         // The regression this guards: driver_fn used to run dlsym (plus a CString malloc)
         // on every forwarded GL call, so a draw-heavy frame paid it per draw. The cache is
         // keyed by the address of the name literal, so repeated lookups must not re-resolve.
@@ -2532,6 +2543,7 @@ mod tests {
 
     #[test]
     fn clearing_the_driver_cache_forgets_every_entry() {
+        let _lock = global_test_lock();
         driver_fn_cached::<unsafe extern "C" fn(u32)>("glCullFace");
         clear_driver_cache();
         assert!(DRIVER_CACHE.lock().unwrap().is_empty());
@@ -2539,6 +2551,7 @@ mod tests {
 
     #[test]
     fn fixed_function_calls_do_not_resolve_to_the_no_op_stub() {
+        let _lock = global_test_lock();
         // Regression guard. These are all implemented by ES 3.x and are what the 1.12-1.16
         // fixed-function path draws through. A name can be exported *and* still resolve to the
         // shared legacy no-op when it only appears in the stub table -- the call then silently
@@ -2566,6 +2579,7 @@ mod tests {
 
     #[test]
     fn every_exported_gl_symbol_is_reachable_through_the_resolver() {
+        let _lock = global_test_lock();
         // LWJGL resolves GL functions with eglGetProcAddress, which routes through
         // resolve_proc. A `#[no_mangle]` function missing from every resolver table is
         // exported but unreachable, so LWJGL binds null and the call faults. Hand-written

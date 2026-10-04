@@ -20,7 +20,7 @@ use super::*;
 use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 
 /// Announces a name that has no OpenGL ES implementation, once.
-fn announce_missing(name: &str) {
+pub(crate) fn announce_missing(name: &str) {
     static SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
     let mut v = SEEN.lock().unwrap_or_else(|e| e.into_inner());
     if !v.iter().any(|s| s == name) {
@@ -93,57 +93,6 @@ macro_rules! no_es_equivalent {
         )*
     };
 }
-
-// ---- immediate mode: ES implements all of this, and 1.12-1.16 draw through it -----------
-
-passthrough!(
-    glArrayElement(i: i32);
-    glWindowPos2i(x: i32, y: i32);
-    glPointSize(size: f32);
-    glLighti(pname: u32, param: i32);
-    glMateriali(pname: u32, param: i32);
-    glTexEnviv(target: u32, pname: u32, params: *const i32);
-    glTexGenfv(target: u32, pname: u32, params: *const f32);
-    glTexGenf(target: u32, pname: u32, param: f32);
-    glTexGeni(target: u32, pname: u32, param: i32);
-    glTexGeniv(target: u32, pname: u32, params: *const i32);
-    glPushAttrib(mask: u32);
-    glPopAttrib();
-    glPushClientAttrib(mask: u32);
-    glPopClientAttrib();
-    glLineStipple(factor: i32, pattern: u16);
-);
-
-// ---- display lists ----------------------------------------------------------------------
-// Lists are not recorded or replayed (1.12 entity models are the main user). What matters
-// here is the ABI: `glGenLists` returns the first id of a range, and it used to be declared
-// as a void function taking a pointer, so callers read garbage out of the return register.
-
-static NEXT_LIST: AtomicU32 = AtomicU32::new(1);
-
-#[no_mangle]
-pub unsafe extern "C" fn glGenLists(range: i32) -> u32 {
-    if range <= 0 {
-        return 0;
-    }
-    NEXT_LIST.fetch_add(range as u32, Ordering::Relaxed)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn glNewList(_list: u32, _mode: u32) {
-    announce_missing("glNewList (display lists are not recorded)");
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn glEndList() {}
-
-#[no_mangle]
-pub unsafe extern "C" fn glCallList(_list: u32) {
-    announce_missing("glCallList (display lists are not replayed)");
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn glDeleteLists(_list: u32, _range: i32) {}
 
 #[no_mangle]
 pub unsafe extern "C" fn glPolygonStipple(_mask: *const u8) {}
