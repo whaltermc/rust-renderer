@@ -868,11 +868,13 @@ pub unsafe extern "C" fn eglGetProcAddress(name: *const c_char) -> *const c_void
                 .or_else(|_| libloading::Library::new("libEGL.so"));
             match lib {
                 Ok(l) => {
-                    let s: Result<libloading::Symbol<unsafe extern "C" fn()>, _> =
-                        unsafe { l.get(b"eglGetProcAddress\0") };
-                    // Leak library intentionally — process lifetime.
+                    let ptr = match unsafe { l.get::<unsafe extern "C" fn()>(b"eglGetProcAddress\0") } {
+                        Ok(s) => *s as usize,
+                        Err(_) => 0,
+                    };
+                    // Keep library mapped for process lifetime.
                     std::mem::forget(l);
-                    s.map(|s| *s as usize).unwrap_or(0)
+                    ptr
                 }
                 Err(_) => 0,
             }
