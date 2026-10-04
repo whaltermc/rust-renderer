@@ -19,9 +19,20 @@ renderer plugin APK.
 
 ### Does it run on a device? No.
 
-**Tested on hardware: the game crashes.** 1.16.5 with OptiFine died with `SIGSEGV` at
-`si_addr = NULL` on the render thread, in `GL11.glFogfv` — LWJGL resolved the entry point to a
-null pointer and called it. That is the current state, and it outweighs everything below. Treat the host harness results as necessary but *not* sufficient — they did
+**Tested on hardware.** Two device reports so far, and both moved the failure later rather
+than persisting:
+
+1. 1.16.5 + OptiFine: `SIGSEGV` at `si_addr = NULL` in `GL11.glFogfv`. A missing entry point
+   resolved to null and LWJGL called it. Fixed by never returning null for a `gl*` name.
+2. 1.21.11 + Sodium/Iris: the game now boots, initialises, reports
+   `Mali-G77 MC9 / OpenGL ES 3.2 / 104 extensions`, and dies with a readable error:
+   `IllegalStateException: OpenGL error 1282` at `GlBackend.createTexture` →
+   `WindowFramebuffer.createDepthAttachment`. The log also named **62 unresolved entry
+   points**, nearly all named-object/DSA spellings.
+
+Both fixes for report 2 are in: the 62 entry points (see `dsa_named.rs`) and the texture-target
+bug that made a depth attachment report `GL_INVALID_OPERATION`. **It has not been retested on a
+device**, so treat "boots further" as the expectation, not a result. Treat the host harness results as necessary but *not* sufficient — they did
 not predict the device outcome, and they should not be read as evidence that the bridge works.
 
 The host suite runs against Mesa's llvmpipe software rasteriser. That catches translation and
@@ -411,6 +422,27 @@ importantly, the stride reading was a **measurement artifact**: `glGetVertexAttr
 GL_VERTEX_ATTRIB_ARRAY_STRIDE)` returns 0 even for an attribute that demonstrably renders
 correctly, so stride cannot be used to diagnose anything here. That is why the harness no
 longer reports stride as data.
+
+### DSA / named-object entry points (`dsa_named.rs`)
+
+Minecraft 1.20.5+ and every mod on top of it use the DSA spellings: the object is named rather
+than bound. The 1.21.11 log asked for 62 entry points this layer did not resolve —
+`glTextureParameteriv`/`fv`, `glNamedFramebuffer*`, `glNamedRenderbuffer*`, `glMapNamedBuffer*`,
+`glCreateFramebuffers`/`Samplers`/`Queries`, `glVertexArrayVertexBuffers`, the
+`ARB`-suffixed instancing aliases, and the bulk `glBindTextures`/`glBindBuffers*` family.
+
+GLES has no named objects, so each one binds the object and delegates to the classic entry
+point that already works. Two bugs surfaced while writing them:
+
+- `glTextureParameteri`/`f` bound the texture to a hardcoded `GL_TEXTURE_2D` regardless of its
+  real target, which is exactly the kind of thing that raises `GL_INVALID_OPERATION` on a
+  depth or array attachment during framebuffer setup.
+- A texture name used before this layer saw it created was treated as an error. It now
+  defaults to 2D and logs once, because a missing detail there cost a framebuffer.
+
+GL error attribution: the bridge now logs which entry point last set an error from its own
+code (`[dsa] GL error site: ...`). Minecraft only reports the numeric code, so without this
+the log could not say which of several dozen sites raised `1282`.
 
 ### The `glFogfv` crash
 

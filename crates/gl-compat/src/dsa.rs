@@ -221,33 +221,6 @@ pub unsafe extern "C" fn glCreateBuffers(n: i32, ids: *mut u32) {
     });
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn glCreateTextures(target: u32, n: i32, ids: *mut u32) {
-    if n <= 0 || ids.is_null() {
-        errors().set(GL_INVALID_VALUE);
-        return;
-    }
-    for i in 0..n as usize {
-        *ids.add(i) = 0;
-    }
-    let Some(gen) = driver_fn_cached::<unsafe extern "C" fn(i32, *mut u32)>("glGenTextures") else {
-        errors().set(GL_INVALID_OPERATION);
-        return;
-    };
-    gen(n, ids);
-    // Materialise each texture on the requested target immediately: ES texture names are
-    // per-target, so this is what makes the name later usable as a DSA object.
-    if let Some(bind) = driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindTexture") {
-        for i in 0..n as usize {
-            bind(target, *ids.add(i));
-        }
-    }
-    with_textures(|v| {
-        for i in 0..n as usize {
-            v.push((*ids.add(i), target));
-        }
-    });
-}
 
 #[no_mangle]
 pub unsafe extern "C" fn glCreateVertexArrays(n: i32, ids: *mut u32) {
@@ -636,7 +609,7 @@ pub unsafe extern "C" fn glDisableVertexArrayAttrib(vao: u32, index: u32) {
 // ---- textures -------------------------------------------------------------------------------
 
 /// Binds a DSA texture to the target it was created for, so the target-bound ES calls apply.
-unsafe fn bind_dsa_texture(id: u32) -> Option<u32> {
+pub(crate) unsafe fn bind_dsa_texture(id: u32) -> Option<u32> {
     let target = with_textures(|v| v.iter().find(|(t, _)| *t == id).map(|(_, tg)| *tg))?;
     let Some(bind) = driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindTexture") else {
         errors().set(GL_INVALID_OPERATION);
@@ -747,23 +720,7 @@ pub unsafe extern "C" fn glTextureSubImage3D(
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn glTextureParameteri(id: u32, pname: u32, param: i32) {
-    if bind_dsa_texture(id).is_none() {
-        errors().set(GL_INVALID_OPERATION);
-        return;
-    }
-    glTexParameteri(GL_TEXTURE_2D, pname, param);
-}
 
-#[no_mangle]
-pub unsafe extern "C" fn glTextureParameterf(id: u32, pname: u32, param: f32) {
-    if bind_dsa_texture(id).is_none() {
-        errors().set(GL_INVALID_OPERATION);
-        return;
-    }
-    glTexParameterf(GL_TEXTURE_2D, pname, param);
-}
 
 // ---- barriers, labels, and honest refusals ---------------------------------------------------
 
@@ -949,7 +906,7 @@ mod tests {
     fn invalid_arguments_are_rejected() {
         unsafe { glCreateBuffers(0, std::ptr::null_mut()) };
         assert_ne!(unsafe { errors().take() }, 0);
-        unsafe { glCreateTextures(0x0DE1, 0, std::ptr::null_mut()) };
+        unsafe { super::dsa_named::glCreateTextures(0x0DE1, 0, std::ptr::null_mut()) };
         assert_ne!(unsafe { errors().take() }, 0);
         unsafe { glCreateVertexArrays(-1, std::ptr::null_mut()) };
         assert_ne!(unsafe { errors().take() }, 0);
