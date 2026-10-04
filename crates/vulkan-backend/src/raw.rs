@@ -169,16 +169,22 @@ const LIMITS_START_U32: usize = 73;
 const LIMITS_INDEX_2D: usize = LIMITS_START_U32 + 1;
 const LIMITS_INDEX_3D: usize = LIMITS_START_U32 + 2;
 const LIMITS_INDEX_ARRAY_LAYERS: usize = LIMITS_START_U32 + 4;
-/// Large enough to cover the decoded fields (`deviceName` ends at word 69, the `Limits`
-/// fields at word 77) and smaller than the 816-byte struct, which is what we intentionally
-/// do not depend on.
-const PROPERTIES_BUFFER_U32: usize = 80;
+/// `vkGetPhysicalDeviceProperties` writes the WHOLE `VkPhysicalDeviceProperties` (824 bytes
+/// on 64-bit: the `Limits` block alone is 504), no matter how much of it we decode. The
+/// buffer must therefore be at least that large. It used to be 320 bytes, so every call
+/// overran the stack by ~500 bytes -- that was the `hybrid`/`vulkan`/`auto` startup crash.
+/// 1024 bytes leaves headroom for layout differences.
+const PROPERTIES_BUFFER_U32: usize = 256;
+
+/// 8-byte aligned scratch for structs that contain `VkDeviceSize` / `u64` members.
+#[repr(C, align(16))]
+struct Scratch<const N: usize>([u32; N]);
 /// The subset of loaded Vulkan entry points used by this crate.
 pub struct Api {
     /// Owns the `dlopen` handle. Dropping this would `dlclose` libvulkan and leave every
     /// function pointer below dangling, so the backend must hold it for as long as it uses
     /// any Vulkan call.
-    _lib: libloading::Library,
+    _lib: std::mem::ManuallyDrop<libloading::Library>,
     pub instance: *mut c_void,
     pub destroy_instance: PfnDestroyInstance,
     pub enumerate_physical_devices: PfnEnumeratePhysicalDevices,
@@ -248,7 +254,7 @@ impl Api {
                     .ok_or_else(|| format!("libvulkan is missing {name}"))
             };
             Ok(Self {
-                _lib: lib,
+                _lib: std::mem::ManuallyDrop::new(lib),
                 instance,
                 destroy_instance: get_opt(&get_proc_addr, instance, "vkDestroyInstance")
                     .map(|f| std::mem::transmute::<PFN, PfnDestroyInstance>(f))
@@ -295,17 +301,18 @@ impl Api {
     /// writes into an oversized zeroed buffer and only the fields whose offsets are
     /// asserted below are decoded. See `properties_offsets_are_stable` for the arithmetic.
     pub fn properties(&self, device: *mut c_void) -> Properties {
-        let mut buf = [0u32; PROPERTIES_BUFFER_U32];
-        // SAFETY: the buffer is fully initialised and reaches the decoded `Limits` words.
-        // It is smaller than the 816-byte struct, so Vulkan writes less than the buffer.
-        unsafe { (self.get_properties)(device, buf.as_mut_ptr() as *mut c_void) };
+        let mut scratch = Scratch::<PROPERTIES_BUFFER_U32>([0u32; PROPERTIES_BUFFER_U32]);
+        // SAFETY: the buffer (1024 B) is larger than the whole struct (824 B), so the
+        // driver cannot write past it.
+        unsafe { (self.get_properties)(device, scratch.0.as_mut_ptr() as *mut c_void) };
+        let buf = &scratch.0;
         Properties {
             api_version: buf[0],
             driver_version: buf[1],
             vendor_id: buf[2],
             device_id: buf[3],
             device_type: buf[4],
-            name: device_name(&buf),
+            name: device_name(buf),
             max_image_dimension_2d: buf[LIMITS_INDEX_2D],
             max_image_dimension_3d: buf[LIMITS_INDEX_3D],
             max_image_array_layers: buf[LIMITS_INDEX_ARRAY_LAYERS],
@@ -331,19 +338,23 @@ impl Api {
     /// Device-local memory, from `VkPhysicalDeviceMemoryProperties`. Only the counts and the
     /// heap sizes are used; both are read from the fixed leading layout.
     pub fn device_local_memory(&self, device: *mut c_void) -> u64 {
-        let mut buf = [0u32; 130]; // 520 bytes = the whole struct
+        // uint32 memoryTypeCount; VkMemoryType memoryTypes[32] (8 B each);
+        // uint32 memoryHeapCount (offset 260); VkMemoryHeap memoryHeaps[16] (16 B each,
+        // 8-aligned, so they start at offset 264). Total 520 bytes.
+        let mut scratch = Scratch::<130>([0u32; 130]);
         // SAFETY: the buffer matches the size of VkPhysicalDeviceMemoryProperties.
-        unsafe { (self.get_memory_properties)(device, buf.as_mut_ptr() as *mut c_void) };
-        let heaps = (buf[1] as usize).min(16);
-        // memoryTypes[32] is 8 bytes each and precedes memoryHeaps[16].
-        const HEAP_BASE: usize = 8 + 32 * 8;
+        unsafe { (self.get_memory_properties)(device, scratch.0.as_mut_ptr() as *mut c_void) };
+        let buf = &scratch.0;
+        // The old code read the heap count from word 1, which is memoryTypes[0].propertyFlags.
+        let heaps = (buf[65] as usize).min(16);
+        const HEAP_BASE_WORD: usize = 264 / 4;
+        const VK_MEMORY_HEAP_DEVICE_LOCAL_BIT: u32 = 1;
         let mut total = 0u64;
         for i in 0..heaps {
-            let lo = buf[(HEAP_BASE / 4) + i * 4] as u64;
-            let hi = buf[(HEAP_BASE / 4) + i * 4 + 1] as u64;
-            // Vulkan 1.0 heaps are device-local unless flagged otherwise.
-            let is_device_local = i == 0;
-            if is_device_local {
+            let lo = buf[HEAP_BASE_WORD + i * 4] as u64;
+            let hi = buf[HEAP_BASE_WORD + i * 4 + 1] as u64;
+            let flags = buf[HEAP_BASE_WORD + i * 4 + 2];
+            if flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT != 0 {
                 total = total.max(lo | (hi << 32));
             }
         }
@@ -368,7 +379,7 @@ pub struct Properties {
 
 /// `deviceName` is a fixed 256-byte array starting after the five leading u32 fields
 /// (byte 20, i.e. word 5, running 64 words).
-fn device_name(buf: &[u32; PROPERTIES_BUFFER_U32]) -> String {
+fn device_name(buf: &[u32]) -> String {
     let bytes: Vec<u8> = buf[5..69]
         .iter()
         .flat_map(|w| w.to_le_bytes())
@@ -467,8 +478,8 @@ mod tests {
         assert_eq!(LIMITS_INDEX_ARRAY_LAYERS, 77);
         // The decode buffer must reach the last field it reads...
         assert!(LIMITS_INDEX_ARRAY_LAYERS < PROPERTIES_BUFFER_U32);
-        // ...and stay smaller than the 816-byte struct we deliberately do not model.
-        assert!(PROPERTIES_BUFFER_U32 * 4 < 816);
+        // ...and be at least as large as the whole struct the driver writes (824 bytes).
+        assert!(PROPERTIES_BUFFER_U32 * 4 >= 824);
     }
 
     #[test]
