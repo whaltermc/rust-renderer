@@ -420,8 +420,13 @@ mod tests {
     fn parses_es_versions() {
         assert_eq!(parse_es_version("OpenGL ES 3.2 V@0502.0 (GIT@abc)"), Some((3, 2)));
         assert_eq!(parse_es_version("OpenGL ES 3.0"), Some((3, 0)));
-        assert_eq!(parse_es_version("4.6.0 NVIDIA"), None);
+        // Desktop GL strings used to be rejected. They are not any more: with the spoof off a
+        // driver reports "3.3 (Compatibility Profile) Mesa ...", failing to parse made the
+        // GLES backend refuse to start, and every backend-dependent call then silently did
+        // nothing -- a black frame instead of an error.
+        assert_eq!(parse_es_version("4.6.0 NVIDIA"), Some((4, 6)));
         assert_eq!(parse_es_version("OpenGL ES x"), None);
+        assert_eq!(parse_es_version(""), None);
     }
 
     #[test]

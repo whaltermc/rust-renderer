@@ -412,6 +412,12 @@ Current results on Mesa llvmpipe:
 | 1.17 main menu | vanilla | 0.999962 | 0.99 | **PASS** |
 | 26.3 improved-transparency | **shader pack** | 0.000006 | 0.995 | **FAIL** |
 
+The 26.3 failure was traced to two real bugs, both fixed: with the spoof off a desktop Mesa build
+reports `3.3 (Compatibility Profile) Mesa 25.2.8`, which `parse_es_version` did not recognise, so
+the GLES backend refused to initialise and every backend-dependent call silently did nothing.
+A failed initialisation was also retried on every GL call -- 51972 attempts, and 51972 log lines
+that buried everything else. Both are fixed; the frame is still black, so a further cause remains.
+
 The vanilla capture matching a golden frame is the strongest evidence so far that the GL
 translation is faithful for ordinary rendering.
 
