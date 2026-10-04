@@ -399,6 +399,7 @@ pub unsafe extern "C" fn glGetIntegerv(pname: u32, data: *mut i32) {
         match pname {
             GL_MAJOR_VERSION => { *data = 3; return; }
             GL_MINOR_VERSION => { *data = 3; return; }
+            0x9126 => { *data = 0x0001; return; } // GL_CONTEXT_PROFILE_MASK = CORE_BIT
             GL_NUM_EXTENSIONS => {
                 // Prefer driver count; otherwise our advertised list length.
                 if let Some(f) = driver_fn::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
@@ -432,24 +433,31 @@ fn advertised_extensions() -> &'static [&'static [u8]] {
         let list: &[&[u8]] = &[
             b"GL_ARB_vertex_array_object\0",
             b"GL_ARB_explicit_attrib_location\0",
+            b"GL_ARB_explicit_uniform_location\0",
             b"GL_ARB_instanced_arrays\0",
             b"GL_ARB_draw_instanced\0",
+            b"GL_ARB_draw_elements_base_vertex\0",
             b"GL_ARB_uniform_buffer_object\0",
             b"GL_ARB_map_buffer_range\0",
             b"GL_ARB_framebuffer_object\0",
+            b"GL_ARB_framebuffer_sRGB\0",
             b"GL_ARB_texture_storage\0",
-            b"GL_ARB_copy_buffer\0",
-            b"GL_ARB_sync\0",
-            b"GL_ARB_half_float_pixel\0",
-            b"GL_ARB_half_float_vertex\0",
             b"GL_ARB_texture_float\0",
             b"GL_ARB_texture_rg\0",
-            b"GL_ARB_draw_elements_base_vertex\0",
-            b"GL_ARB_provoking_vertex\0",
-            b"GL_ARB_seamless_cube_map\0",
             b"GL_ARB_texture_swizzle\0",
+            b"GL_ARB_copy_buffer\0",
+            b"GL_ARB_sync\0",
+            b"GL_ARB_sampler_objects\0",
             b"GL_ARB_timer_query\0",
             b"GL_ARB_occlusion_query\0",
+            b"GL_ARB_occlusion_query2\0",
+            b"GL_ARB_half_float_pixel\0",
+            b"GL_ARB_half_float_vertex\0",
+            b"GL_ARB_provoking_vertex\0",
+            b"GL_ARB_seamless_cube_map\0",
+            b"GL_ARB_texture_multisample\0",
+            b"GL_ARB_blend_func_extended\0",
+            b"GL_ARB_vertex_type_2_10_10_10_rev\0",
             b"GL_EXT_texture_filter_anisotropic\0",
             b"GL_KHR_debug\0",
             b"GL_OES_texture_float\0",
@@ -457,6 +465,7 @@ fn advertised_extensions() -> &'static [&'static [u8]] {
             b"GL_OES_element_index_uint\0",
             b"GL_EXT_color_buffer_float\0",
             b"GL_EXT_color_buffer_half_float\0",
+            b"GL_EXT_texture_format_BGRA8888\0",
         ];
         list.to_vec()
     })
@@ -957,6 +966,47 @@ forward_all! {
     glGetFragDataLocation(p: u32, name: *const c_char) -> i32;
     glMultiDrawArrays(mode: u32, first: *const i32, count: *const i32, drawcount: i32);
     glMultiDrawElements(mode: u32, count: *const i32, ty: u32, indices: *const *const c_void, drawcount: i32);
+    glGenQueries(n: i32, ids: *mut u32);
+    glDeleteQueries(n: i32, ids: *const u32);
+    glIsQuery(id: u32) -> u8;
+    glBeginQuery(target: u32, id: u32);
+    glEndQuery(target: u32);
+    glGetQueryiv(target: u32, pname: u32, params: *mut i32);
+    glGetQueryObjectuiv(id: u32, pname: u32, params: *mut u32);
+    glGetQueryObjectiv(id: u32, pname: u32, params: *mut i32);
+    glGetQueryObjectui64v(id: u32, pname: u32, params: *mut u64);
+    glGetQueryObjecti64v(id: u32, pname: u32, params: *mut i64);
+    glQueryCounter(id: u32, target: u32);
+    glPrimitiveRestartIndex(index: u32);
+    glProvokingVertex(mode: u32);
+    glBindFragDataLocationIndexed(program: u32, colorNumber: u32, index: u32, name: *const c_char);
+    glGetFragDataIndex(program: u32, name: *const c_char) -> i32;
+    glColorMaski(buf: u32, r: u8, g: u8, b: u8, a: u8);
+    glEnablei(cap: u32, index: u32);
+    glDisablei(cap: u32, index: u32);
+    glBlendEquationi(buf: u32, mode: u32);
+    glBlendEquationSeparatei(buf: u32, modeRGB: u32, modeAlpha: u32);
+    glBlendFunci(buf: u32, src: u32, dst: u32);
+    glBlendFuncSeparatei(buf: u32, srcRGB: u32, dstRGB: u32, srcAlpha: u32, dstAlpha: u32);
+    glGetUniformuiv(program: u32, location: i32, params: *mut u32);
+    glSamplerParameterfv(sampler: u32, pname: u32, params: *const f32);
+    glSamplerParameteriv(sampler: u32, pname: u32, params: *const i32);
+    glTexParameterIiv(target: u32, pname: u32, params: *const i32);
+    glTexParameterIuiv(target: u32, pname: u32, params: *const u32);
+    glGetTexParameterIiv(target: u32, pname: u32, params: *mut i32);
+    glGetTexParameterIuiv(target: u32, pname: u32, params: *mut u32);
+    glVertexAttribP4ui(index: u32, ty: u32, normalized: u8, value: u32);
+    glVertexAttribP3ui(index: u32, ty: u32, normalized: u8, value: u32);
+    glVertexAttribP2ui(index: u32, ty: u32, normalized: u8, value: u32);
+    glVertexAttribP1ui(index: u32, ty: u32, normalized: u8, value: u32);
+    glDrawArraysIndirect(mode: u32, indirect: *const c_void);
+    glDrawElementsIndirect(mode: u32, ty: u32, indirect: *const c_void);
+    glUniformMatrix2x3fv(loc: i32, count: i32, transpose: u8, value: *const f32);
+    glUniformMatrix3x2fv(loc: i32, count: i32, transpose: u8, value: *const f32);
+    glUniformMatrix2x4fv(loc: i32, count: i32, transpose: u8, value: *const f32);
+    glUniformMatrix4x2fv(loc: i32, count: i32, transpose: u8, value: *const f32);
+    glUniformMatrix3x4fv(loc: i32, count: i32, transpose: u8, value: *const f32);
+    glUniformMatrix4x3fv(loc: i32, count: i32, transpose: u8, value: *const f32);
 }
 
 
@@ -989,6 +1039,92 @@ pub unsafe extern "C" fn glBufferStorage(target: u32, size: isize, data: *const 
         errors().set(GL_INVALID_OPERATION);
     }
 }
+
+fn legacy_noop_fn() {
+    // shared no-op for unresolved desktop-1.x probes
+}
+
+fn resolve_legacy_stub(n: &[u8]) -> *const c_void {
+    // Fixed-pipeline / 1.x symbols LWJGL enumerates; safe to no-op.
+    const LEGACY: &[&[u8]] = &[
+        b"glAccum", b"glAlphaFunc", b"glAreTexturesResident", b"glArrayElement",
+        b"glBegin", b"glBitmap", b"glCallList", b"glCallLists", b"glClearAccum",
+        b"glClearIndex", b"glClipPlane", b"glColor3b", b"glColor3bv", b"glColor3d",
+        b"glColor3dv", b"glColor3f", b"glColor3fv", b"glColor3i", b"glColor3iv",
+        b"glColor3s", b"glColor3sv", b"glColor3ub", b"glColor3ubv", b"glColor3ui",
+        b"glColor3uiv", b"glColor3us", b"glColor3usv", b"glColor4b", b"glColor4bv",
+        b"glColor4d", b"glColor4dv", b"glColor4fv", b"glColor4i", b"glColor4iv",
+        b"glColor4s", b"glColor4sv", b"glColor4ub", b"glColor4ubv", b"glColor4ui",
+        b"glColor4uiv", b"glColor4us", b"glColor4usv", b"glColorMaterial",
+ b"glCopyPixels", b"glDeleteLists", b"glDrawPixels",
+        b"glEdgeFlag", b"glEdgeFlagPointer", b"glEdgeFlagv", b"glEnd",
+        b"glEndList", b"glEvalCoord1d", b"glEvalCoord1dv", b"glEvalCoord1f",
+        b"glEvalCoord1fv", b"glEvalCoord2d", b"glEvalCoord2dv", b"glEvalCoord2f",
+        b"glEvalCoord2fv", b"glEvalMesh1", b"glEvalMesh2", b"glEvalPoint1",
+        b"glEvalPoint2", b"glFeedbackBuffer", b"glFogf", b"glFogfv", b"glFogi",
+        b"glFogiv", b"glFrustum", b"glGenLists", b"glGetClipPlane", b"glGetLightfv",
+        b"glGetLightiv", b"glGetMapdv", b"glGetMapfv", b"glGetMapiv", b"glGetMaterialfv",
+        b"glGetMaterialiv", b"glGetPixelMapfv", b"glGetPixelMapuiv", b"glGetPixelMapusv",
+        b"glGetPolygonStipple", b"glGetTexEnvfv", b"glGetTexEnviv", b"glGetTexGendv",
+        b"glGetTexGenfv", b"glGetTexGeniv", b"glIndexMask", b"glIndexPointer",
+        b"glIndexd", b"glIndexdv", b"glIndexf", b"glIndexfv", b"glIndexi", b"glIndexiv",
+        b"glIndexs", b"glIndexsv", b"glIndexub", b"glIndexubv", b"glInitNames",
+        b"glInterleavedArrays", b"glIsList", b"glIsTextureEXT", b"glLightModelf",
+        b"glLightModelfv", b"glLightModeli", b"glLightModeliv", b"glLightf",
+        b"glLightfv", b"glLighti", b"glLightiv", b"glLineStipple", b"glListBase",
+ b"glLoadMatrixd", b"glLoadMatrixf", b"glLoadName",
+        b"glLoadTransposeMatrixd", b"glLoadTransposeMatrixf", b"glMap1d", b"glMap1f",
+        b"glMap2d", b"glMap2f", b"glMapGrid1d", b"glMapGrid1f", b"glMapGrid2d",
+        b"glMapGrid2f", b"glMaterialf", b"glMaterialfv", b"glMateriali", b"glMaterialiv",
+ b"glMultMatrixd", b"glMultMatrixf", b"glMultTransposeMatrixd",
+        b"glMultTransposeMatrixf", b"glNewList", b"glNormal3b", b"glNormal3bv",
+        b"glNormal3d", b"glNormal3dv", b"glNormal3f", b"glNormal3fv", b"glNormal3i",
+        b"glNormal3iv", b"glNormal3s", b"glNormal3sv", b"glNormalPointer",
+ b"glPassThrough", b"glPixelMapfv", b"glPixelMapuiv", b"glPixelMapusv",
+        b"glPixelTransferf", b"glPixelTransferi", b"glPixelZoom", b"glPolygonMode",
+        b"glPolygonStipple", b"glPopAttrib", b"glPopClientAttrib", b"glPopMatrix",
+        b"glPopName", b"glPrioritizeTextures", b"glPushAttrib", b"glPushClientAttrib",
+ b"glPushName", b"glRasterPos2d", b"glRasterPos2dv",
+        b"glRasterPos2f", b"glRasterPos2fv", b"glRasterPos2i", b"glRasterPos2iv",
+        b"glRasterPos2s", b"glRasterPos2sv", b"glRasterPos3d", b"glRasterPos3dv",
+        b"glRasterPos3f", b"glRasterPos3fv", b"glRasterPos3i", b"glRasterPos3iv",
+        b"glRasterPos3s", b"glRasterPos3sv", b"glRasterPos4d", b"glRasterPos4dv",
+        b"glRasterPos4f", b"glRasterPos4fv", b"glRasterPos4i", b"glRasterPos4iv",
+        b"glRasterPos4s", b"glRasterPos4sv", b"glRectd", b"glRectdv", b"glRectf",
+        b"glRectfv", b"glRecti", b"glRectiv", b"glRects", b"glRectsv", b"glRenderMode",
+        b"glRotated", b"glRotatef", b"glScaled", b"glScalef", b"glSelectBuffer",
+ b"glTexCoord1d", b"glTexCoord1dv", b"glTexCoord1f",
+        b"glTexCoord1fv", b"glTexCoord1i", b"glTexCoord1iv", b"glTexCoord1s",
+        b"glTexCoord1sv", b"glTexCoord2d", b"glTexCoord2dv", b"glTexCoord2f",
+        b"glTexCoord2fv", b"glTexCoord2i", b"glTexCoord2iv", b"glTexCoord2s",
+        b"glTexCoord2sv", b"glTexCoord3d", b"glTexCoord3dv", b"glTexCoord3f",
+        b"glTexCoord3fv", b"glTexCoord3i", b"glTexCoord3iv", b"glTexCoord3s",
+        b"glTexCoord3sv", b"glTexCoord4d", b"glTexCoord4dv", b"glTexCoord4f",
+        b"glTexCoord4fv", b"glTexCoord4i", b"glTexCoord4iv", b"glTexCoord4s",
+        b"glTexCoord4sv", b"glTexCoordPointer", b"glTexEnvf", b"glTexEnvfv",
+ b"glTexEnviv", b"glTexGend", b"glTexGendv", b"glTexGenf",
+        b"glTexGenfv", b"glTexGeni", b"glTexGeniv", b"glTranslated", b"glTranslatef",
+        b"glVertex2d", b"glVertex2dv", b"glVertex2f", b"glVertex2fv", b"glVertex2i",
+        b"glVertex2iv", b"glVertex2s", b"glVertex2sv", b"glVertex3d", b"glVertex3dv",
+        b"glVertex3f", b"glVertex3fv", b"glVertex3i", b"glVertex3iv", b"glVertex3s",
+        b"glVertex3sv", b"glVertex4d", b"glVertex4dv", b"glVertex4f", b"glVertex4fv",
+        b"glVertex4i", b"glVertex4iv", b"glVertex4s", b"glVertex4sv", b"glVertexPointer",
+        b"glWindowPos2d", b"glWindowPos2dv", b"glWindowPos2f", b"glWindowPos2fv",
+        b"glWindowPos2i", b"glWindowPos2iv", b"glWindowPos2s", b"glWindowPos2sv",
+        b"glWindowPos3d", b"glWindowPos3dv", b"glWindowPos3f", b"glWindowPos3fv",
+        b"glWindowPos3i", b"glWindowPos3iv", b"glWindowPos3s", b"glWindowPos3sv",
+    ];
+    for s in LEGACY {
+        if n == *s {
+            return legacy_noop_fn as *const c_void;
+        }
+    }
+    std::ptr::null()
+}
+
+#[inline(never)]
+pub unsafe extern "C" fn legacy_noop_fn() {}
+
 fn resolve_proc(n: &[u8]) -> *const c_void {
     match n {
         b"glGetError" => glGetError as *const c_void,
@@ -1117,6 +1253,10 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
                 if !ptr.is_null() {
                     return ptr;
                 }
+            }
+            let stub = resolve_legacy_stub(n);
+            if !stub.is_null() {
+                return stub;
             }
             log(&format!("[GLBridge] Missing entry point: {name}"));
             std::ptr::null()
