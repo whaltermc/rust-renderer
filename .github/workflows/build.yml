@@ -25,36 +25,40 @@ jobs:
           java-version: "17"
           cache: gradle
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK and NDK
-        run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;27.2.12479018"
-
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
+
+      - name: Install Android SDK tools
+        run: |
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+
+          yes | "$SDKMANAGER" --licenses || true
+
+          "$SDKMANAGER" \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0" \
+            "ndk;27.2.12479018"
+
+      - name: Configure Android environment
+        run: |
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
       - name: Show tool versions
         run: |
           java -version
           rustc --version
           cargo --version
-          cargo ndk --version || true
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+          "$ANDROID_HOME/platform-tools/adb" version
+          "$ANDROID_HOME/ndk/27.2.12479018/ndk-build" --version
 
       - name: Install cargo-ndk
         run: |
           cargo install cargo-ndk --locked
-
-      - name: Configure Android NDK
-        run: |
-          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
       - name: Build Rust renderer
         run: |
@@ -72,7 +76,7 @@ jobs:
           file target/aarch64-linux-android/release/librust_gl.so
           ls -lh target/aarch64-linux-android/release/librust_gl.so
 
-      - name: Copy renderer into Android project
+      - name: Copy renderer library
         run: |
           mkdir -p android/app/src/main/jniLibs/arm64-v8a
 
@@ -82,11 +86,11 @@ jobs:
 
           ls -lh android/app/src/main/jniLibs/arm64-v8a/librust_gl.so
 
-      - name: Make Gradle wrapper executable
+      - name: Make Gradle executable
         working-directory: android
         run: chmod +x gradlew
 
-      - name: Build Android APK
+      - name: Build APK
         working-directory: android
         run: ./gradlew :app:assembleDebug --stacktrace --no-daemon
 
