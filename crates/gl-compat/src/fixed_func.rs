@@ -88,6 +88,11 @@ struct FfState {
     color4: [f32; 4],
     alpha_func: (u32, f32),
     fog_enabled: bool,
+    fog_mode: i32,
+    fog_start: f32,
+    fog_end: f32,
+    fog_density: f32,
+    fog_color: [f32; 4],
     /// Desktop-only enable caps (GL_TEXTURE_2D, GL_LIGHTING, ...) that ES rejects.
     legacy_caps: Vec<u32>,
     /// Last proxy tex probe size (Minecraft max-texture probe).
@@ -110,6 +115,12 @@ impl FfState {
             color4: [1.0, 1.0, 1.0, 1.0],
             alpha_func: (0x0207, 0.0), // GL_ALWAYS
             fog_enabled: false,
+            // GL_FOG_MODE defaults to GL_EXP (0x0801), matching GL's own initial state.
+            fog_mode: 0x0801,
+            fog_start: 0.0,
+            fog_end: 1.0,
+            fog_density: 1.0,
+            fog_color: [0.0, 0.0, 0.0, 0.0],
             legacy_caps: Vec::new(),
             proxy_w: 0,
             proxy_h: 0,
@@ -392,9 +403,71 @@ pub extern "C" fn gl_alpha_func(func: u32, ref_v: f32) {
     with_ff(|s| s.alpha_func = (func, ref_v));
 }
 
-pub extern "C" fn gl_fogf(_pname: u32, _param: f32) {}
-pub extern "C" fn gl_fogi(_pname: u32, _param: i32) {}
-pub extern "C" fn gl_fogfv(_pname: u32, _params: *const f32) {}
+// GL_FOG_INDEX 0x0B61, GL_FOG_DENSITY 0x0B62, GL_FOG_START 0x0B63, GL_FOG_END 0x0B64,
+// GL_FOG_MODE 0x0B65, GL_FOG_COLOR 0x0B66.
+pub extern "C" fn gl_fogf(pname: u32, param: f32) {
+    with_ff(|s| match pname {
+        0x0B62 => s.fog_density = param,
+        0x0B63 => s.fog_start = param,
+        0x0B64 => s.fog_end = param,
+        _ => {}
+    });
+}
+
+pub extern "C" fn gl_fogi(pname: u32, param: i32) {
+    with_ff(|s| {
+        if pname == 0x0B65 {
+            s.fog_mode = param;
+        }
+    });
+}
+
+/// Records the fog parameters instead of dropping them: ES 3.x has no fog state at all, so
+/// anything that queries fog afterwards has to be answered from here or the query raises
+/// GL_INVALID_ENUM and the game's own state tracking desynchronises from the driver.
+pub extern "C" fn gl_fogfv(pname: u32, params: *const f32) {
+    if params.is_null() {
+        return;
+    }
+    let v = unsafe { *(params as *const f32) };
+    with_ff(|s| match pname {
+        0x0B62 => s.fog_density = v,
+        0x0B63 => s.fog_start = v,
+        0x0B64 => s.fog_end = v,
+        _ => {}
+    });
+    if pname == 0x0B66 {
+        let c = unsafe { *(params as *const [f32; 4]) };
+        with_ff(|s| s.fog_color = c);
+    }
+}
+
+/// `GL_FOG_COLOR` is GL 1.4 and is not in the `glFogf`/`glFogfv` family, so it needs its own
+/// entry point; LWJGL reaches it as `GL11.glFogColor`.
+#[no_mangle]
+pub unsafe extern "C" fn glFogColor(r: f32, g: f32, b: f32, a: f32) {
+    let v = [r, g, b, a];
+    gl_fogfv(0x0B66, v.as_ptr());
+}
+
+/// Fog state recorded here, for `glGetFloatv`/`glGetIntegerv` to answer.
+pub fn fog_query_f(pname: u32) -> Option<f32> {
+    with_ff(|s| match pname {
+        0x0B62 => Some(s.fog_density),
+        0x0B63 => Some(s.fog_start),
+        0x0B64 => Some(s.fog_end),
+        0x0B66 => Some(s.fog_color[0]),
+        _ => None,
+    })
+}
+
+pub fn fog_query_i(pname: u32) -> Option<i32> {
+    with_ff(|s| match pname {
+        0x0B61 => Some(0),          // colour index, unused since GL 1.2
+        0x0B65 => Some(s.fog_mode), // GL_EXP by default
+        _ => None,
+    })
+}
 pub extern "C" fn gl_shade_model(_mode: u32) {}
 pub extern "C" fn gl_tex_envf(_target: u32, _pname: u32, _param: f32) {}
 pub extern "C" fn gl_tex_envi(_target: u32, _pname: u32, _param: i32) {}

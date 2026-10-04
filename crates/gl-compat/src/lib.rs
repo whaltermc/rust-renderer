@@ -531,6 +531,14 @@ pub extern "C" fn glGetString(name: u32) -> *const u8 {
 
 #[no_mangle]
 pub unsafe extern "C" fn glGetIntegerv(pname: u32, data: *mut i32) {
+    // Fog queries are answered from recorded state: ES 3.x has no fog, so forwarding them
+    // raises GL_INVALID_ENUM and desynchronises the game's cached fog state.
+    if let Some(v) = fixed_func::fog_query_i(pname) {
+        if !data.is_null() {
+            *data = v;
+        }
+        return;
+    }
     if data.is_null() {
         errors().set(GL_INVALID_VALUE);
         return;
@@ -1209,7 +1217,7 @@ forward_all! {
     glGenerateMipmap(t: u32);
     glGetAttribLocation(p: u32, n: *const c_char) -> i32;
     glGetBooleanv(p: u32, d: *mut u8);
-    glGetFloatv(p: u32, d: *mut f32);
+
     glGetProgramInfoLog(p: u32, b: i32, l: *mut i32, log: *mut c_char);
     glGetProgramiv(p: u32, n: u32, v: *mut i32);
     glGetShaderInfoLog(s: u32, b: i32, l: *mut i32, log: *mut c_char);
@@ -1478,6 +1486,25 @@ pub unsafe extern "C" fn legacy_noop_fn() {}
 // LWJGL resolves every GL11..GL33 function at startup. With `-Dorg.lwjgl.util.NoChecks=true`
 // a NULL pointer is *called* instead of rejected, which is the `SIGSEGV pc=0x0` the 1.16.5
 // OptiFine launch died with. Everything below resolves to something callable.
+
+/// Answers fog queries from the recorded state, then falls through to the driver. ES 3.x has
+/// no fog, so forwarding these pnames raises GL_INVALID_ENUM and leaves the game's cached fog
+/// state disagreeing with what it last set.
+#[no_mangle]
+pub unsafe extern "C" fn glGetFloatv(p: u32, d: *mut f32) {
+    if d.is_null() {
+        errors().set(GL_INVALID_VALUE);
+        return;
+    }
+    if let Some(v) = fixed_func::fog_query_f(p) {
+        *d = v;
+        return;
+    }
+    match driver_fn_cached::<unsafe extern "C" fn(u32, *mut f32)>("glGetFloatv") {
+        Some(f) => f(p, d),
+        None => errors().set(GL_INVALID_OPERATION),
+    }
+}
 
 /// Desktop `glGetDoublev` -> ES `glGetFloatv`, widened. Matrices come from the emulated
 /// fixed-function stack. Unknown pnames write one value (the safest count for the caller).
@@ -1812,6 +1839,7 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glTexParameteriv" => glTexParameteriv as *const c_void,
         b"glTexParameterfv" => glTexParameterfv as *const c_void,
         b"glRenderbufferStorage" => glRenderbufferStorage as *const c_void,
+        b"glFogColor" => fixed_func::glFogColor as *const c_void,
         b"glGetTexLevelParameteriv" => glGetTexLevelParameteriv as *const c_void,
         b"eglGetDisplay" => eglGetDisplay as *const c_void,
         b"eglInitialize" => eglInitialize as *const c_void,
