@@ -30,7 +30,7 @@ jobs:
         with:
           targets: aarch64-linux-android
 
-      - name: Install Android SDK tools
+      - name: Install Android SDK and NDK
         run: |
           SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
 
@@ -48,51 +48,28 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
-      - name: Show tool versions
-        run: |
-          java -version
-          rustc --version
-          cargo --version
-          "$ANDROID_HOME/platform-tools/adb" version
-          "$ANDROID_HOME/ndk/27.2.12479018/ndk-build" --version
-
       - name: Install cargo-ndk
-        run: |
-          cargo install cargo-ndk --locked
+        run: cargo install cargo-ndk --locked
 
       - name: Build Rust renderer
         run: |
           cargo test -p renderer-core
+          cargo ndk -t arm64-v8a build --release -p gl-compat
 
-          cargo ndk \
-            -t arm64-v8a \
-            build \
-            --release \
-            -p gl-compat
-
-      - name: Verify Rust library
+      - name: Install renderer library
         run: |
-          test -f target/aarch64-linux-android/release/librust_gl.so
-          file target/aarch64-linux-android/release/librust_gl.so
-          ls -lh target/aarch64-linux-android/release/librust_gl.so
-
-      - name: Copy renderer library
-        run: |
-          mkdir -p android/app/src/main/jniLibs/arm64-v8a
-
-          cp \
+          install -D \
             target/aarch64-linux-android/release/librust_gl.so \
             android/app/src/main/jniLibs/arm64-v8a/librust_gl.so
 
-          ls -lh android/app/src/main/jniLibs/arm64-v8a/librust_gl.so
-
-      - name: Make Gradle executable
-        working-directory: android
-        run: chmod +x gradlew
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: "8.7"
 
       - name: Build APK
         working-directory: android
-        run: ./gradlew :app:assembleDebug --stacktrace --no-daemon
+        run: gradle :app:assembleDebug --stacktrace --no-daemon
 
       - name: Verify APK
         run: |

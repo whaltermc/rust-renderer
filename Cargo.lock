@@ -45,13 +45,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "format-translate"
+version = "0.1.0"
+
+[[package]]
 name = "gl-compat"
 version = "0.1.0"
 dependencies = [
  "android_logger",
+ "format-translate",
  "gles-backend",
  "log",
  "renderer-core",
+ "shader-translate",
  "vulkan-backend",
 ]
 
@@ -116,6 +122,10 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "renderer-core"
+version = "0.1.0"
+
+[[package]]
+name = "shader-translate"
 version = "0.1.0"
 
 [[package]]
