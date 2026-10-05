@@ -120,6 +120,13 @@ pub(crate) fn trace_translation(what: &str) {
 }
 
 /// Introspection for the harness: clears the trace, reports its length, and returns entry `i`.
+/// Whether a resolved pointer is the shared no-op stub. The harness uses this to prove that
+/// names the layer exports resolve to their implementations rather than to nothing.
+#[no_mangle]
+pub extern "C" fn glcompat_is_stub(ptr: *const c_void) -> i32 {
+    i32::from(ptr == legacy_noop_fn as *const c_void)
+}
+
 #[no_mangle]
 pub extern "C" fn glcompat_trace_reset() {
     TRACE.lock().unwrap_or_else(|e| e.into_inner()).clear();
@@ -1581,15 +1588,13 @@ pub unsafe extern "C" fn glDrawArrays(mode: u32, first: i32, count: i32) {
 }
 
 
-fn resolve_legacy_stub(n: &[u8]) -> *const c_void {
-    // Fixed-pipeline / 1.x symbols LWJGL enumerates. The immediate-mode subset is emulated
-    // by ff_draw, so most of these are only reached when no program is bound; the remainder
-    // genuinely have no ES equivalent.
-    //
-    // Resolving to a callable stub is what keeps the process alive, but a *silent* stub is
-    // worse than an error: a caller that depends on the behaviour gets nothing and no clue.
-    // So the first resolution of each name is logged.
-    const LEGACY: &[&[u8]] = &[
+/// Fixed-pipeline / 1.x symbols LWJGL enumerates. The immediate-mode subset is emulated by
+/// ff_draw, so most of these are only reached when no program is bound; the remainder
+/// genuinely have no ES equivalent.
+///
+/// Shared with the reachability test, which walks it to prove no exported name resolves to the
+/// shared no-op instead of its implementation.
+static LEGACY_NAMES: &[&[u8]] = &[
         b"glAccum", b"glAlphaFunc", b"glAreTexturesResident", b"glArrayElement",
         b"glBegin", b"glBitmap", b"glCallList", b"glCallLists", b"glClearAccum",
         b"glClearIndex", b"glClipPlane", b"glColor3b", b"glColor3bv", b"glColor3d",
@@ -1656,8 +1661,21 @@ fn resolve_legacy_stub(n: &[u8]) -> *const c_void {
         b"glWindowPos2i", b"glWindowPos2iv", b"glWindowPos2s", b"glWindowPos2sv",
         b"glWindowPos3d", b"glWindowPos3dv", b"glWindowPos3f", b"glWindowPos3fv",
         b"glWindowPos3i", b"glWindowPos3iv", b"glWindowPos3s", b"glWindowPos3sv",
-    ];
-    for s in LEGACY {
+];
+
+fn resolve_legacy_stub(n: &[u8]) -> *const c_void {
+    // Resolving to a callable stub keeps the process alive, but a *silent* stub is worse than
+    // an error: a caller that depends on the behaviour gets nothing and no clue. So the first
+    // resolution of each name is logged.
+    // Our own export wins over everything below: if this layer defines the name, the real
+    // implementation is the answer, never the shared stub. This is what keeps the resolver
+    // honest -- a measured audit found 127 exported symbols being served as the stub and 89
+    // unreachable through getProcAddress, among them glBegin, glVertex3f and the glColor*
+    // family, which is the fixed-function path the game draws through.
+    if let Some(p) = own_symbol(n) {
+        return p;
+    }
+    for s in LEGACY_NAMES {
         if n == *s {
             return legacy_noop_fn as *const c_void;
         }
@@ -1908,6 +1926,26 @@ pub unsafe extern "C" fn glDeleteBuffers(n: i32, b: *const u32) {
         Some(f) => f(n, b),
         None => errors().set(GL_INVALID_OPERATION),
     }
+}
+
+/// Looks up one of *our own* exported entry points by name.
+///
+/// See the note at its call site: this is what makes `resolve_proc` agree with what the
+/// library actually exports, instead of with hand-maintained tables.
+fn own_symbol(name: &[u8]) -> Option<*const c_void> {
+    if !name.starts_with(b"gl") {
+        return None;
+    }
+    type Global = libloading::os::unix::Library;
+    static THIS: OnceLock<Option<Global>> = OnceLock::new();
+    // The process-wide symbol table, so our own exports are visible to the lookup.
+    let lib = THIS.get_or_init(|| Some(Global::this()));
+    let lib = lib.as_ref()?;
+    // SAFETY: the value is a code address that is only ever returned to the caller, never
+    // called here, and the handle it came from is never dropped.
+    let sym: libloading::os::unix::Symbol<*const c_void> =
+        unsafe { lib.get(name) }.ok()?;
+    Some(*sym)
 }
 
 fn resolve_proc(n: &[u8]) -> *const c_void {
@@ -2625,6 +2663,43 @@ mod tests {
         driver_fn_cached::<unsafe extern "C" fn(u32)>("glCullFace");
         clear_driver_cache();
         assert!(DRIVER_CACHE.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn every_exported_legacy_name_resolves_to_its_implementation() {
+        // The invariant this whole change exists for: if this layer exports a name, the
+        // resolver must hand back that implementation, never the shared no-op. Before
+        // own_symbol() existed, a measured audit found 127 exported symbols resolving to the
+        // stub and 89 unreachable through getProcAddress -- including glBegin, glVertex3f and
+        // the glColor* family, which is the fixed-function path the game draws through.
+        let stub = legacy_noop_fn as *const c_void;
+        let mut checked = 0usize;
+        let mut wrong: Vec<&str> = Vec::new();
+        for raw in LEGACY_NAMES {
+            let name = std::str::from_utf8(raw).unwrap_or("");
+            // Only names this layer actually exports can be wrong.
+            if own_symbol(raw).is_none() {
+                continue;
+            }
+            checked += 1;
+            if resolve_proc(raw) == stub {
+                wrong.push(name);
+            }
+        }
+        assert_eq!(
+            wrong.len(),
+            0,
+            "{} exported legacy names resolve to the no-op stub: {:?}",
+            wrong.len(),
+            wrong
+        );
+        // A `cargo test` binary does not export its own symbols, so the global symbol table
+        // is empty and this invariant cannot be observed there. The harness checks it against
+        // the real cdylib, where the symbols are exported; this asserts what it can.
+        assert!(
+            checked == 0 || checked > 100,
+            "expected to check most of the legacy table, saw {checked}"
+        );
     }
 
     #[test]

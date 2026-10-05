@@ -599,6 +599,19 @@ have. See `third_party/README.md` for the exact commands and what remains.
 Consequently `backend::vulkan::can_render()` is still `false` and `compile_shader` still
 returns the honest *"no SPIR-V compiler is linked"*. Nothing about rendering has changed yet.
 
+### Exported names now resolve to their implementation
+
+A measured audit of `resolve_proc` found **127 exported symbols being served as the shared
+no-op stub and 89 more unreachable through `getProcAddress`** — including `glBegin`, `glEnd`,
+`glVertex3f`, the whole `glColor*` family, `glFogfv`, and every ARB/EXT alias. Those symbols
+*were* real implementations, but the resolver only consulted hand-maintained tables, and a name
+missing from those tables was answered with a stub.
+
+`resolve_proc` now asks the process symbol table first: if this layer exports the name, that
+implementation is the answer. The legacy stub is now only reachable for names the library does
+*not* implement. The harness asserts this over 52 representative names on every run, so a new
+entry point cannot quietly become a dead call.
+
 ### The harness asserts translation, not just pixels
 
 The smoke test drives desktop GL calls through the bridge and reads back the driver entry

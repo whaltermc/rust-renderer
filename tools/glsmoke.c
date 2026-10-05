@@ -1417,6 +1417,46 @@ int main(int argc, char **argv) {
     }
 
 
+
+    /* ---- No exported name may resolve to the shared no-op stub ----
+     * LWJGL resolves GL functions through getProcAddress, so a name that is exported as a
+     * real implementation but served as a stub is a silently dead call. This walks a broad
+     * sample of the fixed-function and extension surface and fails on any stub.
+     */
+    {
+        int (*is_stub)(void *) = (int (*)(void *))dlsym(lib, "glcompat_is_stub");
+        static const char *must_be_real[] = {
+            "glBegin", "glEnd", "glVertex2f", "glVertex3f", "glVertex4f",
+            "glColor3f", "glColor4f", "glColor4ub", "glTexCoord2f", "glTexCoord4f",
+            "glNormal3f", "glArrayElement", "glFogfv", "glFogf", "glLightfv",
+            "glMaterialfv", "glTexEnvfv", "glTexGenfv", "glPushAttrib", "glPopAttrib",
+            "glPushMatrix", "glPopMatrix", "glLoadMatrixf", "glMultMatrixf", "glTranslatef",
+            "glRotatef", "glScalef", "glOrtho", "glFrustum", "glPointSize", "glLineWidth",
+            "glAlphaFunc", "glShadeModel", "glEnableClientState", "glDisableClientState",
+            "glVertexPointer", "glColorPointer", "glTexCoordPointer", "glNormalPointer",
+            "glMultiTexCoord2f", "glSecondaryColor3f", "glWindowPos2f", "glFogCoord",
+            "glGenTexturesARB", "glBindTextureARB", "glFramebufferTexture2DEXT",
+            "glGenerateMipmapEXT", "glPointParameterf", "glGetLightfv", "glGetMaterialfv",
+            "glLightiv", "glLineStipple", "glPolygonStipple", "glGenLists",
+        };
+        if (!is_stub) {
+            printf("  (stub check needs glcompat_is_stub)\\n");
+        } else {
+            int stubs = 0;
+            for (size_t i = 0; i < sizeof must_be_real / sizeof must_be_real[0]; i++) {
+                void *fp = getproc(must_be_real[i]);
+                if (!fp) {
+                    printf("  FAIL  %s does not resolve\\n", must_be_real[i]);
+                    stubs++;
+                } else if (is_stub(fp)) {
+                    printf("  FAIL  %s resolves to the no-op stub\\n", must_be_real[i]);
+                    stubs++;
+                }
+            }
+            ok(stubs == 0, "no exported name resolves to the no-op stub");
+        }
+    }
+
     /* ================= Translation contract: GL in, ES out =================
      * The smoke test checks pixels, which tells you *that* something is wrong but not
      * which call caused it. This sends desktop GL calls through the bridge and reads back
