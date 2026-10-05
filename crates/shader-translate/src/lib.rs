@@ -4,6 +4,11 @@
 //! the driver reports a real compile error instead of an empty shader (which freezes
 //! loading screens). Geometry/tessellation/compute still rejected.
 
+use std::borrow::Cow;
+use std::collections::HashSet;
+
+mod numeric;
+
 const PRECISION_300: &str = "\
 precision highp float;\n\
 precision highp int;\n\
@@ -126,18 +131,11 @@ fn rewrite_es300_tokens(mut s: String) -> String {
         ("double", "float"),
     ] { s = s.replace(a,b); }
 
-    // Mojang's shared lightmap helper divides an ivec2 by a float. Desktop GLSL permits
-    // that implicit conversion, while GLSL ES requires both arithmetic operands to match.
-    s = s.replace("uv / 256.0", "vec2(uv) / 256.0");
-    s = s.replace("texCoord2 = UV2", "texCoord2 = vec2(UV2)");
-    s = s
-        .replace("frameCounter * 0.618", "float(frameCounter) * 0.618")
-        .replace("eyeBrightnessSmooth.y / 240.0", "float(eyeBrightnessSmooth.y) / 240.0")
-        .replace("sampleSkip == 0", "sampleSkip == 0.0")
-        .replace("? 0 : skip", "? 0.0 : skip");
-    s = s
-        .replace("floor(texCoord.x * 16) / 15", "floor(texCoord.x * 16.0) / 15.0")
-        .replace("floor(texCoord.y * 16) / 15", "floor(texCoord.y * 16.0) / 15.0");
+    // Mojang's shared lightmap helper divides an ivec2 by a float, and shader packs compare
+    // floats against integer literals. Desktop GLSL converts implicitly; GLSL ES has no such
+    // conversion, so these are fixed structurally by `numeric::widen_int_literals` earlier in
+    // the pipeline rather than by naming individual expressions here.
+    s = s.replace("? 0 : skip", "? 0.0 : skip");
     s = rewrite_texture_lod_integer_levels(&s);
 
     // Desktop-only builtins with straightforward ES equivalents.
@@ -169,6 +167,48 @@ fn strip_mojang_directives(src: &str) -> String {
         })
         .fold(String::new(), |mut acc, l| {
             acc.push_str(l);
+            acc.push('\n');
+            acc
+        })
+}
+
+/// Rewrites `#error "message"` so the message lexes as preprocessing tokens.
+///
+/// GLSL has no string-literal syntax, so the quotes are an illegal character. Sodium's chunk
+/// shader guards its vertex-compression path with `#error "Vertex compression must be
+/// enabled"` inside the `#else` of the `#ifdef` that is actually taken, and Mali's compiler
+/// lexes the whole file before discarding skipped branches: it reports
+/// `Unknown character '"'`, the shader fails, and Sodium aborts the frame. Dropping the
+/// quotes keeps the directive and its message intact for a compiler that does evaluate it.
+fn sanitize_error_directive(line: &str) -> Cow<'_, str> {
+    let trimmed = line.trim_start();
+    // `#errorXYZ` is a different token, not this directive.
+    let Some(message) = trimmed.strip_prefix("#error") else {
+        return Cow::Borrowed(line);
+    };
+    if !message.is_empty() && !message.starts_with([' ', '\t']) {
+        return Cow::Borrowed(line);
+    }
+    let indent = &line[..line.len() - trimmed.len()];
+    let sanitized: String = message
+        .chars()
+        // Everything outside identifiers and whitespace is not a preprocessing token: `"`,
+        // `'` and `\` in particular. Replacing rather than deleting keeps words separated.
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { ' ' })
+        .collect();
+    let sanitized = sanitized.split_whitespace().collect::<Vec<_>>().join(" ");
+    if sanitized.is_empty() {
+        return Cow::Owned(format!("{indent}#error"));
+    }
+    Cow::Owned(format!("{indent}#error {sanitized}"))
+}
+
+/// [`sanitize_error_directive`] over a whole source.
+fn sanitize_error_directives(src: &str) -> String {
+    src.lines()
+        .map(sanitize_error_directive)
+        .fold(String::new(), |mut acc, line| {
+            acc.push_str(&line);
             acc.push('\n');
             acc
         })
@@ -237,7 +277,241 @@ fn has_later_assignment(lines: &[&str], declaration_line: usize, name: &str) -> 
     false
 }
 
+
+fn collect_function_param_names(src: &str) -> HashSet<String> {
+    const VALUE_TYPES: &[&str] = &[
+        "float", "double", "int", "uint", "bool", "void", "vec2", "vec3", "vec4", "ivec2",
+        "ivec3", "ivec4", "uvec2", "uvec3", "uvec4", "mat2", "mat3", "mat4",
+    ];
+    let mut params = HashSet::new();
+    let mut in_param_list = false;
+
+    for line in src.lines() {
+        let trimmed = line.trim_start();
+        if !in_param_list {
+            for ty in VALUE_TYPES {
+                if let Some(rest) = trimmed.strip_prefix(ty) {
+                    let rest = rest.trim_start();
+                    if let Some((name_part, after_paren)) = rest.split_once('(') {
+                        let name = name_part.trim();
+                        if name.bytes().all(|b| {
+                            b == b'_' || b.is_ascii_alphabetic() || (b.is_ascii_digit() && b != b'0')
+                        }) {
+                            in_param_list = true;
+                            for p in after_paren.split(',') {
+                                let raw = p;
+                                let p = raw.trim_end_matches(|c: char| c == ')' || c == '{' || c == ';' || c.is_whitespace()).trim();
+                                if let Some(pname) = p.split_whitespace().last() {
+                                    let pname = pname.to_string();
+                                    if !pname.is_empty() {
+                                        params.insert(pname);
+                                    }
+                                }
+                                if raw.contains(')') {
+                                    in_param_list = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        } else if !trimmed.starts_with("//") {
+            for p in line.split(',') {
+                let raw = p;
+                let p = raw.trim_end_matches(|c: char| c == ')' || c == '{' || c == ';' || c.is_whitespace()).trim();
+                if let Some(pname) = p.split_whitespace().last() {
+                    let pname = pname.to_string();
+                    if !pname.is_empty() {
+                        params.insert(pname);
+                    }
+                }
+                if raw.contains(')') {
+                    in_param_list = false;
+                    break;
+                }
+            }
+        }
+    }
+
+    params
+}
+
+fn collect_potential_macro_names(src: &str) -> HashSet<String> {
+    const VALUE_TYPES: &[&str] = &[
+        "float", "double", "int", "uint", "bool", "vec2", "vec3", "vec4", "ivec2",
+        "ivec3", "ivec4", "uvec2", "uvec3", "uvec4", "mat2", "mat3", "mat4",
+    ];
+    let mut names = HashSet::new();
+    let lines: Vec<&str> = src.lines().collect();
+    let mut brace_depth = 0isize;
+    for line in lines.iter() {
+        let trimmed = line.trim_start();
+        if brace_depth == 0
+            && !trimmed.starts_with("const ")
+            && !trimmed.starts_with("//")
+            && !trimmed.starts_with('#')
+        {
+            if let Some((left, _)) = trimmed.split_once('=') {
+                let mut declaration = left.split_whitespace();
+                if let (Some(ty), Some(name)) = (declaration.next(), declaration.next()) {
+                    if declaration.next().is_none()
+                        && VALUE_TYPES.contains(&ty)
+                        && name.bytes().enumerate().all(|(index, byte)| {
+                            byte == b'_'
+                                || byte.is_ascii_alphabetic()
+                                || index > 0 && byte.is_ascii_digit()
+                        })
+                    {
+                        names.insert(name.to_string());
+                    }
+                }
+            }
+        }
+        if !trimmed.starts_with("//") {
+            brace_depth += line.chars().filter(|&ch| ch == '{').count() as isize;
+            brace_depth -= line.chars().filter(|&ch| ch == '}').count() as isize;
+        }
+    }
+    names
+}
+
+fn is_ident_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+fn replace_whole_word_after_comment(code: &str, old: &str, new: &str) -> String {
+    let mut result = String::with_capacity(code.len());
+    let bytes = code.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i..].starts_with(old.as_bytes()) {
+            let start = i;
+            let end = i + old.len();
+            let before_ok = start == 0 || !is_ident_byte(bytes[start - 1]);
+            let after_ok = end == bytes.len() || !is_ident_byte(bytes[end]);
+            if before_ok && after_ok {
+                result.push_str(new);
+                i = end;
+                continue;
+            }
+        }
+        result.push(bytes[i] as char);
+        i += 1;
+    }
+    result
+}
+
+fn rename_shadowed_params(src: &str) -> String {
+    let param_names = collect_function_param_names(src);
+    let potential_macro_names = collect_potential_macro_names(src);
+    let collisions: HashSet<_> = param_names.intersection(&potential_macro_names).cloned().collect();
+    if collisions.is_empty() {
+        return src.to_string();
+    }
+
+    const VALUE_TYPES: &[&str] = &[
+        "float", "double", "int", "uint", "bool", "void", "vec2", "vec3", "vec4", "ivec2",
+        "ivec3", "ivec4", "uvec2", "uvec3", "uvec4", "mat2", "mat3", "mat4",
+    ];
+    let mut out = String::with_capacity(src.len());
+    let mut in_param_list = false;
+    let mut in_body = false;
+    let mut brace_depth = 0isize;
+    let mut current_renames: Vec<(String, String)> = Vec::new();
+
+    for line in src.lines() {
+        let trimmed = line.trim_start();
+        let mut renamed_line = line.to_string();
+
+        if !in_param_list && !in_body {
+            for ty in VALUE_TYPES {
+                if let Some(rest) = trimmed.strip_prefix(ty) {
+                    let rest = rest.trim_start();
+                    if let Some((name_part, after_paren)) = rest.split_once('(') {
+                        let func_name = name_part.trim();
+                        if func_name.bytes().all(|b| {
+                            b == b'_' || b.is_ascii_alphabetic() || (b.is_ascii_digit() && b != b'0')
+                        }) {
+                            in_param_list = true;
+                            current_renames.clear();
+
+                            for p in after_paren.split(',') {
+                                let raw = p;
+                                let p = raw.trim_end_matches(|c: char| c == ')' || c == '{' || c == ';' || c.is_whitespace()).trim();
+                                if let Some(pname) = p.split_whitespace().last() {
+                                    let pname = pname.to_string();
+                                    if !pname.is_empty() && collisions.contains(&pname) {
+                                        let new_name = format!("{pname}_");
+                                        current_renames.push((pname.clone(), new_name.clone()));
+                                        renamed_line = replace_whole_word_after_comment(&renamed_line, &pname, &new_name);
+                                    }
+                                }
+                                if raw.contains(')') {
+                                    in_param_list = false;
+                                    break;
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    break;
+                }
+            }
+        } else if in_param_list {
+            for p in line.split(',') {
+                let raw = p;
+                let p = raw.trim_end_matches(|c: char| c == ')' || c == '{' || c == ';' || c.is_whitespace()).trim();
+                if let Some(pname) = p.split_whitespace().last() {
+                    let pname = pname.to_string();
+                    if !pname.is_empty() && collisions.contains(&pname) {
+                        let new_name = format!("{pname}_");
+                        current_renames.push((pname.clone(), new_name.clone()));
+                        renamed_line = replace_whole_word_after_comment(&renamed_line, &pname, &new_name);
+                    }
+                }
+                if raw.contains(')') {
+                    in_param_list = false;
+                    break;
+                }
+            }
+        } else if in_body {
+            for (old, new) in &current_renames {
+                renamed_line = replace_whole_word_after_comment(&renamed_line, old, new);
+            }
+        }
+
+        let open = line.chars().filter(|&ch| ch == '{').count();
+        let close = line.chars().filter(|&ch| ch == '}').count();
+        brace_depth += open as isize;
+        brace_depth -= close as isize;
+
+        if !in_param_list && !in_body && open > 0 && brace_depth > 0 {
+            in_body = true;
+        }
+
+        if in_body && brace_depth <= 0 {
+            in_body = false;
+            current_renames.clear();
+        }
+
+        out.push_str(&renamed_line);
+        out.push('\n');
+    }
+
+    out
+}
+
 fn macroize_nonconstant_globals(src: &str) -> String {
+    let renamed_source = rename_shadowed_params(src);
+    macroize_nonconstant_globals_with_params(&renamed_source, &collect_function_param_names(&renamed_source))
+}
+
+fn macroize_nonconstant_globals_with_params(
+    src: &str,
+    param_names: &HashSet<String>,
+) -> String {
     const VALUE_TYPES: &[&str] = &[
         "float", "double", "int", "uint", "bool", "vec2", "vec3", "vec4", "ivec2",
         "ivec3", "ivec4", "uvec2", "uvec3", "uvec4", "mat2", "mat3", "mat4",
@@ -259,6 +533,7 @@ fn macroize_nonconstant_globals(src: &str) -> String {
                 let name = declaration.next()?;
                 if declaration.next().is_some()
                     || !VALUE_TYPES.contains(&ty)
+                    || param_names.contains(name)
                     || !name.bytes().enumerate().all(|(index, byte)| {
                         byte == b'_'
                             || byte.is_ascii_alphabetic()
@@ -285,6 +560,7 @@ fn macroize_nonconstant_globals(src: &str) -> String {
     }
     out
 }
+
 
 
 /// Highest fragment output layer the device can be asked for. Iris/OptiFine packs use up to
@@ -586,6 +862,7 @@ pub fn translate(src: &str) -> Result<String, String> {
     let (num, es) = version.unwrap_or((110, false));
     if es {
         let src = strip_mojang_directives(src);
+        let src = sanitize_error_directives(&src);
         // Already ES — still inject precision if missing (some drivers want it).
         if !src.contains("precision ") && num >= 300 {
             let mut out = String::new();
@@ -614,7 +891,15 @@ pub fn translate(src: &str) -> Result<String, String> {
 
     let fog_sanitized_source = strip_unused_iris_fog_initializer(src);
     let suffix_sanitized_source = strip_float_suffixes(&fog_sanitized_source);
-    let sanitized_source = macroize_nonconstant_globals(&suffix_sanitized_source);
+    // Before macroize_nonconstant_globals, which folds `float f = ...;` globals into #defines and
+    // so hides the declarations this pass types against. ES 1.00 has no implicit conversion at
+    // all and ES 3.00 kept only a few, so both targets need the literals widened.
+    let widened_source = numeric::widen_int_literals(&suffix_sanitized_source);
+    // After the widening, so a `mod` that started with one float argument has already become a
+    // float call and is left for ES's own overload; what is left taking integers is retargeted
+    // to the helper, which is injected only when something actually needed it.
+    let (mod_rewritten_source, needs_int_mod) = numeric::rewrite_int_mod(&widened_source);
+    let sanitized_source = macroize_nonconstant_globals(&mod_rewritten_source);
     let src = sanitized_source.as_str();
     let is_frag = looks_like_fragment(src);
     let layers = fragment_output_layers(src);
@@ -628,6 +913,8 @@ pub fn translate(src: &str) -> Result<String, String> {
     let mut inserted_precision = false;
 
     for line in src.lines() {
+        let line = sanitize_error_directive(line);
+        let line = line.as_ref();
         let t = line.trim_start();
 
         if t.starts_with("#version") {
@@ -652,6 +939,10 @@ pub fn translate(src: &str) -> Result<String, String> {
 
         if !inserted_precision && !t.is_empty() && !t.starts_with('#') && !t.starts_with("//") {
             out.push_str(precision);
+            if needs_int_mod {
+                out.push_str(numeric::int_mod_helper());
+                out.push('\n');
+            }
             if needs_frag_out {
                 out.push_str(&fragment_output_decls(layers));
             }
@@ -667,7 +958,11 @@ pub fn translate(src: &str) -> Result<String, String> {
             // gl_FragData[n]; gating this on MRT left such shaders unrewritten.
             rewritten = rewrite_frag_data(&rewritten, layers);
         }
-        out.push_str(&rewritten);
+        out.push_str(rewritten.trim_end_matches('\n'));
+        // The per-line rewriters rebuild their input a line at a time and so return a trailing
+        // newline of their own; without trimming it here every source line would be followed by
+        // a blank one, which both bloats the shader and shifts every line number a driver
+        // reports away from the source it came from.
         out.push('\n');
     }
 
@@ -721,6 +1016,50 @@ mod tests {
         assert_eq!(translate(s).unwrap(), s);
     }
 
+    /// The exact line from Sodium's chunk vertex shader. GLSL has no string-literal syntax, so
+    /// the quoted message is an illegal character; Mali lexes the whole file before discarding
+    /// the `#else` branch this sits in, rejected it with `Unknown character '"'`, and the game
+    /// crashed on the resulting failed compile.
+    #[test]
+    fn quoted_error_message_is_unquoted() {
+        let sodium = "#version 300 es\n#define USE_VERTEX_COMPRESSION\nprecision highp float;\n\
+            #ifdef USE_VERTEX_COMPRESSION\nvoid main(){ gl_Position = vec4(0); }\n\
+            #else\n#error \"Vertex compression must be enabled\"\n#endif\n";
+        let o = translate(sodium).unwrap();
+        assert!(!o.contains('"'), "quoted #error message survived: {o}");
+        assert!(o.contains("#error Vertex compression must be enabled"), "{o}");
+        // The directive still fires where it is reached, so a genuinely unsupported
+        // configuration is not silently compiled.
+        assert!(o.contains("#ifdef USE_VERTEX_COMPRESSION"));
+        assert!(o.contains("#else"));
+        assert!(o.contains("#endif"));
+    }
+
+    #[test]
+    fn error_message_without_quotes_is_untouched() {
+        let s = "#version 300 es\n#error needs GLSL 420\nvoid main(){}\n";
+        assert!(translate(s).unwrap().contains("#error needs GLSL 420"));
+    }
+
+    /// `#errorXYZ` is a different token and must not be rewritten into a directive.
+    #[test]
+    fn directive_prefix_that_is_not_error_is_untouched() {
+        let s = "#version 300 es\n#errorish foo \"bar\"\nvoid main(){}\n";
+        assert!(translate(s).unwrap().contains("#errorish foo \"bar\""));
+    }
+
+    /// Desktop shaders hit the same illegal character, so the rewrite is not ES-only.
+    #[test]
+    fn desktop_shader_error_message_is_unquoted() {
+        let o = translate(
+            "#version 150 core\n#error \"GL_ARB_gpu_shader5 is required\"\n\
+             void main(){ gl_Position = vec4(0); }\n",
+        )
+        .unwrap();
+        assert!(!o.contains('"'), "quoted #error message survived: {o}");
+        assert!(o.contains("#error GL_ARB_gpu_shader5 is required"), "{o}");
+    }
+
     fn desktop_330_layouts_and_double_are_rewritten() {
         let o = translate("#version 330 core\nlayout(location=0, binding=2) in dvec3 p;\nlayout(location=0) out vec4 c;\nvoid main(){ c=vec4(p); }\n").unwrap();
         assert!(o.starts_with("#version 300 es\n"));
@@ -753,9 +1092,13 @@ mod tests {
             "#version 150\nin ivec2 UV2;\nout vec2 texCoord2;\nin vec2 texCoord;\nvoid main() { texCoord2 = UV2; float level = floor(texCoord.x * 16) / 15; }\nvec2 lightmap(ivec2 uv) { return uv / 256.0; }\n",
         )
         .unwrap();
-        assert!(o.contains("vec2(uv) / 256.0"));
-        assert!(o.contains("texCoord2 = vec2(UV2)"));
-        assert!(o.contains("floor(texCoord.x * 16.0) / 15.0"));
+        // The int-to-float conversions are now made structurally rather than by naming these
+        // three expressions. An integer vector has to convert with `vecN(...)`: `float(uv)` on
+        // an ivec2 is a conversion of the first component, not componentwise, and glslang
+        // rejects it here.
+        assert!(o.contains("vec2(uv) / 256.0"), "{o}");
+        assert!(o.contains("texCoord2 = vec2(UV2)"), "{o}");
+        assert!(o.contains("floor(texCoord.x * 16.0) / 15.0"), "{o}");
     }
 
     #[test]

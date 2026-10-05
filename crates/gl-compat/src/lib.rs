@@ -940,6 +940,16 @@ void main(){ c = vec4(1.0); }
             }
         }
     };
+    // TEMP(debug): capture every shader source so translation gaps can be reproduced offline.
+    if let Ok(dir) = std::env::var("RENDERER_DUMP_SHADER_DIR") {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::File::create(format!("{dir}/{shader}.src")) {
+            let _ = f.write_all(src.as_bytes());
+        }
+        if let Ok(mut f) = std::fs::File::create(format!("{dir}/{shader}.translated")) {
+            let _ = f.write_all(translated.as_bytes());
+        }
+    }
     let c = match CString::new(translated.clone()) {
         Ok(c) => c,
         Err(_) => {

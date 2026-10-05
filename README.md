@@ -860,7 +860,7 @@ Do not claim Minecraft compatibility until a concrete version has been tested an
 | Vanilla MC 1.17–1.20 | Partial — modern shaders via GLES3 passthrough + GLSL rewrite; test per version |
 | Vanilla MC 1.21.4 | GUI and vanilla world captures pass on host GLES retrace; Android device launch remains unverified |
 | Sodium | **Out of scope for a 3.3 layer** — see above: unsupported architecture per Sodium's own docs, needs 4.5-class drivers, and is a mod requiring a working Fabric/NeoForge loader |
-| Iris / shader packs | **Not working yet** — the 1.21.4 Iris/BSL capture completes but has 144 shader compile failures and SSIM 0.079 |
+| Iris / shader packs | **Not working yet** — the 1.21.4 Iris/BSL capture completes but has 13 shader compile failures and SSIM 0.134 |
 | Performance | GLES driver does the heavy lifting; FF path is only used when no program is bound |
 
 The 1.21.4 status is from current host retrace tests; the other vanilla-version rows describe
