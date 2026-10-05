@@ -24,10 +24,10 @@ apply(plugin = "com.launchers_plugin.renderer.dsl")
 
 val pluginRendererConfig = buildJsonValue {
     renderer(
-        displayName = "Rust Renderer",
+        displayName = "RustGL",
 
         // This becomes POJAV_RENDERER
-        rendererId = "opengles3_rust",
+        rendererId = "rustgl",
 
         // Your actual native renderer library
         rendererGLPath = nativePath("librust_gl.so"),
@@ -75,23 +75,9 @@ val pluginRendererConfig = buildJsonValue {
             // Avoid treating our SO as a Mesa DRI driver.
             normal("LIB_MESA_NAME", "")
 
-            // Renderer options. Each setting is declared exactly once: the previous build
-            // sent RENDERER_BACKEND both as a fixed env var and as a selectable under a
-            // different key, which is what made the backend appear twice in the list.
-            // `vulkan` and `hybrid` cannot render the game yet (see backend::vulkan) and
-            // the code logs why, then stays on GLES.
-            selectable(
-                key = "RENDERER_BACKEND",
-                items = RendererConfig.EnvItems(
-                    defaultValue = "gles",
-                    values = listOf(
-                        "gles",
-                        "hybrid",
-                        "vulkan",
-                        "auto"
-                    )
-                )
-            )
+            // GLES is the only backend that currently draws Minecraft frames. Vulkan is
+            // device discovery only, so don't expose non-rendering choices in the launcher.
+            normal("RENDERER_BACKEND", "gles")
             // 1 = report OpenGL 3.3 / GLSL 330 so version checks pass; 0 = report the real
             // GLES strings (useful when diagnosing a driver-specific problem).
             // Explicit values rather than `toggleable`, because this variable defaults to
@@ -135,6 +121,13 @@ val pluginRendererConfig = buildJsonValue {
         minMCVer = null,
         maxMCVer = null
     )
+}
+
+tasks.register<Copy>("packageRustGlApk") {
+    dependsOn("assembleDebug")
+    from(layout.buildDirectory.file("outputs/apk/debug/app-debug.apk"))
+    into(layout.buildDirectory.dir("outputs/apk"))
+    rename { "RustGL.apk" }
 }
 
 android {

@@ -269,6 +269,8 @@ int ResolveHeight(int height) {
 }
 
 void *Lookup(const char *name) {
+    const char *strict = std::getenv("RUST_RENDERER_TRACE_STRICT");
+    const bool strictRenderer = strict != nullptr && std::strcmp(strict, "1") == 0;
     if (gMobileGl == nullptr) {
         const char *library = std::getenv("RUST_RENDERER_TRACE_LIBRARY");
         if (library != nullptr && library[0] != '\0') {
@@ -277,10 +279,10 @@ void *Lookup(const char *name) {
                 gMobileGl = dlopen(library, RTLD_NOW | RTLD_GLOBAL);
             }
         }
-        if (gMobileGl == nullptr) {
+        if (gMobileGl == nullptr && !strictRenderer) {
             gMobileGl = dlopen("librust_gl.so", RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
         }
-        if (gMobileGl == nullptr) {
+        if (gMobileGl == nullptr && !strictRenderer) {
             gMobileGl = dlopen("librust_gl.so", RTLD_NOW | RTLD_GLOBAL);
         }
     }
@@ -290,7 +292,7 @@ void *Lookup(const char *name) {
             return symbol;
         }
     }
-    return dlsym(RTLD_DEFAULT, name);
+    return strictRenderer ? nullptr : dlsym(RTLD_DEFAULT, name);
 }
 
 template <typename T>

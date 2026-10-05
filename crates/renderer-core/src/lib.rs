@@ -48,7 +48,8 @@ pub struct Config {
 }
 
 impl Config {
-    /// Reads the backend selection and debug flag from the environment.
+    /// Reads the backend selection and debug flag from the environment. GLES is the
+    /// default because it is currently the only backend that can render game frames.
     pub fn from_env() -> Self {
         let select = std::env::var("RENDERER_BACKEND").ok();
         let base = std::env::var("RENDERER_BACKEND_SELECT").ok();
@@ -73,7 +74,7 @@ pub fn select_backend(primary: Option<&str>, legacy_select: Option<&str>) -> Bac
     primary
         .and_then(BackendKind::parse)
         .or_else(|| legacy_select.and_then(BackendKind::parse))
-        .unwrap_or(BackendKind::Auto)
+        .unwrap_or(BackendKind::Gles)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -384,7 +385,7 @@ mod tests {
     fn unusable_values_fall_through_instead_of_failing() {
         assert_eq!(select_backend(Some(""), Some("vulkan")), BackendKind::Vulkan);
         assert_eq!(select_backend(Some("nonsense"), Some("gles")), BackendKind::Gles);
-        assert_eq!(select_backend(None, None), BackendKind::Auto);
+        assert_eq!(select_backend(None, None), BackendKind::Gles);
     }
 
     #[test]
@@ -404,7 +405,7 @@ mod tests {
         // A junk value must not stop the game from starting.
         assert_eq!(select_backend(Some("nonsense"), Some("gles")), BackendKind::Gles);
         // Nothing set at all.
-        assert_eq!(select_backend(None, None), BackendKind::Auto);
+        assert_eq!(select_backend(None, None), BackendKind::Gles);
     }
 
     #[test]

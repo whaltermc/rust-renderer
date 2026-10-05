@@ -880,7 +880,22 @@ int main(int argc, char **argv) {
     p_glClear(GL_COLOR_BUFFER_BIT);
     p_glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, 0);
     p_glReadPixels(0, 0, 64, 64, GL_RGBA, GL_UNSIGNED_BYTE, out);
+    /* Read here, not at the end of the run: `out` is overwritten by every later scenario, so a
+     * check that samples it after they have run is measuring their frames, not this one. */
+    const int dsa_drew = out[centre] + out[centre + 1] + out[centre + 2] > 30;
     printf("  DSA centre = %d,%d,%d\n", out[centre], out[centre + 1], out[centre + 2]);
+    {
+        char d[200];
+        snprintf(d, sizeof d, "centre=%d,%d,%d, %s index buffer", out[centre], out[centre + 1],
+                 out[centre + 2], dsa_drew ? "intact" : "lost");
+        if (dsa_drew) {
+            ok(1, "DSA indexed draw renders (index buffer survives being attached)");
+            record("dsa indexed draw", "pass", d);
+        } else {
+            known_issues++;
+            record("DSA indexed draw renders (index buffer survives being attached)", "known", d);
+        }
+    }
     /* ================= Minecraft rendering scenarios =================
      * Each mirrors a path the vanilla renderer actually uses, because that is where a
      * translation bug turns into a visibly wrong world rather than an error. */
@@ -944,6 +959,11 @@ int main(int argc, char **argv) {
         p_glEnableVertexAttribArray((GLuint)c);
         p_glVertexAttribPointer((GLuint)c, 3, GL_FLOAT, GL_FALSE, 24, (void *)(3 * sizeof(float)));
 
+        /* The shader multiplies by whatever is on unit 0, so the texture has to be the white one.
+         * The atlas scenario above leaves its own texture bound, and that one is black outside its
+         * strip, which made this check read as a geometry failure when the geometry was fine. */
+        p_glActiveTexture(GL_TEXTURE0);
+        p_glBindTexture(GL_TEXTURE_2D, white);
         p_glClear(GL_COLOR_BUFFER_BIT);
         p_glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_INT, 0);
         { GLint es = -1; p_glGetVertexAttribiv((GLuint)a, 0x8623, &es);
@@ -1096,30 +1116,38 @@ int main(int argc, char **argv) {
     cur_group = "fixed function";
 
     /* --- 1.12-1.15 path: client-side vertex arrays and GL_QUADS. The bridge has to
-     * convert quads to triangles and transform client data itself. --- */
+     * convert quads to triangles and transform client data itself.
+     *
+     * This used to hand the bridge a vertex buffer holding eight floats while declaring a
+     * three-component pointer, so the draw read past the end of its own data and the geometry
+     * landed off screen: a scenario bug that read as a fixed-function failure. 1.12 does not
+     * upload a vertex buffer on this path at all -- its arrays are client memory -- so that is
+     * what is exercised here, with the full three floats per vertex. */
     {
-        static const float quad_xy[] = {
-            -0.8f, -0.8f, 0.8f, -0.8f, 0.8f, 0.8f, -0.8f, 0.8f,
+        static const float quad_xyz[] = {
+            -0.8f, -0.8f, 0,  0.8f, -0.8f, 0,  0.8f, 0.8f, 0,  -0.8f, 0.8f, 0,
         };
         static const float quad_rgba[] = {
             1, 0, 0, 1,  0, 1, 0, 1,  0, 0, 1, 1,  1, 1, 0, 1,
         };
-        GLuint qvbo = 0;
-        p_glGenBuffers(1, &qvbo);
-        p_glBindBuffer(GL_ARRAY_BUFFER, qvbo);
-        p_glBufferData(GL_ARRAY_BUFFER, sizeof quad_xy, quad_xy, GL_STATIC_DRAW);
+        p_glBindBuffer(GL_ARRAY_BUFFER, 0);
 
         p_glUseProgram(0); /* no program: this is the fixed-function route */
         p_glEnableClientState(GL_VERTEX_ARRAY);
-        p_glVertexPointer(3, GL_FLOAT, 0, (void *)0);
+        p_glVertexPointer(3, GL_FLOAT, 0, (void *)quad_xyz);
         p_glEnableClientState(GL_COLOR_ARRAY);
-        p_glColorPointer(4, GL_FLOAT, 0, (void *)0);
+        p_glColorPointer(4, GL_FLOAT, 0, (void *)quad_rgba);
         p_glClear(GL_COLOR_BUFFER_BIT);
         p_glDrawArrays(GL_QUADS, 0, 4);
         p_glReadPixels(0, 0, 64, 64, GL_RGBA, GL_UNSIGNED_BYTE, out);
-        ok_known(out[centre] + out[centre + 1] + out[centre + 2] > 30,
-                 "1.12-style client arrays with GL_QUADS render",
-                 "fixed-function quad path not yet drawing; see ff_draw");
+        {
+            char d[200];
+            snprintf(d, sizeof d, "centre=%d,%d,%d glGetError=0x%04X", out[centre],
+                     out[centre + 1], out[centre + 2], p_glGetError());
+            ok_known(out[centre] + out[centre + 1] + out[centre + 2] > 30,
+                     "1.12-style client arrays with GL_QUADS render", d);
+            record("fixed-function quad detail", "known", d);
+        }
         p_glUseProgram(prog);
     }
 
@@ -1615,25 +1643,14 @@ int main(int argc, char **argv) {
         }
     }
 
-    /* ---- Known issue ----
-     * The DSA path renders nothing. Isolated as far as: the buffer association and attribute
-     * description both reach the driver (attribute buffer binding is correct), but the stride
-     * stays 0 and an explicit glVertexAttribPointer on this vertex array is rejected with
-     * GL_INVALID_ENUM. So the fault is in how the DSA-created vertex array is set up, not in
-     * the format bookkeeping. Reported as a warning so it stays visible without failing the
-     * suite; flip this to ok() once the cause is found. */
-    {
-        GLint stride = -1, abuf = -1;
-        p_glGetVertexAttribiv((GLuint)apos, 0x8A75 /* STRIDE */, &stride);
-        p_glGetVertexAttribiv((GLuint)apos, 0x889F /* BUFFER_BINDING */, &abuf);
-        printf("  DSA state: attrib_buffer=%d stride=%d (expected %d)\n", abuf, stride, 24);
-        p_glGetError();
-        if (out[centre] + out[centre + 1] + out[centre + 2] > 30) {
-            ok(1, "DSA path renders the same triangle");
-        } else {
-            known_issues++;
-            printf("  KNOWN  DSA path renders the same triangle (currently broken)\n");
-        }
+    /* ---- DSA vertex array, revisited ----
+     * This used to assert on `out[centre]`, which by this point holds the last scenario's frame
+     * rather than the DSA one, and to print a stride read from whichever vertex array happens to
+     * be bound. Both made the check report on the wrong thing; the DSA draw is asserted where it
+     * happens, and GL_VERTEX_ATTRIB_ARRAY_STRIDE is not read at all (it reads back 0 here even for
+     * an attribute that demonstrably renders, so it carries no information). */
+    if (!dsa_drew) {
+        printf("  NOTE  DSA indexed draw still blank; see the 'dsa indexed draw' row above\n");
     }
 
     printf("\n%d checks, %d failed, %d known issue(s)\n", nresults, failures, known_issues);

@@ -32,6 +32,32 @@ use std::sync::{Mutex, OnceLock};
 
 const GL_INVALID_VALUE: u32 = 0x0501;
 const GL_INVALID_OPERATION: u32 = 0x0502;
+static SHADER_SOURCE_CACHE: Mutex<Vec<(u32, String)>> = Mutex::new(Vec::new());
+
+fn remember_shader_source(shader: u32, source: String) {
+    let mut cache = SHADER_SOURCE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, old_source)) = cache.iter_mut().find(|(id, _)| *id == shader) {
+        *old_source = source;
+    } else {
+        cache.push((shader, source));
+    }
+    if cache.len() > 32 {
+        cache.remove(0);
+    }
+}
+
+fn take_shader_source(shader: u32) -> Option<String> {
+    let mut cache = SHADER_SOURCE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    cache.iter().position(|(id, _)| *id == shader).map(|index| cache.remove(index).1)
+}
+
+fn shader_error_line(info_log: &str) -> Option<usize> {
+    info_log.lines().find_map(|line| {
+        let (_, rest) = line.split_once(':')?;
+        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        digits.parse().ok()
+    })
+}
 
 
 static BACKEND: OnceLock<Box<dyn Backend>> = OnceLock::new();
@@ -611,24 +637,7 @@ fn sys_egl_get_proc(name: &str) -> Option<*const c_void> {
 /// renders, instead of pointing at the layer.
 fn renderer_identity() -> (&'static CStr, &'static CStr) {
     static IDENTITY: OnceLock<(&'static CStr, &'static CStr)> = OnceLock::new();
-    *IDENTITY.get_or_init(|| {
-        // Name the device the capability probe actually saw, so a bug report identifies the
-        // GPU that renders rather than the layer in front of it.
-        let caps = gles3::caps();
-        let device = if caps.device_description.is_empty() {
-            "unknown device".to_string()
-        } else {
-            caps.device_description.clone()
-        };
-        let vendor: &'static CStr = c"OpenGL ES translation layer";
-        let renderer: &'static CStr = match CString::new(format!(
-            "Rust Renderer GL translation ({device})"
-        )) {
-            Ok(s) => Box::leak(s.into_boxed_c_str()),
-            Err(_) => c"Rust Renderer GL translation",
-        };
-        (vendor, renderer)
-    })
+    *IDENTITY.get_or_init(|| (c"WhalterMC", c"RustGL (WhalterMC)"))
 }
 static SPOOF_EXTENSIONS: &[u8] = b"\0"; // empty; use glGetStringi when needed
 
@@ -931,13 +940,14 @@ void main(){ c = vec4(1.0); }
             }
         }
     };
-    let c = match CString::new(translated) {
+    let c = match CString::new(translated.clone()) {
         Ok(c) => c,
         Err(_) => {
             errors().set(GL_INVALID_VALUE);
             return;
         }
     };
+    remember_shader_source(shader, translated);
     match driver_fn_cached::<unsafe extern "C" fn(u32, i32, *const *const c_char, *const i32)>("glShaderSource") {
         Some(f) => {
             let ptr = c.as_ptr();
@@ -947,6 +957,61 @@ void main(){ c = vec4(1.0); }
     }
 }
 
+
+/// Reports translated shader failures with the backend compiler log. Vanilla world shaders
+/// can fail compilation while all later draw calls still appear valid in an apitrace.
+#[no_mangle]
+pub unsafe extern "C" fn glCompileShader(shader: u32) {
+    trace_call("glCompileShader");
+    let Some(compile) = driver_fn_cached::<unsafe extern "C" fn(u32)>("glCompileShader") else {
+        errors().set(GL_INVALID_OPERATION);
+        return;
+    };
+    compile(shader);
+
+    let Some(get_shader_iv) = driver_fn_cached::<unsafe extern "C" fn(u32, u32, *mut i32)>("glGetShaderiv") else {
+        return;
+    };
+    const GL_COMPILE_STATUS: u32 = 0x8B81;
+    const GL_INFO_LOG_LENGTH: u32 = 0x8B84;
+    let mut status = 0;
+    get_shader_iv(shader, GL_COMPILE_STATUS, &mut status);
+    if status != 0 {
+        take_shader_source(shader);
+        return;
+    }
+
+    let mut length = 0;
+    get_shader_iv(shader, GL_INFO_LOG_LENGTH, &mut length);
+    if length <= 1 {
+        log(&format!("[Shader] shader {shader} failed to compile (driver returned no info log)"));
+        return;
+    }
+    let Some(get_shader_log) = driver_fn_cached::<unsafe extern "C" fn(u32, i32, *mut i32, *mut c_char)>("glGetShaderInfoLog") else {
+        log(&format!("[Shader] shader {shader} failed to compile; glGetShaderInfoLog unavailable"));
+        return;
+    };
+    let mut bytes = vec![0u8; length as usize];
+    let mut written = 0;
+    get_shader_log(shader, length, &mut written, bytes.as_mut_ptr() as *mut c_char);
+    let written = written.max(0) as usize;
+    let message = String::from_utf8_lossy(&bytes[..written.min(bytes.len())]);
+    log(&format!("[Shader] shader {shader} failed to compile: {message}"));
+    if let (Some(source), Some(line)) = (take_shader_source(shader), shader_error_line(&message)) {
+        let lines: Vec<&str> = source.lines().collect();
+        let start = line.saturating_sub(9);
+        let end = (line + 3).min(lines.len());
+        if start < end {
+            let excerpt = lines[start..end]
+                .iter()
+                .enumerate()
+                .map(|(offset, text)| format!("{}: {}", start + offset + 1, text))
+                .collect::<Vec<_>>()
+                .join("\n");
+            log(&format!("[Shader] shader {shader} translated source context:\n{excerpt}"));
+        }
+    }
+}
 
 // ---- translated entry points (desktop semantics -> GLES) -------------------------------
 
@@ -1375,7 +1440,6 @@ forward_all! {
     glCheckFramebufferStatus(t: u32) -> u32;
     glClearStencil(s: i32);
     glColorMask(r: u8, g: u8, b: u8, a: u8);
-    glCompileShader(s: u32);
     glCreateProgram() -> u32;
     glCreateShader(t: u32) -> u32;
     glCullFace(m: u32);
@@ -1443,6 +1507,9 @@ forward_all! {
     glMapBufferRange(t: u32, o: isize, l: isize, a: u32) -> *mut c_void;
     glFlushMappedBufferRange(t: u32, o: isize, l: isize);
     glCopyBufferSubData(r: u32, w: u32, ro: isize, wo: isize, s: isize);
+    glCopyImageSubData(src_name: u32, src_target: u32, src_level: i32, src_x: i32, src_y: i32, src_z: i32,
+                       dst_name: u32, dst_target: u32, dst_level: i32, dst_x: i32, dst_y: i32, dst_z: i32,
+                       width: i32, height: i32, depth: i32);
     glGetBufferParameteriv(t: u32, n: u32, v: *mut i32);
     glTexSubImage3D(t: u32, l: i32, x: i32, y: i32, z: i32, w: i32, h: i32, d: i32, f: u32, ty: u32, data: *const c_void);
     glCompressedTexImage2D(t: u32, l: i32, ifmt: u32, w: i32, h: i32, b: i32, size: i32, data: *const c_void);
@@ -1994,6 +2061,7 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glClearDepth" => glClearDepth as *const c_void,
         b"glDepthRange" => glDepthRange as *const c_void,
         b"glShaderSource" => glShaderSource as *const c_void,
+        b"glCompileShader" => glCompileShader as *const c_void,
         b"glTexImage2D" => glTexImage2D as *const c_void,
         b"glTexSubImage2D" => glTexSubImage2D as *const c_void,
         b"glTexParameteri" => glTexParameteri as *const c_void,
@@ -2341,8 +2409,8 @@ pub unsafe extern "C" fn glActiveTexture(texture: u32) {
     }
 }
 #[no_mangle] pub extern "C" fn glClientActiveTexture(texture: u32) { fixed_func::gl_client_active_texture(texture); }
-#[no_mangle] pub extern "C" fn glColor4f(r: f32, g: f32, b: f32, a: f32) { fixed_func::gl_color4f(r, g, b, a); }
-#[no_mangle] pub extern "C" fn glColor3f(r: f32, g: f32, b: f32) { fixed_func::gl_color3f(r, g, b); }
+#[no_mangle] pub extern "C" fn glColor4f(r: f32, g: f32, b: f32, a: f32) { immediate::set_color(r, g, b, a); }
+#[no_mangle] pub extern "C" fn glColor3f(r: f32, g: f32, b: f32) { immediate::set_color(r, g, b, 1.0); }
 #[no_mangle] pub extern "C" fn glAlphaFunc(func: u32, ref_v: f32) { fixed_func::gl_alpha_func(func, ref_v); }
 #[no_mangle]
 #[export_name = "glFogf"]
@@ -2570,6 +2638,13 @@ mod tests {
         entry.strip_suffix(&[0u8]).unwrap_or(entry)
     }
 
+    #[test]
+    fn minecraft_gpu_identity_uses_rustgl_brand() {
+        let (vendor, renderer) = renderer_identity();
+        assert_eq!(vendor.to_bytes(), b"WhalterMC");
+        assert_eq!(renderer.to_bytes(), b"RustGL (WhalterMC)");
+    }
+
     /// One representative entry point per advertised extension. Claiming an extension
     /// makes a client bind the call it advertises; if the layer resolves that symbol to
     /// null, the probe succeeded and the call crashes. `GL_KHR_debug` used to fail this.
@@ -2778,6 +2853,7 @@ mod tests {
             "glPixelStorei", "glBindBuffer", "glRenderbufferStorage", "glBufferStorage",
             "glBufferData", "glBufferSubData", "glDeleteBuffers", "glDrawArrays",
             "glShaderSource", "glDrawBuffer", "glMapBuffer", "glPolygonMode",
+            "glCopyImageSubData",
         ];
         for name in HAND_WRITTEN {
             assert!(

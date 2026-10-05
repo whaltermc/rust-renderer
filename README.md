@@ -1,4 +1,4 @@
-# Minecraft Rust Renderer — ZalithLauncher 2 plugin
+# RustGL — ZalithLauncher 2 Minecraft renderer
 
 Rust GLES passthrough + desktop-GL compatibility shims, packaged as a ZalithLauncher 2
 renderer plugin APK.
@@ -7,7 +7,7 @@ renderer plugin APK.
 
 | Piece | State |
 |---|---|
-| Plugin APK (V2, MAIN activity) | ready — install and pick **Rust Renderer** |
+| Plugin APK (V2, MAIN activity) | ready — install `RustGL.apk` and pick **RustGL** |
 | `renderer-core` | Backend trait, config, error state, unit tests |
 | `backend::gles` | Full resource Backend over system GLES 3.0+ (dlopen) |
 | `backend::vulkan` | **Device discovery only** — loads `libvulkan`, enumerates and picks a physical device, creates a device + graphics queue, reports real info/limits. Cannot render (see below) |
@@ -64,11 +64,13 @@ behind it:
   the CPU and `glEnd` draws them through the same path as client-array draws
   (`QUAD_STRIP` -> `TRIANGLE_STRIP`, `POLYGON` -> `TRIANGLE_FAN`, `QUADS` expanded as before).
 
-  Names ES genuinely lacks (`glTexImage1D`, `glSelectBuffer`, the evaluators, display lists,
-  pixel maps) are exported as announcing stubs, so a client that depends on one is visible
+  Names ES genuinely lacks (`glTexImage1D`, `glSelectBuffer`, the evaluators, pixel maps) are
+  exported as announcing stubs, so a client that depends on one is visible
   in the log. `glGenLists` used to be declared as a void function taking a pointer, so
   callers read garbage out of the return register; it now returns a real id range.
-  Display lists are still **not** recorded or replayed (1.12 entity models use them).
+  Display lists record and replay immediate-mode begin/end, vertex, color and texture
+  coordinate commands in both compile modes. Other state and matrix commands are not recorded,
+  so this does not provide full GL 1.1 display-list semantics or guarantee 1.12 compatibility.
 
 ### The follow-up `0x0502`: depth formats paired with a type ES rejects
 
@@ -93,9 +95,12 @@ without a device.
 
 Verified by running it, on this machine:
 
-- `cargo check --workspace` / `cargo test --workspace` — 33 unit tests pass.
-- `cargo build -p gl-compat --release` links; `nm -D` shows **352 exported `gl*` entry points**
+- `cargo test --workspace` — 86 unit tests pass (46 in `gl-compat`).
+- `cargo build -p gl-compat --release` links; `nm -D` shows **675 exported `gl*` entry points**
   with **no duplicate symbols**.
+- `tools/run-glsmoke.sh` — **47 checks, 0 failures, 0 known issues**, and **52** with
+  `GLSMOKE_CONTRACT=1 RENDERER_TRACE_GL=all`. Every former known issue is resolved; see *Open
+  findings* for which were harness bugs and which was real.
 - `cargo run -p backend --example probe` runs and reports a precise reason when no
   Vulkan loader is present.
 
@@ -153,27 +158,12 @@ for a GLES translation layer:
 What is realistic: vanilla and lightly-modded launch on the modern band, with mods that
 stay inside the 3.3 surface.
 
-## Backend selection: gles / vulkan / hybrid / auto
+## Backend selection
 
-The renderer options in the plugin (ZalithLauncher → renderer settings) expose four modes,
-read through `RENDERER_BACKEND_SELECT`:
-
-| Mode | Behaviour |
-|---|---|
-| `gles` | GLES 3.x passthrough. Serves every desktop GL entry point the game calls. Default. |
-| `vulkan` | Try Vulkan for renderer-owned work; if it cannot render, log why and stay on GLES so the game still starts. |
-| `hybrid` | GLES for the GL surface, Vulkan preferred for renderer-owned work when it can render. |
-| `auto` | First backend that initializes *and can render*, in the order vulkan → gles. |
-
-The plugin declares this as a **single** selectable option. The previous build shipped
-`RENDERER_BACKEND` both as a fixed env var and as a selectable under a different key, which
-is what made the backend show up twice in the launcher's renderer list; `RENDERER_BACKEND_SELECT`
-is still accepted as a fallback so an already-installed launcher build keeps working. A junk
-value is ignored rather than fatal.
-
-`hybrid` reports what it actually did: GLES serves every GL entry point, so until Vulkan can
-render, hybrid means "GLES draws the frame, Vulkan supplies device information". The log says
-which of those happened instead of leaving the choice looking like it did nothing.
+The launcher now selects the only backend that renders Minecraft frames: `gles`. Vulkan is
+still available for device discovery, but has no pipeline or presentation path, so Vulkan,
+hybrid, and auto are not offered as renderer choices. `RENDERER_BACKEND_SELECT` remains accepted
+as a legacy environment fallback; unset or invalid selections default to GLES.
 
 ### What the Vulkan backend does and does not do
 
@@ -417,6 +407,9 @@ reports `3.3 (Compatibility Profile) Mesa 25.2.8`, which `parse_es_version` did 
 the GLES backend refused to initialise and every backend-dependent call silently did nothing.
 A failed initialisation was also retried on every GL call -- 51972 attempts, and 51972 log lines
 that buried everything else. Both are fixed; the frame is still black, so a further cause remains.
+Re-measured on the current tree (with the buffer-store fix below in place, and the storage probe
+visible in `retrace.log`): **unchanged at `ssim=0.000006`, `mismatchPixels=408400`**. That is the
+next thing to chase, and it is a shader-translation problem, not a geometry one.
 
 The vanilla capture matching a golden frame is the strongest evidence so far that the GL
 translation is faithful for ordinary rendering.
@@ -554,21 +547,57 @@ is cover the GL surface each version band depends on, so a regression in one ban
 
 ### Open findings
 
-Host-side, all reported as known issues rather than failures so the suite stays meaningful:
+**None outstanding in the host harness:** 47 checks, 0 failures, 0 known issues
+(`52` with `GLSMOKE_CONTRACT=1`).
 
-- **A freshly created vertex array draws nothing.** Attribute size, enabled flag and buffer
-  binding all read back correctly and there is no GL error, yet nothing rasterises. Reproduces
-  with indexed and non-indexed draws, and whether or not the objects are reused.
-- **The DSA path renders nothing** on this host.
-- **The 1.12 fixed-function quad path does not draw.**
+The three entries this section used to list were two harness bugs and one real bridge bug. All
+three are fixed and all three were "the draw produces nothing with no GL error":
 
-**Retracted, and why it matters:** this file previously listed `glScissor` and "DSA stride
-stays 0" as bridge bugs. Both were harness bugs — a sample point outside its own scissor
-rectangle, and a texture left bound to unit 0 so later draws multiplied by black. More
-importantly, the stride reading was a **measurement artifact**: `glGetVertexAttribiv(
-GL_VERTEX_ATTRIB_ARRAY_STRIDE)` returns 0 even for an attribute that demonstrably renders
-correctly, so stride cannot be used to diagnose anything here. That is why the harness no
-longer reports stride as data.
+| Former finding | What it actually was |
+|---|---|
+| "A freshly created vertex array draws nothing" | **Harness.** The scene's fragment shader multiplies by whatever is on unit 0, and the atlas scenario above it left a texture bound that is black outside one strip. The geometry was always fine — the same draw passes once a white texture is bound, which is what every other scenario in the harness already did. |
+| "The DSA path renders nothing" | **Bridge**, and the real one — see *Buffer names carry one store, not one per target* below. |
+| "The 1.12 fixed-function quad path does not draw" | **Harness.** The scenario declared a three-component vertex pointer over two-component data in a buffer with room for eight floats: four vertices at three floats each is twelve. The draw read past the end of its own data, so the geometry landed off screen. It now passes twelve floats with no vertex buffer bound, which is what 1.12 actually does. |
+
+The "DSA stride" symptom in the same area was never a bridge bug either: `glGetVertexAttribiv(
+GL_VERTEX_ATTRIB_ARRAY_STRIDE)` reads back 0 here even for an attribute that demonstrably
+renders, so it carries no information. The harness no longer reads it, and the end-of-run DSA
+check no longer asserts on `out[]` — by that point every later scenario has overwritten that
+buffer, so it was reporting on their frames. The DSA draw is asserted where it happens.
+
+### Buffer names carry one store, not one per target
+
+The real bug behind "the DSA path renders nothing". `note_buffer_target` existed to allocate a
+DSA-created buffer under a second target, on the premise — repeated in the old module docs —
+that ES buffer names are per target the way texture names are. They are not: **a buffer name has
+one data store, shared by every binding.** The proof is one call sequence:
+
+```
+glGenBuffers -> 1
+glBindBuffer(GL_ARRAY_BUFFER, 1);      glBufferData(GL_ARRAY_BUFFER, 6, {0,1,2})
+glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 1); glBufferData(GL_ELEMENT_ARRAY_BUFFER, 6, NULL)
+```
+
+Measured on Mesa llvmpipe: after the second call, mapping `GL_ARRAY_BUFFER` returns **zeros** —
+the allocation from the first call is gone, and both targets map the same address. So the
+"second-target allocation" was not a no-op, it was an overwrite: an index buffer filled with
+`glNamedBufferData` and attached with `glVertexArrayElementBuffer` ended up empty, every indexed
+draw read indices of zero, and every triangle collapsed to a degenerate — a blank frame with no GL
+error anywhere. That is 1.20.5+ and every mod on top of it.
+
+`buffer_storage_is_shared()` now measures which model the driver follows instead of assuming one:
+fill a scratch name through `GL_ARRAY_BUFFER`, bind it to `GL_ELEMENT_ARRAY_BUFFER`, and ask for
+`GL_BUFFER_SIZE`. A shared store still reports the size; a per-target one reports zero. On the
+shared model — every driver measured so far — a second binding does no work at all. On a per-target
+driver the bytes are still carried across, with `glMapBufferRange` rather than
+`glCopyBufferSubData`, because `glCopyBufferSubData` **cannot** be used for it here: it raises
+`GL_INVALID_VALUE` on Mesa llvmpipe even between two ordinary `GL_ARRAY_BUFFER` objects
+(measured), so a copy built on it silently leaves an empty buffer behind.
+
+**New finding, not acted on:** that `glCopyBufferSubData` result is a driver-side failure this
+layer forwards verbatim, so a game that copies between buffers on such a driver gets a refused
+copy and an error it does not check. It is not known to be hit by Minecraft — 1.16.5 uploads
+through `glBufferSubData` — so it is recorded here rather than papered over with a fallback.
 
 ### GLSL to SPIR-V (naga)
 
@@ -829,13 +858,14 @@ Do not claim Minecraft compatibility until a concrete version has been tested an
 | Vanilla MC 1.16 | **Works** on an earlier build — world render verified on device |
 | Vanilla MC 1.12–1.15 | Likely works (fixed-function path) |
 | Vanilla MC 1.17–1.20 | Partial — modern shaders via GLES3 passthrough + GLSL rewrite; test per version |
-| Vanilla MC 1.21 / 26.x | Experimental — needs more GL 4.x / DSA coverage |
+| Vanilla MC 1.21.4 | GUI and vanilla world captures pass on host GLES retrace; Android device launch remains unverified |
 | Sodium | **Out of scope for a 3.3 layer** — see above: unsupported architecture per Sodium's own docs, needs 4.5-class drivers, and is a mod requiring a working Fabric/NeoForge loader |
-| Iris / shader packs | GLSL translated (OptiFine/Iris-era `#version 120`, MRT, `gl_FragData`, `texture2DGrad`, `gl_FragDepthEXT`); **unverified** — MRT needs `glDrawBuffers` paths that are untested here, and Iris/OptiFine are mods needing Fabric/Forge + Mixin |
+| Iris / shader packs | **Not working yet** — the 1.21.4 Iris/BSL capture completes but has 144 shader compile failures and SSIM 0.079 |
 | Performance | GLES driver does the heavy lifting; FF path is only used when no program is bound |
 
-These rows describe earlier device testing and are **not** re-verified for the current tree
-(see *What has actually been verified*).
+The 1.21.4 status is from current host retrace tests; the other vanilla-version rows describe
+earlier device testing and are **not** re-verified for the current tree. Host retrace does not
+prove Android device compatibility.
 
 ### Enabling debug logs
 ```
@@ -881,5 +911,8 @@ says `extended program failed`. Look for `fixed-function emulation program ready
   compile or draw wrong geometry. Supporting them means declaring `rust_*` attributes and
   uniforms in the translator and feeding them from the FF state at draw time.
 
-**None of this has been compiled or run by the author of this change** (no Rust toolchain was
-available). Run `cargo test --workspace` and `tools/run-glsmoke.sh` first.
+**The host-side checks have now been run against this tree**: `cargo test --workspace` (86 tests)
+and `tools/run-glsmoke.sh` (47 checks, 0 failures, 0 known issues) both pass, and the
+fixed-function client-array + `GL_QUADS` path is covered by a check that renders real pixels. What
+is still unverified is the same as before — anything that needs a device, the launcher or the
+game. The list above is what a 1.12–1.15 frame still misses.

@@ -64,6 +64,9 @@ fn usable_vertex_count(mode: u32, n: usize) -> usize {
 }
 
 pub unsafe extern "C" fn begin(mode: u32) {
+    if !crate::gl::v1_1::record_command(crate::gl::v1_1::ListCommand::Begin(mode)) {
+        return;
+    }
     with_imm(|i| {
         i.active = true;
         i.mode = mode;
@@ -77,6 +80,9 @@ pub unsafe extern "C" fn begin(mode: u32) {
 }
 
 pub unsafe extern "C" fn end() {
+    if !crate::gl::v1_1::record_command(crate::gl::v1_1::ListCommand::End) {
+        return;
+    }
     let batch = with_imm(|i| {
         if !i.active {
             return None;
@@ -106,6 +112,9 @@ pub unsafe extern "C" fn end() {
 }
 
 fn push_vertex(x: f32, y: f32, z: f32, w: f32) {
+    if !crate::gl::v1_1::record_command(crate::gl::v1_1::ListCommand::Vertex([x, y, z, w])) {
+        return;
+    }
     let color = fixed_func::current_color();
     with_imm(|i| {
         if !i.active {
@@ -119,10 +128,31 @@ fn push_vertex(x: f32, y: f32, z: f32, w: f32) {
 }
 
 fn set_uv(s: f32, t: f32) {
+    if !crate::gl::v1_1::record_command(crate::gl::v1_1::ListCommand::TexCoord([s, t])) {
+        return;
+    }
     with_imm(|i| {
         i.uv = [s, t];
         i.uv_used = true;
     });
+}
+
+pub(crate) fn set_color(r: f32, g: f32, b: f32, a: f32) {
+    if crate::gl::v1_1::record_command(crate::gl::v1_1::ListCommand::Color([r, g, b, a])) {
+        fixed_func::gl_color4f(r, g, b, a);
+    }
+}
+
+pub(crate) fn replay_list_command(command: crate::gl::v1_1::ListCommand) {
+    use crate::gl::v1_1::ListCommand;
+    match command {
+        ListCommand::Begin(mode) => unsafe { begin(mode) },
+        ListCommand::End => unsafe { end() },
+        ListCommand::Vertex([x, y, z, w]) => push_vertex(x, y, z, w),
+        ListCommand::Color([r, g, b, a]) => set_color(r, g, b, a),
+        ListCommand::TexCoord([s, t]) => set_uv(s, t),
+        ListCommand::CallList(_) => unreachable!("nested lists are replayed by the list manager"),
+    }
 }
 
 // ---- colour conversion: GL maps the full integer range onto [0, 1] -----------------------
@@ -173,24 +203,24 @@ export! {
     glNormal3f(_x: f32, _y: f32, _z: f32) {}
     glNormal3fv(_v: *const f32) {}
 
-    glColor3b(r: i8, g: i8, b: i8) { fixed_func::gl_color4f(from_i8(r), from_i8(g), from_i8(b), 1.0) }
-    glColor4b(r: i8, g: i8, b: i8, a: i8) { fixed_func::gl_color4f(from_i8(r), from_i8(g), from_i8(b), from_i8(a)) }
-    glColor3ub(r: u8, g: u8, b: u8) { fixed_func::gl_color4f(from_u8(r), from_u8(g), from_u8(b), 1.0) }
-    glColor4ub(r: u8, g: u8, b: u8, a: u8) { fixed_func::gl_color4f(from_u8(r), from_u8(g), from_u8(b), from_u8(a)) }
-    glColor3s(r: i16, g: i16, b: i16) { fixed_func::gl_color4f(from_i16(r), from_i16(g), from_i16(b), 1.0) }
-    glColor4s(r: i16, g: i16, b: i16, a: i16) { fixed_func::gl_color4f(from_i16(r), from_i16(g), from_i16(b), from_i16(a)) }
-    glColor3us(r: u16, g: u16, b: u16) { fixed_func::gl_color4f(from_u16(r), from_u16(g), from_u16(b), 1.0) }
-    glColor4us(r: u16, g: u16, b: u16, a: u16) { fixed_func::gl_color4f(from_u16(r), from_u16(g), from_u16(b), from_u16(a)) }
-    glColor3i(r: i32, g: i32, b: i32) { fixed_func::gl_color4f(from_i32(r), from_i32(g), from_i32(b), 1.0) }
-    glColor4i(r: i32, g: i32, b: i32, a: i32) { fixed_func::gl_color4f(from_i32(r), from_i32(g), from_i32(b), from_i32(a)) }
-    glColor3ui(r: u32, g: u32, b: u32) { fixed_func::gl_color4f(from_u32(r), from_u32(g), from_u32(b), 1.0) }
-    glColor4ui(r: u32, g: u32, b: u32, a: u32) { fixed_func::gl_color4f(from_u32(r), from_u32(g), from_u32(b), from_u32(a)) }
-    glColor3d(r: f64, g: f64, b: f64) { fixed_func::gl_color4f(r as f32, g as f32, b as f32, 1.0) }
-    glColor4d(r: f64, g: f64, b: f64, a: f64) { fixed_func::gl_color4f(r as f32, g as f32, b as f32, a as f32) }
-    glColor3fv(v: *const f32) { if !v.is_null() { fixed_func::gl_color4f(*v, *v.add(1), *v.add(2), 1.0) } }
-    glColor4fv(v: *const f32) { if !v.is_null() { fixed_func::gl_color4f(*v, *v.add(1), *v.add(2), *v.add(3)) } }
-    glColor3ubv(v: *const u8) { if !v.is_null() { fixed_func::gl_color4f(from_u8(*v), from_u8(*v.add(1)), from_u8(*v.add(2)), 1.0) } }
-    glColor4ubv(v: *const u8) { if !v.is_null() { fixed_func::gl_color4f(from_u8(*v), from_u8(*v.add(1)), from_u8(*v.add(2)), from_u8(*v.add(3))) } }
+    glColor3b(r: i8, g: i8, b: i8) { set_color(from_i8(r), from_i8(g), from_i8(b), 1.0) }
+    glColor4b(r: i8, g: i8, b: i8, a: i8) { set_color(from_i8(r), from_i8(g), from_i8(b), from_i8(a)) }
+    glColor3ub(r: u8, g: u8, b: u8) { set_color(from_u8(r), from_u8(g), from_u8(b), 1.0) }
+    glColor4ub(r: u8, g: u8, b: u8, a: u8) { set_color(from_u8(r), from_u8(g), from_u8(b), from_u8(a)) }
+    glColor3s(r: i16, g: i16, b: i16) { set_color(from_i16(r), from_i16(g), from_i16(b), 1.0) }
+    glColor4s(r: i16, g: i16, b: i16, a: i16) { set_color(from_i16(r), from_i16(g), from_i16(b), from_i16(a)) }
+    glColor3us(r: u16, g: u16, b: u16) { set_color(from_u16(r), from_u16(g), from_u16(b), 1.0) }
+    glColor4us(r: u16, g: u16, b: u16, a: u16) { set_color(from_u16(r), from_u16(g), from_u16(b), from_u16(a)) }
+    glColor3i(r: i32, g: i32, b: i32) { set_color(from_i32(r), from_i32(g), from_i32(b), 1.0) }
+    glColor4i(r: i32, g: i32, b: i32, a: i32) { set_color(from_i32(r), from_i32(g), from_i32(b), from_i32(a)) }
+    glColor3ui(r: u32, g: u32, b: u32) { set_color(from_u32(r), from_u32(g), from_u32(b), 1.0) }
+    glColor4ui(r: u32, g: u32, b: u32, a: u32) { set_color(from_u32(r), from_u32(g), from_u32(b), from_u32(a)) }
+    glColor3d(r: f64, g: f64, b: f64) { set_color(r as f32, g as f32, b as f32, 1.0) }
+    glColor4d(r: f64, g: f64, b: f64, a: f64) { set_color(r as f32, g as f32, b as f32, a as f32) }
+    glColor3fv(v: *const f32) { if !v.is_null() { set_color(*v, *v.add(1), *v.add(2), 1.0) } }
+    glColor4fv(v: *const f32) { if !v.is_null() { set_color(*v, *v.add(1), *v.add(2), *v.add(3)) } }
+    glColor3ubv(v: *const u8) { if !v.is_null() { set_color(from_u8(*v), from_u8(*v.add(1)), from_u8(*v.add(2)), 1.0) } }
+    glColor4ubv(v: *const u8) { if !v.is_null() { set_color(from_u8(*v), from_u8(*v.add(1)), from_u8(*v.add(2)), from_u8(*v.add(3))) } }
 }
 
 /// Every name this module exports, for the resolver.

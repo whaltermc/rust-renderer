@@ -8,23 +8,45 @@
 //!
 //! # Why this needs bookkeeping
 //!
-//! Desktop GL treats object names as global. GLES 3.x is **per target**: a buffer name bound
-//! to `GL_ARRAY_BUFFER` and the same name bound to `GL_ELEMENT_ARRAY_BUFFER` are two distinct
-//! GLbuffer objects, and the same is true of textures per target. So DSA cannot be translated
-//! by ignoring the target. Each object created here is immediately materialised on the target
-//! it was created for, and [`note_buffer_target`] does the same the first time a known DSA
-//! buffer is bound to another target. That covers the single-target case exactly and the
-//! cross-target case without corrupting the first binding.
+//! Desktop GL treats object names as global, so a DSA entry point that names its object instead of
+//! binding it cannot be translated by ignoring the binding: the entry point here binds the object
+//! and delegates to the classic call. Textures need a target table for that (they really are per
+//! target in ES); buffers need one only to know which target holds their bytes.
 //!
 //! Vertex array *attribute formats* are the remaining gap: `GL_ARRAY_BUFFER` binding is
 //! global state in ES, not per-VAO, so `glVertexArrayVertexBuffer` cannot be per-VAO there.
 //! It is applied globally and the deviation is logged once rather than silently misrendered.
+//!
+//! # Buffer storage is not per target, and re-allocating destroys it
+//!
+//! An earlier version of [`note_buffer_target`] assumed ES buffer names were per target, the way
+//! texture names are, and "fixed" a second-target binding by allocating storage under that target
+//! too. Measured on Mesa llvmpipe, a buffer name has **one** store shared by every binding:
+//! allocating under a second target overwrote the client's index bytes with an empty buffer, so
+//! every indexed draw read indices of zero and collapsed to a degenerate triangle — a blank frame
+//! with no GL error. [`buffer_storage_is_shared`] now measures which model the driver follows
+//! instead of assuming one, so the common case does no work at all and the per-target case still
+//! gets its bytes copied across.
 
 use super::*;
+use std::sync::atomic::AtomicU8;
 use std::sync::Mutex;
 
-/// DSA buffer: name -> (byte size, GL usage).
-static BUFFERS: Mutex<Vec<(u32, i64, u32)>> = Mutex::new(Vec::new());
+/// DSA buffer: name -> what this layer knows about it.
+///
+/// `contents` is the target the client last wrote through, and `targets` is every target this
+/// layer has allocated the name on. Only a driver that keeps storage per target needs the second
+/// one; see [`buffer_storage_is_shared`].
+#[derive(Clone)]
+struct DsaBuffer {
+    size: i64,
+    usage: u32,
+    contents: u32,
+    targets: Vec<u32>,
+}
+
+/// DSA buffer: name -> allocation, source target, materialised targets.
+static BUFFERS: Mutex<Vec<(u32, DsaBuffer)>> = Mutex::new(Vec::new());
 /// DSA texture: name -> the target it was created for.
 static TEXTURES: Mutex<Vec<(u32, u32)>> = Mutex::new(Vec::new());
 /// DSA vertex array names.
@@ -127,7 +149,7 @@ const GL_ARRAY_BUFFER: u32 = 0x8892;
 const GL_ELEMENT_ARRAY_BUFFER: u32 = 0x8893;
 const GL_NO_ERROR: u32 = 0;
 
-fn with_buffers<R>(f: impl FnOnce(&mut Vec<(u32, i64, u32)>) -> R) -> R {
+fn with_buffers<R>(f: impl FnOnce(&mut Vec<(u32, DsaBuffer)>) -> R) -> R {
     let mut g = BUFFERS.lock().unwrap_or_else(|e| e.into_inner());
     f(g.as_mut())
 }
@@ -166,35 +188,204 @@ fn warn_no_vertex_attrib_format() {
     );
 }
 
-/// Binds a DSA buffer to `target`, materialising the GLES-side buffer object for that target
-/// the first time. Without this, binding a known DSA buffer to a second target would hand the
-/// driver a name that has no storage under that target.
+/// Makes sure a DSA buffer name has storage under `target` before it is bound there.
+///
+/// GLES keeps **one** data store per buffer name, shared by every binding (measured on Mesa
+/// llvmpipe: allocating under a second target overwrites the first allocation's bytes), so on a
+/// driver that behaves that way this has nothing to do — the client's allocation is already the
+/// store the new binding will use. Re-allocating here is what used to blank every indexed draw.
+///
+/// A driver that *does* keep storage per target gets the name materialised with the client's bytes
+/// copied across, because an empty buffer there is just as blank.
 pub(crate) unsafe fn note_buffer_target(buffer: u32, target: u32) {
     if buffer == 0 || target != GL_ELEMENT_ARRAY_BUFFER && target != GL_ARRAY_BUFFER {
         return;
     }
-    let known = with_buffers(|v| v.iter().find(|(id, _, _)| *id == buffer).copied());
-    let Some((_, size, usage)) = known else {
+    let known = with_buffers(|v| {
+        v.iter()
+            .find(|(id, _)| *id == buffer)
+            .map(|(_, b)| (b.size, b.usage, b.contents, b.targets.clone()))
+    });
+    let Some((size, usage, contents, targets)) = known else {
         return;
     };
-    // If it is already the current binding for this target, nothing to materialise.
-    let mut current = 0i32;
-    if let Some(get) = driver_fn_cached::<GetIntFn>("glGetIntegerv") {
-        let pname = if target == GL_ELEMENT_ARRAY_BUFFER { 0x8895 } else { 0x8894 };
-        get(pname, &mut current);
-    }
-    if current as u32 == buffer {
+    if targets.contains(&target) {
         return;
     }
+    if buffer_storage_is_shared() {
+        // The driver's store for this name already exists and is shared: binding is all that is
+        // needed. Recorded so the next bind on any target is a no-op too.
+        with_buffers(|v| {
+            if let Some(entry) = v.iter_mut().find(|(id, _)| *id == buffer) {
+                entry.1.targets.push(target);
+            }
+        });
+        return;
+    }
+    // Whatever this borrows from the context has to be put back: a client that binds an index
+    // buffer and then asks for the array-buffer binding must not see a different answer. The
+    // element binding is the exception — the caller is in the middle of making it.
+    let mut prev_array = 0i32;
+    let mut prev_element = 0i32;
+    if let Some(get) = driver_fn_cached::<GetIntFn>("glGetIntegerv") {
+        get(0x8894 /* GL_ARRAY_BUFFER_BINDING */, &mut prev_array);
+        get(0x8895 /* GL_ELEMENT_ARRAY_BUFFER_BINDING */, &mut prev_element);
+    }
     if let Some(bind) = driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindBuffer") {
+        bind(GL_ARRAY_BUFFER, buffer);
         bind(target, buffer);
     }
     if let Some(data) = driver_fn_cached::<unsafe extern "C" fn(u32, isize, *const c_void, u32)>(
         "glBufferData",
     ) {
-        // Allocate uninitialised storage so the name is valid under this target. The contents
-        // come from the original allocation; see the note in the module docs.
         data(target, size as isize, std::ptr::null(), usage);
+    } else {
+        errors().set(GL_INVALID_OPERATION);
+    }
+    let copyable = contents != 0 && contents != target && size > 0 && targets.contains(&contents);
+    if copyable {
+        if copy_buffer_contents(buffer, contents, target, size as usize, usage) {
+            log_mirrored(buffer, contents, target, size);
+        } else {
+            errors().set(GL_INVALID_OPERATION);
+        }
+    }
+    if let Some(bind) = driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindBuffer") {
+        bind(GL_ARRAY_BUFFER, prev_array as u32);
+        if target != GL_ELEMENT_ARRAY_BUFFER {
+            bind(GL_ELEMENT_ARRAY_BUFFER, prev_element as u32);
+        }
+    }
+    set_array_buffer_binding(prev_array as u32);
+    with_buffers(|v| {
+        if let Some(entry) = v.iter_mut().find(|(id, _)| *id == buffer) {
+            entry.1.targets.push(target);
+        }
+    });
+}
+
+/// Whether this driver gives a buffer name one data store shared by every binding.
+///
+/// Measured once per context instead of assumed: fill a scratch name through `GL_ARRAY_BUFFER`,
+/// bind it to `GL_ELEMENT_ARRAY_BUFFER` and ask for `GL_BUFFER_SIZE`. A shared store still reports
+/// the size; a per-target one reports zero. Getting this backwards is not cosmetic — it decides
+/// whether the client's bytes survive being bound a second time.
+pub(crate) unsafe fn buffer_storage_is_shared() -> bool {
+    static SHARED: AtomicU8 = AtomicU8::new(0);
+    match SHARED.load(Ordering::Relaxed) {
+        1 => return true,
+        2 => return false,
+        _ => {}
+    }
+    let Some(gen) = driver_fn_cached::<unsafe extern "C" fn(i32, *mut u32)>("glGenBuffers") else {
+        return true; // nothing to probe with; assume the shared model and do no work
+    };
+    let (Some(bind), Some(data), Some(get)) = (
+        driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindBuffer"),
+        driver_fn_cached::<unsafe extern "C" fn(u32, isize, *const c_void, u32)>("glBufferData"),
+        driver_fn_cached::<unsafe extern "C" fn(u32, u32, *mut i32)>("glGetBufferParameteriv"),
+    ) else {
+        return true;
+    };
+    let mut name = 0u32;
+    gen(1, &mut name);
+    let mut prev_array = 0i32;
+    let mut prev_element = 0i32;
+    if let Some(get_int) = driver_fn_cached::<GetIntFn>("glGetIntegerv") {
+        get_int(0x8894, &mut prev_array);
+        get_int(0x8895, &mut prev_element);
+    }
+    bind(GL_ARRAY_BUFFER, name);
+    data(GL_ARRAY_BUFFER, 16, std::ptr::null(), 0x88E4 /* GL_STATIC_DRAW */);
+    bind(GL_ELEMENT_ARRAY_BUFFER, name);
+    let mut size = 0i32;
+    get(GL_ELEMENT_ARRAY_BUFFER, 0x8764 /* GL_BUFFER_SIZE */, &mut size);
+    bind(GL_ARRAY_BUFFER, prev_array as u32);
+    bind(GL_ELEMENT_ARRAY_BUFFER, prev_element as u32);
+    set_array_buffer_binding(prev_array as u32);
+    if let Some(del) = driver_fn_cached::<unsafe extern "C" fn(i32, *const u32)>("glDeleteBuffers")
+    {
+        del(1, &name);
+    }
+    // A driver that refused the probe leaves size at zero; treat that as per-target, which only
+    // costs a copy on a driver that has not been measured otherwise.
+    let shared = size == 16;
+    SHARED.store(if shared { 1 } else { 2 }, Ordering::Relaxed);
+    log(&format!(
+        "[GLCompat] buffer storage probe: {}",
+        if shared {
+            "one store per buffer name, shared across bindings"
+        } else {
+            "per-target storage; buffers bound to a second target get their bytes copied"
+        }
+    ));
+    shared
+}
+
+/// Reads the bytes stored under `from` and writes them under `to`.
+///
+/// `glCopyBufferSubData` is the cheap way to do this and it is not used here: on Mesa llvmpipe it
+/// raises `GL_INVALID_VALUE` even between two ordinary `GL_ARRAY_BUFFER` objects, and a refused
+/// copy leaves an empty buffer behind with no error the client will ever read. ES 3.0 has
+/// `glMapBufferRange`, so the bytes come through that instead. It is a CPU round-trip of the
+/// buffer's size, paid once per name per target — the mirror is remembered, not repeated.
+unsafe fn copy_buffer_contents(
+    buffer: u32,
+    from: u32,
+    to: u32,
+    size: usize,
+    usage: u32,
+) -> bool {
+    let Some(map) = driver_fn_cached::<unsafe extern "C" fn(u32, isize, isize, u32) -> *mut c_void>(
+        "glMapBufferRange",
+    ) else {
+        return false;
+    };
+    let Some(unmap) =
+        driver_fn_cached::<unsafe extern "C" fn(u32) -> u8>("glUnmapBuffer")
+    else {
+        return false;
+    };
+    let Some(put) =
+        driver_fn_cached::<unsafe extern "C" fn(u32, isize, *const c_void, u32)>("glBufferData")
+    else {
+        return false;
+    };
+    let Some(bind) = driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindBuffer") else {
+        return false;
+    };
+    const GL_MAP_READ_BIT: u32 = 0x0001;
+    let mut bytes = vec![0u8; size];
+    // `from` and `to` are both already bound to `buffer` by the caller.
+    let ptr = map(from, 0, size as isize, GL_MAP_READ_BIT);
+    if ptr.is_null() {
+        return false;
+    }
+    std::ptr::copy_nonoverlapping(ptr as *const u8, bytes.as_mut_ptr(), size);
+    unmap(from);
+    bind(to, buffer);
+    put(to, size as isize, bytes.as_ptr() as *const c_void, usage);
+    true
+}
+
+/// Says once per mirror that data had to be copied, because the alternative — a buffer that is
+/// silently empty on one target — is invisible until a frame is blank.
+fn log_mirrored(buffer: u32, from: u32, to: u32, size: i64) {
+    static MIRRORED: Mutex<Vec<(u32, u32)>> = Mutex::new(Vec::new());
+    let first = {
+        let mut g = MIRRORED.lock().unwrap_or_else(|e| e.into_inner());
+        if g.iter().any(|(b, t)| *b == buffer && *t == to) {
+            false
+        } else {
+            g.push((buffer, to));
+            true
+        }
+    };
+    if first {
+        log(&format!(
+            "[GLCompat] buffer {buffer} has no ES storage on target 0x{to:04X}: copied its \
+             {size} bytes from target 0x{from:04X} (ES buffer names are per target)"
+        ));
     }
 }
 
@@ -216,7 +407,10 @@ pub unsafe extern "C" fn glCreateBuffers(n: i32, ids: *mut u32) {
     gen(n, ids);
     with_buffers(|v| {
         for i in 0..n as usize {
-            v.push((*ids.add(i), 0, 0x88E4 /* GL_STATIC_DRAW */));
+            v.push((
+                *ids.add(i),
+                DsaBuffer { size: 0, usage: 0x88E4 /* GL_STATIC_DRAW */, contents: 0, targets: vec![] },
+            ));
         }
     });
 }
@@ -265,13 +459,90 @@ pub unsafe extern "C" fn glNamedBufferData(buffer: u32, size: isize, data: *cons
         errors().set(GL_INVALID_OPERATION);
         return;
     }
+    // A name already materialised on another target holds a copy taken at the previous upload, so
+    // this upload has to reach that copy too -- otherwise an index buffer that is refilled and then
+    // attached again draws the first upload's indices forever.
     with_buffers(|v| {
-        if let Some(entry) = v.iter_mut().find(|(id, _, _)| *id == buffer) {
-            *entry = (buffer, size as i64, usage);
-        } else {
-            v.push((buffer, size as i64, usage));
+        match v.iter_mut().find(|(id, _)| *id == buffer) {
+            Some((_, b)) => {
+                b.size = size as i64;
+                b.usage = usage;
+                b.contents = GL_ARRAY_BUFFER;
+                b.targets.retain(|t| *t != GL_ARRAY_BUFFER);
+                b.targets.push(GL_ARRAY_BUFFER);
+            }
+            None => v.push((
+                buffer,
+                DsaBuffer {
+                    size: size as i64,
+                    usage,
+                    contents: GL_ARRAY_BUFFER,
+                    targets: vec![GL_ARRAY_BUFFER],
+                },
+            )),
         }
     });
+    mirror_targets(buffer, &[], |target, put, usage| {
+        put(target, size as isize, data, usage);
+    });
+}
+
+/// Applies an upload to the copies this layer keeps of `buffer`'s other materialised targets.
+///
+/// `targets` is the selection: empty means "every target other than the one being written
+/// directly", and a single entry means exactly that one. Both the bindings borrowed for the copy
+/// and the `GL_ARRAY_BUFFER` shadow are restored, because the client keeps using them.
+///
+/// Does nothing at all on a driver whose buffer names carry one shared store: there is no second
+/// copy to update, and rewriting it per upload would cost a reallocation of the whole buffer for
+/// no change.
+unsafe fn mirror_targets(
+    buffer: u32,
+    targets: &[u32],
+    write: impl Fn(u32, unsafe extern "C" fn(u32, isize, *const c_void, u32), u32),
+) {
+    if buffer_storage_is_shared() {
+        return;
+    }
+    let chosen: Vec<u32> = {
+        let Some((_, b)) = with_buffers(|v| v.iter().find(|(id, _)| *id == buffer).cloned()) else {
+            return;
+        };
+        if targets.is_empty() {
+            b.targets.iter().copied().filter(|t| *t != GL_ARRAY_BUFFER).collect()
+        } else {
+            b.targets.iter().copied().filter(|t| targets.contains(t)).collect()
+        }
+    };
+    if chosen.is_empty() {
+        return;
+    }
+    let Some(bind) = driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindBuffer") else {
+        return;
+    };
+    let Some(put) =
+        driver_fn_cached::<unsafe extern "C" fn(u32, isize, *const c_void, u32)>("glBufferData")
+    else {
+        errors().set(GL_INVALID_OPERATION);
+        return;
+    };
+    let usage = with_buffers(|v| {
+        v.iter().find(|(id, _)| *id == buffer).map(|(_, b)| b.usage).unwrap_or(0x88E4)
+    });
+    let mut prev_array = 0i32;
+    let mut prev_element = 0i32;
+    if let Some(get) = driver_fn_cached::<GetIntFn>("glGetIntegerv") {
+        get(0x8894 /* GL_ARRAY_BUFFER_BINDING */, &mut prev_array);
+        get(0x8895 /* GL_ELEMENT_ARRAY_BUFFER_BINDING */, &mut prev_element);
+    }
+    for target in chosen {
+        bind(GL_ARRAY_BUFFER, buffer);
+        bind(target, buffer);
+        write(target, put, usage);
+    }
+    bind(GL_ARRAY_BUFFER, prev_array as u32);
+    bind(GL_ELEMENT_ARRAY_BUFFER, prev_element as u32);
+    set_array_buffer_binding(prev_array as u32);
 }
 
 #[no_mangle]
@@ -299,6 +570,10 @@ pub unsafe extern "C" fn glNamedBufferSubData(
     size: isize,
     data: *const c_void,
 ) {
+    if offset < 0 || size < 0 {
+        errors().set(GL_INVALID_VALUE);
+        return;
+    }
     if let Some(bind) = driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindBuffer") {
         bind(GL_ARRAY_BUFFER, buffer);
     }
@@ -309,6 +584,32 @@ pub unsafe extern "C" fn glNamedBufferSubData(
     } else {
         errors().set(GL_INVALID_OPERATION);
     }
+    // A partial update has to reach the copies too. glBufferSubData needs the whole buffer, so the
+    // copy is read back, patched and rewritten; that is CPU work proportional to the buffer, and
+    // only for a name this layer had to mirror in the first place.
+    let patch = if data.is_null() { None } else { Some(std::slice::from_raw_parts(data as *const u8, size as usize)) };
+    mirror_targets(buffer, &[], move |target, put, usage| {
+        let total = with_buffers(|v| {
+            v.iter().find(|(id, _)| *id == buffer).map(|(_, b)| b.size).unwrap_or(0)
+        });
+        let total = total.max(0) as usize;
+        let Some(get) =
+            driver_fn_cached::<unsafe extern "C" fn(u32, isize, isize, *mut c_void)>(
+                "glGetBufferSubData",
+            )
+        else {
+            return;
+        };
+        let mut bytes = vec![0u8; total];
+        get(target, 0, total as isize, bytes.as_mut_ptr() as *mut c_void);
+        if let Some(bytes_new) = patch {
+            let start = offset as usize;
+            if start + bytes_new.len() <= bytes.len() {
+                bytes[start..start + bytes_new.len()].copy_from_slice(bytes_new);
+                put(target, total as isize, bytes.as_ptr() as *const c_void, usage);
+            }
+        }
+    });
 }
 
 #[no_mangle]
@@ -935,11 +1236,48 @@ mod tests {
     }
 
     #[test]
-    fn buffer_table_records_size_and_usage() {
+    fn buffer_table_records_size_usage_and_where_the_bytes_are() {
         let _guard = table_guard();
         with_buffers(|v| v.clear());
-        with_buffers(|v| v.push((7, 4096, 0x88E8)));
-        assert!(with_buffers(|v| v.iter().any(|(id, size, usage)| *id == 7 && *size == 4096 && *usage == 0x88E8)));
+        with_buffers(|v| {
+            v.push((
+                7,
+                DsaBuffer { size: 4096, usage: 0x88E8, contents: GL_ARRAY_BUFFER, targets: vec![GL_ARRAY_BUFFER] },
+            ))
+        });
+        assert!(
+            with_buffers(|v| v.iter().any(|(id, b)| {
+                *id == 7 && b.size == 4096 && b.usage == 0x88E8 && b.contents == GL_ARRAY_BUFFER
+            })),
+            "size, usage and the target holding the client's bytes all have to be remembered: \
+             the first is what a second-target allocation is sized from, the second is the hint it \
+             is created with, and the third is what the bytes have to be copied from"
+        );
+    }
+
+    /// The bug this table exists to prevent: a name with a recorded allocation must not be
+    /// re-allocated just because it is bound to another target, because GLES keeps one store per
+    /// name and re-allocating empties it.
+    #[test]
+    fn binding_a_filled_buffer_to_a_second_target_does_not_reallocate_it() {
+        let _guard = table_guard();
+        with_buffers(|v| v.clear());
+        with_buffers(|v| {
+            v.push((
+                11,
+                DsaBuffer { size: 64, usage: 0x88E4, contents: GL_ARRAY_BUFFER, targets: vec![GL_ARRAY_BUFFER] },
+            ))
+        });
+        // No driver in a unit test, so the probe reports "shared" and nothing is materialised.
+        unsafe { note_buffer_target(11, GL_ELEMENT_ARRAY_BUFFER) };
+        let entry = with_buffers(|v| v.iter().find(|(id, _)| *id == 11).map(|(_, b)| (b.size, b.contents, b.targets.clone())));
+        assert_eq!(
+            entry,
+            Some((64, GL_ARRAY_BUFFER, vec![GL_ARRAY_BUFFER, GL_ELEMENT_ARRAY_BUFFER])),
+            "the recorded allocation and its contents must survive the second binding, and the \
+             new target is recorded so the work happens once"
+        );
+        with_buffers(|v| v.clear());
     }
 
     #[test]

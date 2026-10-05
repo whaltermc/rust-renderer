@@ -1198,40 +1198,50 @@ pub unsafe extern "C" fn glBindImageTexture(
 
 /// Multi-draw with a base vertex. Found missing from a real Minecraft 1.21.1 trace.
 ///
-/// ES 3.2 provides it directly; where absent the fallback is exact rather than
-/// approximate, advancing the index pointer per draw and keeping the same base vertex.
+/// The desktop ABI takes arrays for counts, index pointers, and base vertices. Passing scalar
+/// arguments here shifted every argument and crashed Mesa during Iris world rendering.
 #[no_mangle]
 pub unsafe extern "C" fn glMultiDrawElementsBaseVertex(
-    mode: u32, count: i32, ty: u32, indices: *const c_void, base_vertex: i32, primcount: i32,
+    mode: u32,
+    counts: *const i32,
+    ty: u32,
+    indices: *const *const c_void,
+    draw_count: i32,
+    base_vertices: *const i32,
 ) {
-    if primcount <= 0 {
+    if draw_count < 0 {
+        errors().set(0x0501);
         return;
     }
-    if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, i32, u32, *const c_void, i32, i32)>(
-        "glMultiDrawElementsBaseVertex",
-    ) {
-        return f(mode, count, ty, indices, base_vertex, primcount);
+    if draw_count == 0 {
+        return;
     }
-    if let Some(draw) =
-        driver_fn_cached::<unsafe extern "C" fn(u32, i32, u32, *const c_void, i32)>(
-            "glDrawElementsBaseVertex",
-        )
-    {
-        let stride = match ty {
-            0x1401 => 1isize,
-            0x1403 => 2,
-            0x1405 => 4,
-            _ => {
+    if counts.is_null() || indices.is_null() || base_vertices.is_null() {
+        errors().set(0x0501);
+        return;
+    }
+    type MultiDraw = unsafe extern "C" fn(u32, *const i32, u32, *const *const c_void, i32, *const i32);
+    if let Some(draw) = driver_fn_cached::<MultiDraw>("glMultiDrawElementsBaseVertex") {
+        return draw(mode, counts, ty, indices, draw_count, base_vertices);
+    }
+    if let Some(draw) = driver_fn_cached::<unsafe extern "C" fn(u32, i32, u32, *const c_void, i32)>(
+        "glDrawElementsBaseVertex",
+    ) {
+        for i in 0..draw_count as isize {
+            draw(mode, *counts.offset(i), ty, *indices.offset(i), *base_vertices.offset(i));
+        }
+        return;
+    }
+    if let Some(draw) = driver_fn_cached::<unsafe extern "C" fn(u32, i32, u32, *const c_void)>("glDrawElements") {
+        for i in 0..draw_count as isize {
+            if *base_vertices.offset(i) != 0 {
                 mark_error_site("glMultiDrawElementsBaseVertex");
-                errors().set(0x0500);
+                errors().set(0x0502);
                 return;
             }
-        };
-        let base = indices as usize;
-        for i in 0..primcount as isize {
-            draw(mode, count, ty,
-                 base.wrapping_add((i * stride) as usize) as *const c_void,
-                 base_vertex);
+        }
+        for i in 0..draw_count as isize {
+            draw(mode, *counts.offset(i), ty, *indices.offset(i));
         }
         return;
     }

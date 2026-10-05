@@ -137,6 +137,7 @@ bool LoadMobileGL(const Request& request, std::string& error) {
     }
     setenv("RENDERER_BACKEND", "gles", 1);
     setenv("RUST_RENDERER_TRACE_LIBRARY", request.mobileGlLibrary.c_str(), 1);
+    setenv("RUST_RENDERER_TRACE_STRICT", "1", 1);
     setenv("MOBILEGL_TRACE_SKIP_AUTODESTROY", "1", 1);
     // Retrace is a test lane on every platform, including the Android AVD one where
     // MobileGL's __ANDROID__ default would leave validation off. No overwrite: an outer

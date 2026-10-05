@@ -17,5 +17,5 @@ if [ -x ./gradlew ]; then
 else
     GRADLE_CMD="${GRADLE:-gradle}"
 fi
-"$GRADLE_CMD" :app:assembleDebug
-echo "APK: android/app/build/outputs/apk/debug/app-debug.apk"
+"$GRADLE_CMD" :app:packageRustGlApk
+echo "APK: android/app/build/outputs/apk/RustGL.apk"

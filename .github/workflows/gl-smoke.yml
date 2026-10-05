@@ -23,8 +23,8 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      # No submodules: the replay tool (apitrace) is not run in CI, and glslang is not built
-      # here. Fetching them would make the job depend on two third-party forks for nothing.
+      # The replay job initializes only its apitrace dependency below; glslang is not built
+      # here, so the unrelated shader-compiler submodule stays untouched.
       - name: Checkout
         uses: actions/checkout@v5
 
@@ -126,6 +126,28 @@ jobs:
           ./tools/trace-coverage.sh 2>&1 | tee target/reports/trace-coverage.log
           set -e
 
+      - name: Initialize apitrace replay dependency
+        run: git submodule update --init --recursive tools/trace_replay/vendor/apitrace
+
+      - name: Retrace Minecraft 1.21.4 through Rust renderer
+        run: |
+          mkdir -p target/reports
+          RENDERER_TRACE_GL=1 tools/trace_replay/run_fixture.sh 1.21.4 \
+            2>&1 | tee target/reports/minecraft-1.21.4-retrace.log
+
+      - name: Retrace Minecraft 1.21.4 world through Rust renderer
+        run: |
+          mkdir -p target/reports
+          RENDERER_TRACE_GL=1 tools/trace_replay/run_fixture.sh 1.21.4-world \
+            2>&1 | tee target/reports/minecraft-1.21.4-world-retrace.log
+
+      - name: Diagnose Minecraft 1.21.4 Iris shader pack
+        continue-on-error: true
+        run: |
+          mkdir -p target/reports
+          RENDERER_TRACE_GL=1 tools/trace_replay/run_fixture.sh 1.21.4-shaders \
+            2>&1 | tee target/reports/minecraft-1.21.4-shaders-retrace.log
+
       - name: Compare lanes
         if: always()
         run: |
@@ -147,8 +169,12 @@ jobs:
             target/reports/screenshots/
             target/reports-angle/
             target/reports/trace-coverage.log
+            target/reports/minecraft-1.21.4-retrace.log
+            target/reports/minecraft-1.21.4-world-retrace.log
+            target/reports/minecraft-1.21.4-shaders-retrace.log
             target/reports/unit-tests.log
             target/reports/lane-comparison.md
+            target/trace-replay/results/1.21.4/
 
       - name: Summarise
         if: always()

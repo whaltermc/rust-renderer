@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <utility>
 #include <dlfcn.h>
 
@@ -22,13 +23,13 @@ Clock::time_point gStart;
 Clock::time_point gLastBoundary;
 std::vector<double> gFrameMs;
 
-// Same resolution order the glws layers use for MobileGL's entry points: the replay driver
+// Same resolution order the glws layers use for Rust Renderer entry points: the replay driver
 // already dlopen()ed the library with RTLD_GLOBAL before retrace started, so RTLD_NOLOAD
-// finds that handle instead of loading a second copy, and RTLD_DEFAULT is the fallback for
-// the case where it was linked in rather than dlopen()ed.
+// finds that handle instead of loading a second copy. Strict renderer replay never falls back
+// to the host GL implementation.
 GlFinishFn ResolveGlFinish() {
     void *handle = nullptr;
-    const char *library = std::getenv("MOBILEGL_TRACE_LIBRARY");
+    const char *library = std::getenv("RUST_RENDERER_TRACE_LIBRARY");
     if (library != nullptr && library[0] != '\0') {
         handle = dlopen(library, RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
     }
@@ -40,6 +41,10 @@ GlFinishFn ResolveGlFinish() {
         if (symbol != nullptr) {
             return reinterpret_cast<GlFinishFn>(symbol);
         }
+    }
+    const char *strict = std::getenv("RUST_RENDERER_TRACE_STRICT");
+    if (strict != nullptr && std::strcmp(strict, "1") == 0) {
+        return nullptr;
     }
     return reinterpret_cast<GlFinishFn>(dlsym(RTLD_DEFAULT, "glFinish"));
 }

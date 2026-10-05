@@ -20,11 +20,78 @@ precision highp samplerCubeShadow;\n";
 
 const PRECISION_100: &str = "precision highp float;\nprecision highp int;\n";
 
+fn strip_float_suffixes(src: &str) -> String {
+    let bytes = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let starts_number = bytes[i].is_ascii_digit()
+            || (bytes[i] == b'.' && bytes.get(i + 1).is_some_and(u8::is_ascii_digit));
+        let boundary = i == 0 || !(bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_');
+        if !starts_number || !boundary {
+            let length = utf8_len(bytes[i]);
+            out.push_str(&src[i..i + length]);
+            i += length;
+            continue;
+        }
+
+        let start = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() { i += 1; }
+        if i < bytes.len() && bytes[i] == b'.' {
+            i += 1;
+            while i < bytes.len() && bytes[i].is_ascii_digit() { i += 1; }
+        }
+        if i < bytes.len() && matches!(bytes[i], b'e' | b'E') {
+            let exponent = i;
+            i += 1;
+            if i < bytes.len() && matches!(bytes[i], b'+' | b'-') { i += 1; }
+            let digits = i;
+            while i < bytes.len() && bytes[i].is_ascii_digit() { i += 1; }
+            if digits == i { i = exponent; }
+        }
+        out.push_str(&src[start..i]);
+        if i < bytes.len() && matches!(bytes[i], b'f' | b'F') {
+            i += 1;
+        }
+    }
+    out
+}
+
+fn replace_glsl_call(src: &str, call: &str, replacement: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let mut rest = src;
+    while let Some(index) = rest.find(call) {
+        out.push_str(&rest[..index]);
+        let is_identifier_byte = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
+        let starts_identifier = index > 0 && is_identifier_byte(rest.as_bytes()[index - 1]);
+        if starts_identifier {
+            out.push_str(call);
+        } else {
+            out.push_str(replacement);
+        }
+        rest = &rest[index + call.len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn declares_ftransform(src: &str) -> bool {
+    src.lines().any(|line| {
+        let Some(index) = line.find("ftransform()") else {
+            return false;
+        };
+        let preceded_by_identifier = index > 0
+            && (line.as_bytes()[index - 1].is_ascii_alphanumeric() || line.as_bytes()[index - 1] == b'_');
+        !preceded_by_identifier && line[index + "ftransform()".len()..].trim_start().starts_with('{')
+    })
+}
+
 
 /// Rewrites GLSL 3.30 desktop qualifiers/features that do not exist in GLSL ES 3.00.
 /// This deliberately stays lexical rather than using a full GLSL parser: Minecraft's
 /// generated shaders are regular and preserving formatting makes driver logs useful.
 fn rewrite_es300_tokens(mut s: String) -> String {
+    s = strip_float_suffixes(&s);
     // ES 3.00 has no interpolation qualifier named `noperspective`.
     s = s.replace("noperspective ", "");
     // `centroid` and `sample` are supported by ES3 where available; keep them.
@@ -59,6 +126,20 @@ fn rewrite_es300_tokens(mut s: String) -> String {
         ("double", "float"),
     ] { s = s.replace(a,b); }
 
+    // Mojang's shared lightmap helper divides an ivec2 by a float. Desktop GLSL permits
+    // that implicit conversion, while GLSL ES requires both arithmetic operands to match.
+    s = s.replace("uv / 256.0", "vec2(uv) / 256.0");
+    s = s.replace("texCoord2 = UV2", "texCoord2 = vec2(UV2)");
+    s = s
+        .replace("frameCounter * 0.618", "float(frameCounter) * 0.618")
+        .replace("eyeBrightnessSmooth.y / 240.0", "float(eyeBrightnessSmooth.y) / 240.0")
+        .replace("sampleSkip == 0", "sampleSkip == 0.0")
+        .replace("? 0 : skip", "? 0.0 : skip");
+    s = s
+        .replace("floor(texCoord.x * 16) / 15", "floor(texCoord.x * 16.0) / 15.0")
+        .replace("floor(texCoord.y * 16) / 15", "floor(texCoord.y * 16.0) / 15.0");
+    s = rewrite_texture_lod_integer_levels(&s);
+
     // Desktop-only builtins with straightforward ES equivalents.
     s
 }
@@ -91,6 +172,118 @@ fn strip_mojang_directives(src: &str) -> String {
             acc.push('\n');
             acc
         })
+}
+
+fn contains_identifier(src: &str, identifier: &str) -> bool {
+    src.match_indices(identifier).any(|(start, token)| {
+        let end = start + token.len();
+        let is_identifier_byte = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
+        let before_is_boundary = start == 0 || !is_identifier_byte(src.as_bytes()[start - 1]);
+        let after_is_boundary = end == src.len() || !is_identifier_byte(src.as_bytes()[end]);
+        before_is_boundary && after_is_boundary
+    })
+}
+
+fn strip_unused_iris_fog_initializer(src: &str) -> String {
+    const DECLARATION: &str = "iris_FogParameters iris_Fog =";
+    if !src.lines().any(|line| line.trim_start().starts_with(DECLARATION)) {
+        return src.to_string();
+    }
+
+    let without_initializer = src
+        .lines()
+        .filter(|line| !line.trim_start().starts_with(DECLARATION))
+        .fold(String::new(), |mut out, line| {
+            out.push_str(line);
+            out.push('\n');
+            out
+        });
+    if contains_identifier(&without_initializer, "iris_Fog") {
+        src.to_string()
+    } else {
+        without_initializer
+    }
+}
+
+fn has_later_assignment(lines: &[&str], declaration_line: usize, name: &str) -> bool {
+    for (line_number, line) in lines.iter().enumerate() {
+        if line_number == declaration_line || line.trim_start().starts_with("//") {
+            continue;
+        }
+        let bytes = line.as_bytes();
+        let mut start = 0;
+        while let Some(relative) = line[start..].find(name) {
+            let index = start + relative;
+            let end = index + name.len();
+            let is_identifier_byte = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
+            let whole_identifier = (index == 0 || !is_identifier_byte(bytes[index - 1]))
+                && (end == bytes.len() || !is_identifier_byte(bytes[end]));
+            if whole_identifier {
+                let mut operator = end;
+                while operator < bytes.len() && bytes[operator].is_ascii_whitespace() {
+                    operator += 1;
+                }
+                if operator < bytes.len()
+                    && ((bytes[operator] == b'=' && bytes.get(operator + 1) != Some(&b'='))
+                        || matches!(bytes[operator], b'+' | b'-' | b'*' | b'/')
+                            && bytes.get(operator + 1) == Some(&b'='))
+                {
+                    return true;
+                }
+            }
+            start = end;
+        }
+    }
+    false
+}
+
+fn macroize_nonconstant_globals(src: &str) -> String {
+    const VALUE_TYPES: &[&str] = &[
+        "float", "double", "int", "uint", "bool", "vec2", "vec3", "vec4", "ivec2",
+        "ivec3", "ivec4", "uvec2", "uvec3", "uvec4", "mat2", "mat3", "mat4",
+    ];
+    let lines: Vec<&str> = src.lines().collect();
+    let mut out = String::with_capacity(src.len());
+    let mut brace_depth = 0isize;
+    for (line_number, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_start();
+        let indent = &line[..line.len() - trimmed.len()];
+        let replacement = if brace_depth == 0
+            && !trimmed.starts_with("const ")
+            && !trimmed.starts_with("//")
+            && !trimmed.starts_with('#')
+        {
+            trimmed.split_once('=').and_then(|(left, right)| {
+                let mut declaration = left.split_whitespace();
+                let ty = declaration.next()?;
+                let name = declaration.next()?;
+                if declaration.next().is_some()
+                    || !VALUE_TYPES.contains(&ty)
+                    || !name.bytes().enumerate().all(|(index, byte)| {
+                        byte == b'_'
+                            || byte.is_ascii_alphabetic()
+                            || index > 0 && byte.is_ascii_digit()
+                    })
+                {
+                    return None;
+                }
+                let expression = right.trim().strip_suffix(';')?.trim();
+                if expression.is_empty() || has_later_assignment(&lines, line_number, name) {
+                    return None;
+                }
+                Some(format!("{indent}#define {name} ({expression})"))
+            })
+        } else {
+            None
+        };
+        out.push_str(replacement.as_deref().unwrap_or(line));
+        out.push('\n');
+        if !trimmed.starts_with("//") {
+            brace_depth += line.chars().filter(|&ch| ch == '{').count() as isize;
+            brace_depth -= line.chars().filter(|&ch| ch == '}').count() as isize;
+        }
+    }
+    out
 }
 
 
@@ -242,7 +435,62 @@ fn looks_like_geometry_or_tess(src: &str) -> bool {
         || src.contains("layout(triangles_adjacency)")
 }
 
-fn rewrite_line_body(line: &str, use_300: bool, is_frag: bool, needs_frag_out: bool) -> String {
+fn rewrite_texture_lod_integer_levels(src: &str) -> String {
+    const CALL: &str = "textureLod(";
+    let mut out = String::with_capacity(src.len());
+    let mut copied_until = 0;
+    let mut search_from = 0;
+    while let Some(relative) = src[search_from..].find(CALL) {
+        let open = search_from + relative + CALL.len() - 1;
+        let mut depth = 1usize;
+        let mut commas = Vec::with_capacity(2);
+        let mut close = None;
+        for (offset, byte) in src.as_bytes()[open + 1..].iter().enumerate() {
+            let index = open + 1 + offset;
+            match byte {
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = Some(index);
+                        break;
+                    }
+                }
+                b',' if depth == 1 => commas.push(index),
+                _ => {}
+            }
+        }
+        let Some(close) = close else { break };
+        if commas.len() == 2 {
+            let level_start = commas[1] + 1;
+            let raw_level = &src[level_start..close];
+            let level = raw_level.trim();
+            let digits = level.strip_prefix('-').or_else(|| level.strip_prefix('+')).unwrap_or(level);
+            if !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()) {
+                out.push_str(&src[copied_until..level_start]);
+                let leading = raw_level.len() - raw_level.trim_start().len();
+                let trailing = raw_level.trim_end().len();
+                out.push_str(&raw_level[..leading]);
+                out.push_str("float(");
+                out.push_str(level);
+                out.push(')');
+                out.push_str(&raw_level[trailing..]);
+                copied_until = close;
+            }
+        }
+        search_from = close + 1;
+    }
+    out.push_str(&src[copied_until..]);
+    out
+}
+
+fn rewrite_line_body(
+    line: &str,
+    use_300: bool,
+    is_frag: bool,
+    needs_frag_out: bool,
+    rewrite_ftransform: bool,
+) -> String {
     let t = line.trim_start();
     let indent_len = line.len() - t.len();
     let indent = &line[..indent_len];
@@ -284,8 +532,10 @@ fn rewrite_line_body(line: &str, use_300: bool, is_frag: bool, needs_frag_out: b
         s = s.replace("gl_FragDepthEXT", "gl_FragDepth");
 
         // Rare desktop helpers
+        if rewrite_ftransform {
+            s = replace_glsl_call(&s, "ftransform()", "(gl_ModelViewProjectionMatrix * gl_Vertex)");
+        }
         s = s
-            .replace("ftransform()", "(gl_ModelViewProjectionMatrix * gl_Vertex)")
             .replace("gl_TextureMatrix[0]", "mat4(1.0)")
             .replace("gl_TextureMatrix[1]", "mat4(1.0)")
             .replace("gl_ModelViewProjectionMatrix", "mat4(1.0)")
@@ -362,9 +612,14 @@ pub fn translate(src: &str) -> Result<String, String> {
         ("#version 100", PRECISION_100)
     };
 
+    let fog_sanitized_source = strip_unused_iris_fog_initializer(src);
+    let suffix_sanitized_source = strip_float_suffixes(&fog_sanitized_source);
+    let sanitized_source = macroize_nonconstant_globals(&suffix_sanitized_source);
+    let src = sanitized_source.as_str();
     let is_frag = looks_like_fragment(src);
     let layers = fragment_output_layers(src);
     let needs_frag_out = use_300 && layers > 0;
+    let rewrite_ftransform = !declares_ftransform(src);
 
     let mut out = String::with_capacity(src.len() + 512);
     out.push_str(header);
@@ -403,7 +658,7 @@ pub fn translate(src: &str) -> Result<String, String> {
             inserted_precision = true;
         }
 
-        let mut rewritten = rewrite_line_body(line, use_300, is_frag, needs_frag_out);
+        let mut rewritten = rewrite_line_body(line, use_300, is_frag, needs_frag_out, rewrite_ftransform);
         if use_300 {
             rewritten = rewrite_es300_tokens(rewritten);
         }
@@ -490,6 +745,107 @@ mod tests {
     fn noperspective_is_removed() {
         let o = translate("#version 330 core\nnoperspective in vec2 uv;\nvoid main(){gl_Position=vec4(0);}").unwrap();
         assert!(!o.contains("noperspective"));
+    }
+
+    #[test]
+    fn minecraft_lightmap_integer_uvs_convert_before_float_division() {
+        let o = translate(
+            "#version 150\nin ivec2 UV2;\nout vec2 texCoord2;\nin vec2 texCoord;\nvoid main() { texCoord2 = UV2; float level = floor(texCoord.x * 16) / 15; }\nvec2 lightmap(ivec2 uv) { return uv / 256.0; }\n",
+        )
+        .unwrap();
+        assert!(o.contains("vec2(uv) / 256.0"));
+        assert!(o.contains("texCoord2 = vec2(UV2)"));
+        assert!(o.contains("floor(texCoord.x * 16.0) / 15.0"));
+    }
+
+    #[test]
+    fn unused_iris_fog_global_initializer_is_removed() {
+        let source = "#version 150\nstruct iris_FogParameters { float density; };\nuniform float iris_FogDensity;\niris_FogParameters iris_Fog = iris_FogParameters(iris_FogDensity);\nvoid main() {}\n";
+        let translated = translate(source).unwrap();
+        assert!(!translated.contains("iris_FogParameters iris_Fog ="));
+
+        let referenced = source.replace("void main() {}", "void main() { float d = iris_Fog.density; }");
+        assert!(translate(&referenced).unwrap().contains("iris_FogParameters iris_Fog ="));
+    }
+
+    #[test]
+    fn desktop_float_suffixes_are_removed_without_changing_identifiers() {
+        let stripped = strip_float_suffixes("float f = 0.25f + 1e-5F; float index4f = 1.0f;");
+        assert!(stripped.contains("0.25 + 1e-5"));
+        assert!(stripped.contains("index4f = 1.0"));
+        let o = translate("#version 150\nfloat f = 0.25f + 1e-5F;\nfloat index4f = 1.0f;\n").unwrap();
+        assert!(o.contains("0.25 + 1e-5"));
+        assert!(!o.contains("1.0f"));
+    }
+
+    #[test]
+    fn ftransform_rewrite_does_not_corrupt_iris_helper_names() {
+        let o = translate(
+            "#version 150\nvec4 iris_ftransform() { return vec4(0.0); }\nvoid main() { gl_Position = ftransform(); }\n",
+        )
+        .unwrap();
+        assert!(o.contains("vec4 iris_ftransform()"));
+        assert!(o.contains("gl_Position = (mat4(1.0) * gl_Vertex)"));
+    }
+
+    #[test]
+    fn user_defined_ftransform_is_preserved() {
+        let o = translate(
+            "#version 330 core\nvec4 ftransform() { return vec4(1.0); }\nvoid main() { gl_Position = ftransform(); }\n",
+        )
+        .unwrap();
+        assert!(o.contains("vec4 ftransform()"));
+        assert!(o.contains("gl_Position = ftransform()"));
+    }
+
+    #[test]
+    fn bsl_integer_lod_and_uniform_globals_are_es_compatible() {
+        let source = "#version 330 core\nuniform int frameCounter;\nuniform ivec2 eyeBrightnessSmooth;\nuniform float viewHeight;\nuniform float viewWidth;\nuniform float aspectRatio;\nuniform float frameTimeCounter;\nuniform float timeAngle;\nuniform vec3 sunVec;\nuniform vec4 weatherRain;\nuniform vec4 weatherCold;\nuniform float isCold;\nuniform float weatherWeight;\nuniform sampler2D tex;\nin vec2 uv;\nfloat eBS = eyeBrightnessSmooth.y / 240.0;\nfloat ph = 0.8 / min(720.0, viewHeight);\nfloat pw = ph / aspectRatio;\nfloat frametime = frameTimeCounter * 1.0;\nfloat sunVisibility = clamp(frameTimeCounter, 0.0, 1.0);\nvec2 view = vec2(1.0 / viewWidth, 1.0 / viewHeight);\nfloat pi2wt = frameTimeCounter * 6.28;\nvec3 lightVec = sunVec * ((timeAngle < 0.5325) ? 1.0 : -1.0);\nvec4 weatherCol = mix(weatherRain, weatherCold * isCold / max(weatherWeight, 1e-4), weatherWeight);\nvoid main() { float d = fract(frameCounter * 0.618); float sampleSkip = 0.0; bool skip = sampleSkip == 0; vec4 c = textureLod(tex, uv, 0); }\n";
+        let o = translate(source).unwrap();
+        assert!(o.contains("#define eBS (float(eyeBrightnessSmooth.y) / 240.0)"));
+        assert!(o.contains("#define ph (0.8 / min(720.0, viewHeight))"));
+        assert!(o.contains("#define pw (ph / aspectRatio)"));
+        assert!(o.contains("#define frametime (frameTimeCounter * 1.0)"));
+        assert!(o.contains("#define sunVisibility (clamp(frameTimeCounter, 0.0, 1.0))"));
+        assert!(o.contains("#define view (vec2(1.0 / viewWidth, 1.0 / viewHeight))"));
+        assert!(o.contains("#define pi2wt (frameTimeCounter * 6.28)"));
+        assert!(o.contains("#define lightVec (sunVec * ((timeAngle < 0.5325) ? 1.0 : -1.0))"));
+        assert!(o.contains("#define weatherCol (mix(weatherRain, weatherCold * isCold / max(weatherWeight, 1e-4), weatherWeight))"));
+        assert!(o.contains("float(frameCounter) * 0.618"));
+        assert!(o.contains("sampleSkip == 0.0"));
+        assert!(o.contains("textureLod(tex, uv, float(0))"), "{o}");
+    }
+
+    #[test]
+    fn bsl_moon_weather_and_float_ternary_are_es_compatible() {
+        let source = "#version 330 core\nuniform float frameTimeCounter;\nuniform vec3 sunVec;\nuniform vec3 upVec;\nuniform float isCold;\nuniform float isDesert;\nfloat moonVisibility = clamp(dot(-sunVec, upVec) + 0.05, 0.0, 1.0);\nfloat weatherWeight = isCold + isDesert;\nvoid main() { float skip = 1.0; float sampleDepth = 1.0; float skipDepth = 1.0; skip = (sampleDepth < skipDepth) ? 0 : skip; }\n";
+        let o = translate(source).unwrap();
+        assert!(o.contains("#define moonVisibility (clamp(dot(-sunVec, upVec) + 0.05, 0.0, 1.0))"));
+        assert!(o.contains("#define weatherWeight (isCold + isDesert)"));
+        assert!(o.contains("? 0.0 : skip"));
+    }
+
+    #[test]
+    fn iris_dependent_global_initializers_become_macros() {
+        let source = "#version 330 core\nuniform float timeAngle;\nuniform float timeBrightness;\nvec3 blocklightColSqrt = vec3(1.0);\nfloat mefade = 1.0 - clamp(abs(timeAngle - 0.5) * 8.0 - 1.5, 0.0, 1.0);\nfloat dfade = 1.0 - pow(1.0 - timeBrightness, 1.5);\nvec3 blocklightCol = blocklightColSqrt * blocklightColSqrt;\nvoid main() {}\n";
+        let o = translate(source).unwrap();
+        assert!(o.contains("#define mefade (1.0 - clamp(abs(timeAngle - 0.5) * 8.0 - 1.5, 0.0, 1.0))"));
+        assert!(o.contains("#define dfade (1.0 - pow(1.0 - timeBrightness, 1.5))"));
+        assert!(o.contains("#define blocklightCol (blocklightColSqrt * blocklightColSqrt)"));
+    }
+
+    #[test]
+    fn iris_sun_color_globals_become_macros() {
+        let source = "#version 330 core\nvec3 lightMorning;\nvec3 lightEvening;\nvec3 lightDay;\nfloat mefade;\nfloat dfade;\nvec3 lightSun = mix(mix(lightMorning, lightEvening, mefade), lightDay, dfade);\nvec3 ambientMorning;\nvec3 ambientEvening;\nvec3 ambientDay;\nvec3 ambientSun = mix(mix(ambientMorning, ambientEvening, mefade), ambientDay, dfade);\nvoid main() {}\n";
+        let o = translate(source).unwrap();
+        assert!(o.contains("#define lightSun (mix(mix(lightMorning, lightEvening, mefade), lightDay, dfade))"));
+        assert!(o.contains("#define ambientSun (mix(mix(ambientMorning, ambientEvening, mefade), ambientDay, dfade))"));
+    }
+
+    #[test]
+    fn desktop_ftransform_builtin_is_rewritten_without_a_definition() {
+        let o = translate("#version 150\nvoid main() { gl_Position = ftransform(); }\n").unwrap();
+        assert!(o.contains("gl_Position = (mat4(1.0) * gl_Vertex)"));
     }
 
     // ---- OptiFine / Iris era (#version 120) shader packs ----

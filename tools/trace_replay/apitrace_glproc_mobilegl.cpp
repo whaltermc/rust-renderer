@@ -11,6 +11,11 @@ namespace {
 
 void *LookupSymbol(const char *procName);
 
+bool StrictRendererResolution() {
+    const char *value = std::getenv("RUST_RENDERER_TRACE_STRICT");
+    return value != nullptr && std::strcmp(value, "1") == 0;
+}
+
 void *GetMobileGlHandle() {
     if (_libGlHandle != nullptr) {
         return _libGlHandle;
@@ -106,7 +111,7 @@ void *LookupSymbol(const char *procName) {
         }
     }
 
-    return dlsym(RTLD_DEFAULT, procName);
+    return StrictRendererResolution() ? nullptr : dlsym(RTLD_DEFAULT, procName);
 }
 
 } // namespace
@@ -133,7 +138,7 @@ void *_getPrivateProcAddress(const char *procName) {
         return proc;
     }
 
-    if (_eglGetProcAddress != nullptr) {
+    if (!StrictRendererResolution() && _eglGetProcAddress != nullptr) {
         return reinterpret_cast<void *>(_eglGetProcAddress(procName));
     }
 
