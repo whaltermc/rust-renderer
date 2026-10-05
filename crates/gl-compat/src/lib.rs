@@ -1683,8 +1683,17 @@ fn resolve_legacy_stub(n: &[u8]) -> *const c_void {
     std::ptr::null()
 }
 
+/// The shared fallback for a GL name this layer does not implement.
+///
+/// It used to return quietly, which is the worst option available: the call succeeds, the
+/// game carries on believing the state changed, and the resulting image is wrong with nothing
+/// anywhere pointing at a cause. Raising `GL_INVALID_OPERATION` makes the game able to see it.
+/// It is not the *right* fix -- that would be implementing the call -- but it is the difference
+/// between a silent wrong frame and a diagnosable one.
 #[inline(never)]
-pub unsafe extern "C" fn legacy_noop_fn() {}
+pub unsafe extern "C" fn legacy_noop_fn() {
+    errors().set(0x0502 /* GL_INVALID_OPERATION */);
+}
 
 // ---- core GL 1.x-3.3 entry points that used to resolve to NULL --------------------------------
 // LWJGL resolves every GL11..GL33 function at startup. With `-Dorg.lwjgl.util.NoChecks=true`
@@ -1946,6 +1955,13 @@ fn own_symbol(name: &[u8]) -> Option<*const c_void> {
     let sym: libloading::os::unix::Symbol<*const c_void> =
         unsafe { lib.get(name) }.ok()?;
     Some(*sym)
+}
+
+/// Test-only view of `own_symbol`, so a module can assert that the names it declares are
+/// genuinely exported rather than assuming it.
+#[cfg(test)]
+pub(crate) fn own_symbol_for_test(name: &[u8]) -> Option<*const c_void> {
+    own_symbol(name)
 }
 
 fn resolve_proc(n: &[u8]) -> *const c_void {

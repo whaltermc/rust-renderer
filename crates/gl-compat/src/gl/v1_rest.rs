@@ -142,3 +142,131 @@ pub unsafe extern "C" fn glSwapBuffers(_dpy: *mut c_void) {
     }
     errors().set(0x0502);
 }
+
+/// The names this module cannot serve, and why.
+///
+/// Three tiers, following MobileGL's surface discipline (its dispatch is 150 names, all ES 3.x
+/// plus EXT, with no fixed-function surface at all -- it simply omits what its target ES does
+/// not have). We cannot omit: LWJGL enumerates the GL 1.x names, and an unresolved symbol is
+/// the `SIGSEGV pc=0x0` crash that killed 1.16.5. So:
+///
+/// 1. **ES-backed** -- forwarded to the real driver.
+/// 2. **Layer-implemented** -- immediate mode, the matrix stack, client arrays, fog, lighting,
+///    texture environment and the attribute stacks, handled by `fixed_func` / `immediate` /
+///    `fixed_draw`. Needed for Minecraft 1.12-1.16, which MobileGL does not target at all.
+/// 3. **ES-absent** -- the entries below. MobileGL omits them; we export them and raise
+///    `GL_INVALID_OPERATION` so a caller that depends on one finds out, rather than getting a
+///    silent no-op or a null pointer.
+///
+/// Also absent by ES's design, handled elsewhere rather than here: 1D textures and texel
+/// buffers (ES never had them), and `glSwapBuffers` (presentation is EGL's, not GL's).
+pub const NO_ES_EQUIVALENT: &[(&str, &str)] = &[
+    ("glPixelMapfv", "pixel maps were removed in ES 2.0"),
+    ("glPixelMapuiv", "pixel maps were removed in ES 2.0"),
+    ("glPixelMapusv", "pixel maps were removed in ES 2.0"),
+    ("glPixelZoom", "removed in ES 2.0"),
+    ("glRasterPos2d", "raster position was removed in ES 2.0; no ES equivalent"),
+    ("glRasterPos3d", "raster position was removed in ES 2.0; no ES equivalent"),
+    ("glRectd", "window rectangles were removed in ES 2.0"),
+    ("glEdgeFlag", "edge flags were removed in ES 2.0"),
+    ("glIndexMask", "colour index was removed in ES 2.0"),
+    ("glIndexd", "colour index was removed in ES 2.0"),
+    ("glIndexf", "colour index was removed in ES 2.0"),
+    ("glIndexi", "colour index was removed in ES 2.0"),
+    ("glIndexs", "colour index was removed in ES 2.0"),
+    ("glIndexub", "colour index was removed in ES 2.0"),
+    ("glInitNames", "colour index was removed in ES 2.0"),
+    ("glPassThrough", "colour index was removed in ES 2.0"),
+    ("glPushName", "colour index was removed in ES 2.0"),
+    ("glPopName", "colour index was removed in ES 2.0"),
+    ("glSelectBuffer", "selection buffers were removed in ES 2.0"),
+    ("glFeedbackBuffer", "feedback buffers were removed in ES 2.0"),
+    ("glEvalCoord1f", "the evaluators were removed in ES 2.0"),
+    ("glEvalCoord2f", "the evaluators were removed in ES 2.0"),
+    ("glEvalCoord3f", "the evaluators were removed in ES 2.0"),
+    ("glEvalMesh1", "the evaluators were removed in ES 2.0"),
+    ("glEvalMesh2", "the evaluators were removed in ES 2.0"),
+    ("glEvalPoint1", "the evaluators were removed in ES 2.0"),
+    ("glEvalPoint2", "the evaluators were removed in ES 2.0"),
+    ("glClipPlane", "clip planes were removed in ES 2.0"),
+    ("glGetClipPlane", "clip planes were removed in ES 2.0"),
+    ("glTranslated", "the fixed-function transform stack was removed in ES 2.0"),
+    ("glLoadTransposeMatrixf", "transpose matrices are desktop GL; ES has none"),
+    ("glLoadTransposeMatrixd", "transpose matrices are desktop GL; ES has none"),
+    ("glMultTransposeMatrixf", "transpose matrices are desktop GL; ES has none"),
+    ("glMultTransposeMatrixd", "transpose matrices are desktop GL; ES has none"),
+    ("glNormal3b", "removed in ES 2.0; use glNormal3f"),
+    ("glNormal3i", "removed in ES 2.0; use glNormal3f"),
+    ("glNormal3s", "removed in ES 2.0; use glNormal3f"),
+    ("glGetTexEnvdv", "ES exposes the float and int forms only"),
+    ("glGetTexGendv", "ES exposes the float and int forms only"),
+    ("glGetLightf", "ES 2.0 dropped the scalar lighting getters"),
+    ("glGetLighti", "ES 2.0 dropped the scalar lighting getters"),
+    ("glGetLightModelf", "ES 2.0 dropped the scalar lighting getters"),
+    ("glGetLightModelfv", "ES 2.0 dropped the scalar lighting getters"),
+    ("glGetLightModeliv", "ES 2.0 dropped the scalar lighting getters"),
+    ("glGetMaterialf", "ES 2.0 dropped the scalar material getters"),
+    ("glMaterialiv", "ES 2.0 dropped the scalar material setters"),
+    ("glGetColorMaterial", "removed in ES 2.0; no ES equivalent"),
+    ("glGetPointParameterf", "ES exposes the vector form only"),
+    ("glFragDepth", "ES 3.x has no fragment-depth write"),
+    ("glCopyTexImage1D", "ES 3.x has no 1D textures"),
+    ("glCompressedTexImage1D", "ES 3.x has no 1D textures"),
+    ("glCompressedTexSubImage1D", "ES 3.x has no 1D textures"),
+];
+
+/// The table as NUL-terminated C strings, so a C consumer gets a real `char*`. Returning
+/// `str::as_ptr` would not do: Rust strings carry no terminator, and every reader would run
+/// off the end into whatever followed.
+fn es_absent_c_strings() -> &'static [std::ffi::CString] {
+    use std::sync::OnceLock;
+    static S: OnceLock<Vec<std::ffi::CString>> = OnceLock::new();
+    S.get_or_init(|| {
+        NO_ES_EQUIVALENT
+            .iter()
+            .filter_map(|(n, _)| std::ffi::CString::new(*n).ok())
+            .collect()
+    })
+}
+
+/// Number of entries in [`NO_ES_EQUIVALENT`], so a harness can walk them without duplicating
+/// the table.
+#[no_mangle]
+pub extern "C" fn glcompat_no_es_equivalent_count() -> u32 {
+    es_absent_c_strings().len() as u32
+}
+
+/// Name of entry `i` in [`NO_ES_EQUIVALENT`], NUL-terminated, or null past the end.
+#[no_mangle]
+pub extern "C" fn glcompat_no_es_equivalent_name(i: u32) -> *const std::ffi::c_char {
+    match es_absent_c_strings().get(i as usize) {
+        Some(c) => c.as_ptr(),
+        None => std::ptr::null(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The export check cannot run here: a `cargo test` binary does not export its own
+    /// symbols, so the symbol-table lookup sees nothing and every name would look missing.
+    /// The harness checks it against the real cdylib instead, where the symbols are exported.
+    #[test]
+    fn every_es_absent_name_carries_a_reason() {
+        for (name, reason) in NO_ES_EQUIVALENT {
+            assert!(!reason.is_empty(), "{name} has no recorded reason");
+            assert!(name.starts_with("gl"), "{name} is not a GL entry point");
+        }
+    }
+
+    #[test]
+    fn the_table_is_not_empty_and_has_no_duplicates() {
+        assert!(NO_ES_EQUIVALENT.len() > 40, "expected a substantial table");
+        let mut names: Vec<&str> = NO_ES_EQUIVALENT.iter().map(|(n, _)| *n).collect();
+        names.sort_unstable();
+        let before = names.len();
+        names.dedup();
+        assert_eq!(names.len(), before, "duplicate entry in NO_ES_EQUIVALENT");
+    }
+}

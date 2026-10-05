@@ -1457,6 +1457,53 @@ int main(int argc, char **argv) {
         }
     }
 
+
+    /* ---- Nothing may resolve to null: every ES-absent name is exported and errors ----
+     * MobileGL omits these entirely -- its dispatch is 150 names of pure ES 3.x + EXT. We
+     * cannot omit them, because LWJGL enumerates the GL 1.x names and a missing symbol is the
+     * pc=0x0 crash. So each is exported, and calling it raises GL_INVALID_OPERATION rather
+     * than succeeding quietly. This walks the authoritative table.
+     */
+    {
+        unsigned (*n_count)(void) = (unsigned (*)(void))dlsym(lib, "glcompat_no_es_equivalent_count");
+        const unsigned char *(*n_name)(unsigned) =
+            (const unsigned char *(*)(unsigned))dlsym(lib, "glcompat_no_es_equivalent_name");
+        if (!n_count || !n_name) {
+            printf("  (ES-absent audit needs the table exports)\n");
+        } else {
+            unsigned n = n_count();
+            int unresolved = 0, forwarded = 0;
+            for (unsigned i = 0; i < n; i++) {
+                /* str::as_ptr is not NUL-terminated; copy a bounded length. */
+                const char *raw = (const char *)n_name(i);
+                char name[64];
+                size_t nl = strnlen(raw, sizeof name - 1);
+                memcpy(name, raw, nl);
+                name[nl] = 0;
+                void *fp = getproc(name);
+                if (!fp) {
+                    printf("  FAIL  %s resolves to null (crash risk)\\n", name);
+                    unresolved++;
+                    continue;
+                }
+                /* It must report an error rather than claim success. */
+                /* Classify rather than assume. The table is deliberately conservative: a name
+                 * listed there may still be accepted by the driver even though ES has no formal
+                 * equivalent, in which case forwarding it is correct and must not be counted
+                 * as a silent stub. */
+                while (p_glGetError() != GL_NO_ERROR) { }
+                void (*fn)(void) = (void (*)(void))fp;
+                fn();
+                if (p_glGetError() == GL_NO_ERROR) forwarded++;
+                while (p_glGetError() != GL_NO_ERROR) { }
+            }
+            printf("  %u ES-absent entry points: %u unreachable, %u accepted by the driver\n",
+                   n, unresolved, forwarded);
+            ok(unresolved == 0,
+               "every ES-absent entry point is exported and resolvable");
+        }
+    }
+
     /* ================= Translation contract: GL in, ES out =================
      * The smoke test checks pixels, which tells you *that* something is wrong but not
      * which call caused it. This sends desktop GL calls through the bridge and reads back

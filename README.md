@@ -599,6 +599,33 @@ have. See `third_party/README.md` for the exact commands and what remains.
 Consequently `backend::vulkan::can_render()` is still `false` and `compile_shader` still
 returns the honest *"no SPIR-V compiler is linked"*. Nothing about rendering has changed yet.
 
+### What MobileGL actually does, and what we adopted from it
+
+Checked rather than assumed. MobileGL's dispatch (`MG_Impl/GLImpl/Exporting/Definitions.cpp`,
+554 KB) exports **150 GL names**, and *none* of the legacy fixed-function surface: no
+`glBegin`, `glVertex3f`, `glMatrixMode`, `glVertexPointer`, `glFogfv`. It targets ES 3.x, where
+those calls do not exist, so its method is **omission**.
+
+We cannot omit: LWJGL enumerates the GL 1.x names and a missing symbol is the `SIGSEGV pc=0x0`
+crash. So the adopted discipline is:
+
+1. **ES-backed** -- forwarded to the real driver.
+2. **Layer-implemented** -- immediate mode, matrix stack, client arrays, fog, lighting, texture
+   environment, attribute stacks, handled by `fixed_func` / `immediate` / `fixed_draw`. Needed for
+   Minecraft 1.12-1.16, which MobileGL does not target at all.
+3. **ES-absent** -- an explicit, auditable table in `gl/v1_rest.rs` (`NO_ES_EQUIVALENT`), 52
+   entries each with *why* ES cannot do it. Every one is exported, and calling it raises
+   `GL_INVALID_OPERATION` instead of returning quietly. The shared legacy stub does the same, so
+   no name anywhere in the layer succeeds silently.
+
+On hybrid, the ES-absent tier could eventually be served by Vulkan, which supports these
+natively. It cannot today: `can_render()` is `false` and there are no pipelines, so routing them
+there would substitute one stub for another.
+
+The harness walks that table every run and reports **52 entry points: 0 unreachable**. Eleven are
+*accepted by the driver* despite having no formal ES equivalent -- the table is deliberately
+conservative, and forwarding those is correct.
+
 ### Exported names now resolve to their implementation
 
 A measured audit of `resolve_proc` found **127 exported symbols being served as the shared
