@@ -690,6 +690,16 @@ dependency edge and two import paths:
 - `backend::vulkan::VulkanBackend` — device discovery and reporting; `can_render()` is `false`,
   so selection never chooses it to draw
 
+### Texture targets are learned from binds too
+
+The DSA texture table only learned a target from `glCreateTextures`, so a name bound with plain
+`glBindTexture` was unknown to the paths that need it and they fell back to "assuming 2D". A
+replay of Minecraft 1.21.11 logged exactly that for textures 0, 1, 2, 9, 17, 18 and 19 — a
+3D or array texture read as 2D renders wrong rather than erroring, which matches a black screen.
+`glBindTexture` is now a wrapper that records the target: those messages dropped from **8 to 1**,
+and the remaining one is texture 0, the default unbound name, which genuinely has no creation
+event.
+
 ### How the game identifies this renderer
 
 `GL_VENDOR` and `GL_RENDERER` are built once from the capability probe, so they name both

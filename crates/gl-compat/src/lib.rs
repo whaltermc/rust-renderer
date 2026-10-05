@@ -1366,7 +1366,6 @@ forward_all! {
     glBindAttribLocation(p: u32, i: u32, n: *const c_char);
     glBindFramebuffer(t: u32, f: u32);
     glBindRenderbuffer(t: u32, r: u32);
-    glBindTexture(t: u32, x: u32);
     glBindVertexArray(a: u32);
     glBlendColor(r: f32, g: f32, b: f32, a: f32);
     glBlendEquation(m: u32);
@@ -1964,6 +1963,23 @@ pub(crate) fn own_symbol_for_test(name: &[u8]) -> Option<*const c_void> {
     own_symbol(name)
 }
 
+/// Records the target a texture name is bound to, then forwards.
+///
+/// Learning a texture's target only from `glCreateTextures` was a real gap: a name bound with
+/// plain `glBindTexture` says just as much about where it lives, and the DSA paths that need
+/// the target were falling back to "assuming 2D". A 1.21.11 replay logged exactly that for
+/// textures 0, 1, 2, 9, 17, 18 and 19.
+#[no_mangle]
+pub unsafe extern "C" fn glBindTexture(target: u32, texture: u32) {
+    if texture != 0 && named_objects::is_bindable_texture_target(target) {
+        named_objects::note_texture_target(texture, target);
+    }
+    match driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindTexture") {
+        Some(f) => f(target, texture),
+        None => errors().set(GL_INVALID_OPERATION),
+    }
+}
+
 fn resolve_proc(n: &[u8]) -> *const c_void {
     match n {
         b"glGetError" => glGetError as *const c_void,
@@ -2144,6 +2160,7 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glTexParameteriv" => glTexParameteriv as *const c_void,
         b"glTexParameterfv" => glTexParameterfv as *const c_void,
         b"glRenderbufferStorage" => glRenderbufferStorage as *const c_void,
+        b"glBindTexture" => glBindTexture as *const c_void,
         b"glLightModeliv" => glLightModeliv as *const c_void,
         b"glFramebufferTexture2D" => glFramebufferTexture2D as *const c_void,
         b"glFogColor" => fixed_func::glFogColor as *const c_void,

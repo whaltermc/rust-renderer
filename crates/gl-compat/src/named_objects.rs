@@ -22,6 +22,20 @@ const GL_COPY_WRITE_BUFFER: u32 = 0x8F37;
 /// to bind them to. Names created any other way are still tracked by `glBindTexture`.
 static TEXTURES: Mutex<Vec<(u32, u32)>> = Mutex::new(Vec::new());
 
+/// Records the target a texture name is bound to.
+///
+/// A texture name is per-target in GLES, so whichever call first pins a name decides where it
+/// lives. This existed only on the `glCreateTextures` path, so a name bound with plain
+/// `glBindTexture` was unknown to the DSA paths and they fell back to "assuming 2D" -- logged
+/// during a replay of Minecraft 1.21.11 for textures 0, 1, 2, 9, 17, 18 and 19.
+pub(crate) fn note_texture_target(id: u32, target: u32) {
+    let mut v = TEXTURES.lock().unwrap_or_else(|e| e.into_inner());
+    match v.iter_mut().find(|(t, _)| *t == id) {
+        Some(e) => e.1 = target,
+        None => v.push((id, target)),
+    }
+}
+
 fn record_texture(id: u32, target: u32) {
     let mut v = TEXTURES.lock().unwrap_or_else(|e| e.into_inner());
     if !v.iter().any(|(i, _)| *i == id) {
@@ -153,7 +167,7 @@ unsafe fn allocate_msaa_renderbuffer(samples: i32, fmt: u32, w: i32, h: i32) -> 
 /// The multisample *types* (GL_TEXTURE_2D_MULTISAMPLE, GL_TEXTURE_3D_MULTISAMPLE) are not in
 /// this list: they name a texture kind, not a binding point, and binding one raises
 /// GL_INVALID_ENUM. Their storage is allocated by `glTexStorage*Multisample` instead.
-fn is_bindable_texture_target(t: u32) -> bool {
+pub(crate) fn is_bindable_texture_target(t: u32) -> bool {
     matches!(t, 0x0DE1 /* 2D */ | 0x806F /* 3D */ | 0x8513 /* CUBE_MAP */
         | 0x8C1A /* 2D_ARRAY */ | 0x9009 /* CUBE_MAP_ARRAY */ | 0x84F5 /* 1D */
         | 0x84F6 /* 1D_ARRAY */ | 0x84F7 /* RECT */ | 0x8C18 /* 3D_ARRAY */)

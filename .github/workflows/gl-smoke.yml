@@ -21,9 +21,9 @@ jobs:
 
     steps:
       - name: Checkout
+        # No submodules: the replay tool (apitrace) is out of CI, and glslang is not built
+        # here. Fetching them would make the job depend on two third-party forks for nothing.
         uses: actions/checkout@v5
-        with:
-          submodules: recursive
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -68,7 +68,8 @@ jobs:
             fi
           done
           if [ -z "$ANGLE" ]; then
-            echo "::notice::ANGLE not found; skipping the translated lane. The Mesa lane still ran."
+            echo "::notice::ANGLE not found at $ANGLE; skipping the translated lane."
+            echo "::notice::Install it with: sdkmanager 'emulator' 'platform-tools'"
             exit 0
           fi
           echo "using ANGLE from $ANGLE"
@@ -195,10 +196,10 @@ jobs:
             target/reports/gl-smoke.html
             target/reports/gl-smoke.log
             target/reports/screenshots/
-            target/reports-angle/
+            target/reports-angle/  # may be absent: the ANGLE lane skips without the emulator SDK
             target/reports/trace-coverage.log
             target/reports/lane-comparison.md
-          if-no-files-found: error
+          if-no-files-found: warn
 
       - name: Summarise
         if: always()
