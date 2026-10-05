@@ -1009,6 +1009,16 @@ pub unsafe extern "C" fn glCompileShader(shader: u32) {
                 .collect::<Vec<_>>()
                 .join("\n");
             log(&format!("[Shader] shader {shader} translated source context:\n{excerpt}"));
+            
+            let directives = lines
+                .iter()
+                .enumerate()
+                .filter(|(_, text)| text.trim_start().starts_with('#'))
+                .take(80)
+                .map(|(index, text)| format!("{}: {}", index + 1, text.trim()))
+                .collect::<Vec<_>>()
+                .join("\n");
+            log(&format!("[Shader] shader {shader} preprocessor lines:\n{directives}"));
         }
     }
 }
