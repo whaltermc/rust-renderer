@@ -52,12 +52,46 @@ fn take_shader_source(shader: u32) -> Option<String> {
     cache.iter().position(|(id, _)| *id == shader).map(|index| cache.remove(index).1)
 }
 
-fn shader_error_line(info_log: &str) -> Option<usize> {
+/// Parses the first `<string>:<line>:` location out of a driver info log (`0:15: S0001: ...`).
+fn shader_error_location(info_log: &str) -> Option<(usize, usize)> {
     info_log.lines().find_map(|line| {
-        let (_, rest) = line.split_once(':')?;
+        let (string, rest) = line.split_once(':')?;
+        let string: usize = string.trim().parse().ok()?;
         let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
-        digits.parse().ok()
+        Some((string, digits.parse().ok()?))
     })
+}
+
+/// Maps a driver-reported `<string>:<line>` back to a 1-based physical line of `source`.
+///
+/// Mojang's import processor (and Iris) emit `#line N S` around every `#moj_import`, so the
+/// driver numbers lines relative to those directives, not to the translated text. Taking the
+/// reported number as a physical index shows the wrong excerpt: a failure at `0:15` of the
+/// main file, after a 30-line import, sits on physical line ~58, not 15.
+fn physical_line_for_error(source: &str, string: usize, line: usize) -> Option<usize> {
+    let (mut cur_string, mut cur_line) = (0usize, 1usize);
+    for (index, text) in source.lines().enumerate() {
+        let t = text.trim_start();
+        if let Some(rest) = t.strip_prefix("#line") {
+            let mut parts = rest.split_whitespace();
+            if let Some(n) = parts.next().and_then(|n| n.parse::<usize>().ok()) {
+                cur_line = n;
+                if let Some(s) = parts.next().and_then(|s| s.parse::<usize>().ok()) {
+                    cur_string = s;
+                }
+                continue;
+            }
+        }
+        if cur_string == string && cur_line == line {
+            return Some(index + 1);
+        }
+        cur_line += 1;
+    }
+    None
+}
+
+fn shader_error_line(info_log: &str) -> Option<usize> {
+    shader_error_location(info_log).map(|(_, line)| line)
 }
 
 
@@ -1023,6 +1057,11 @@ pub unsafe extern "C" fn glCompileShader(shader: u32) {
     let message = String::from_utf8_lossy(&bytes[..written.min(bytes.len())]);
     log(&format!("[Shader] shader {shader} failed to compile: {message}"));
     if let (Some(source), Some(line)) = (take_shader_source(shader), shader_error_line(&message)) {
+        // Prefer the `#line`-aware physical line; fall back to the raw number if the
+        // directives do not account for it.
+        let line = shader_error_location(&message)
+            .and_then(|(string, reported)| physical_line_for_error(&source, string, reported))
+            .unwrap_or(line);
         let lines: Vec<&str> = source.lines().collect();
         let start = line.saturating_sub(9);
         let end = (line + 3).min(lines.len());
@@ -2675,6 +2714,18 @@ pub extern "C" fn __driDriverGetExtensions_virtio_gpu() -> *const *const c_void 
 
 #[cfg(test)]
 mod tests {
+    /// Mali reports `0:15` relative to `#line 3 0` after an imported block; the excerpt must
+    /// land on the physical line that follows the directive, not on physical line 15.
+    #[test]
+    fn error_line_follows_line_directives() {
+        let src = "#version 300 es\n#line 0 1\nimported_a\nimported_b\n#line 3 0\nmain_3\nmain_4\n";
+        assert_eq!(physical_line_for_error(src, 0, 3), Some(6));
+        assert_eq!(physical_line_for_error(src, 0, 4), Some(7));
+        assert_eq!(physical_line_for_error(src, 1, 0), Some(3));
+        assert_eq!(physical_line_for_error(src, 0, 99), None);
+        assert_eq!(shader_error_location("0:15: S0001: oops"), Some((0, 15)));
+    }
+
     use super::*;
 
     /// Serialises tests that touch process-global state -- the driver entry-point cache and
