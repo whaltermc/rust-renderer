@@ -17,14 +17,20 @@ on:
 permissions:
   contents: read
 
+# A newer push supersedes an older run on the same ref; the older one is wasted minutes.
+concurrency:
+  group: gl-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   smoke:
     name: Render through librust_gl.so
     runs-on: ubuntu-24.04
+    # The apitrace replay builds a lot of C++. A hung download or build should fail visibly
+    # rather than sit until GitHub's 6 hour default.
+    timeout-minutes: 60
 
     steps:
-      # The replay job initializes only its apitrace dependency below; glslang is not built
-      # here, so the unrelated shader-compiler submodule stays untouched.
       - name: Checkout
         uses: actions/checkout@v5
 
@@ -33,23 +39,29 @@ jobs:
         # than the one this was verified against, which is not a failure worth debugging.
         uses: dtolnay/rust-toolchain@1.99.0
 
+      # Reuses compiled dependencies between runs. The workspace builds gl-compat several
+      # times (tests, smoke, each retrace), so a cold cache is most of the job's runtime.
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
       - name: Unit tests
         run: |
           set -o pipefail
-          cargo test --workspace 2>&1 | tee unit-tests.log
+          mkdir -p target/reports
+          cargo test --workspace 2>&1 | tee target/reports/unit-tests.log
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
             { echo "### Unit tests failed (exit $status)"; echo;
-              echo '```'; tail -60 unit-tests.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-            mkdir -p target/reports && cp unit-tests.log target/reports/ 2>/dev/null || true
+              echo '```'; tail -60 target/reports/unit-tests.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
           exit "$status"
 
-      - name: Install Mesa software GL
+      - name: Install Mesa software GL and build tools
         run: |
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends \
-            libegl1 libgles2 libegl1-mesa-dev libgles2-mesa-dev mesa-utils
+            libegl1 libgles2 libegl1-mesa-dev libgles2-mesa-dev mesa-utils \
+            cmake build-essential python3 curl
 
       - name: Report EGL/GL stack
         run: |
@@ -62,6 +74,7 @@ jobs:
       # fails the job; known issues are reported in the HTML without one.
       - name: Run smoke test (Mesa llvmpipe)
         run: |
+          set -o pipefail
           mkdir -p target/reports
           RENDERER_TRACE_GL=all GLSMOKE_CONTRACT=1 \
             ./tools/run-glsmoke.sh 2>&1 | tee target/reports/gl-smoke.log
@@ -84,6 +97,7 @@ jobs:
           if [ -z "$ANGLE" ]; then
             echo "::notice::ANGLE not found; skipping the translated lane."
             echo "::notice::Install it with: sdkmanager 'emulator' 'platform-tools'"
+            echo "ANGLE not found; lane skipped." > target/reports-angle/NOT-RUN.txt
             exit 0
           fi
           sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers
@@ -96,6 +110,7 @@ jobs:
           ln -sf "$ANGLE/libEGL.so"       "$FARM/libEGL.so"
           ln -sf "$ANGLE/libGLESv2.so"    "$FARM/libGLESv2.so"
           ln -sf "$ANGLE/libvulkan.so.1"  "$FARM/libvulkan.so.1"
+          mkdir -p target/release
           cc -O1 -o target/release/glsmoke tools/glsmoke.c -lEGL -ldl -lm
           set +e
           LD_LIBRARY_PATH="$FARM:target/release/" \
@@ -119,24 +134,33 @@ jobs:
       # Entry-point coverage measured against real Minecraft apitrace captures from the
       # MobileGL fixture set. Network-dependent, so it reports rather than gates.
       - name: Trace coverage against real Minecraft captures
+        continue-on-error: true
         run: |
           sudo apt-get install -y --no-install-recommends apitrace
           mkdir -p target/reports
-          set +e
           ./tools/trace-coverage.sh 2>&1 | tee target/reports/trace-coverage.log
-          set -e
 
       - name: Initialize apitrace replay dependency
-        run: git submodule update --init --recursive tools/trace_replay/vendor/apitrace
+        run: git submodule update --init --recursive --depth 1 tools/trace_replay/vendor/apitrace
+
+      # The 1.21.4 fixtures are downloaded from the MobileGL repo. Caching them means a flaky
+      # download or a moved file only fails the first run, not every run.
+      - name: Cache replay fixtures
+        uses: actions/cache@v4
+        with:
+          path: target/trace-replay/downloads
+          key: trace-fixtures-${{ hashFiles('tools/trace_replay/run_fixture.sh') }}
 
       - name: Retrace Minecraft 1.21.4 through Rust renderer
         run: |
+          set -o pipefail
           mkdir -p target/reports
           RENDERER_TRACE_GL=1 tools/trace_replay/run_fixture.sh 1.21.4 \
             2>&1 | tee target/reports/minecraft-1.21.4-retrace.log
 
       - name: Retrace Minecraft 1.21.4 world through Rust renderer
         run: |
+          set -o pipefail
           mkdir -p target/reports
           RENDERER_TRACE_GL=1 tools/trace_replay/run_fixture.sh 1.21.4-world \
             2>&1 | tee target/reports/minecraft-1.21.4-world-retrace.log
@@ -144,6 +168,7 @@ jobs:
       - name: Diagnose Minecraft 1.21.4 Iris shader pack
         continue-on-error: true
         run: |
+          set -o pipefail
           mkdir -p target/reports
           RENDERER_TRACE_GL=1 tools/trace_replay/run_fixture.sh 1.21.4-shaders \
             2>&1 | tee target/reports/minecraft-1.21.4-shaders-retrace.log
@@ -174,8 +199,10 @@ jobs:
             target/reports/minecraft-1.21.4-shaders-retrace.log
             target/reports/unit-tests.log
             target/reports/lane-comparison.md
-            target/trace-replay/results/1.21.4/
+            target/trace-replay/results/
 
+      # Puts the tail of every log in the job summary, so a red run shows its cause without
+      # downloading the artifact.
       - name: Summarise
         if: always()
         run: |
@@ -193,4 +220,16 @@ jobs:
               echo
               cat target/reports/lane-comparison.md
             fi
+            for f in gl-smoke minecraft-1.21.4-retrace minecraft-1.21.4-world-retrace; do
+              if [ -f "target/reports/$f.log" ]; then
+                echo
+                echo "<details><summary>$f.log (last 25 lines)</summary>"
+                echo
+                echo '```'
+                tail -25 "target/reports/$f.log"
+                echo '```'
+                echo "</details>"
+              fi
+            done
           } >> "$GITHUB_STEP_SUMMARY"
+          
