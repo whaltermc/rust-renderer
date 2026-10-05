@@ -27,7 +27,7 @@ val pluginRendererConfig = buildJsonValue {
         displayName = "RustGL",
 
         // This becomes POJAV_RENDERER
-        rendererId = "rustgl",
+        rendererId = "opengles3_rust",
 
         // Your actual native renderer library
         rendererGLPath = nativePath("librust_gl.so"),
