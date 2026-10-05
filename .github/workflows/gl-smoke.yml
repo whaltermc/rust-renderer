@@ -29,10 +29,21 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        # Pinned, not `stable`: a floating toolchain means CI can compile a different compiler
+        # than the one this was verified against, which is not a failure worth debugging.
+        uses: dtolnay/rust-toolchain@1.99.0
 
       - name: Unit tests
-        run: cargo test --workspace
+        run: |
+          set -o pipefail
+          cargo test --workspace 2>&1 | tee unit-tests.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            { echo "### Unit tests failed (exit $status)"; echo;
+              echo '```'; tail -60 unit-tests.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            mkdir -p target/reports && cp unit-tests.log target/reports/ 2>/dev/null || true
+          fi
+          exit "$status"
 
       - name: Install Mesa software GL
         run: |
@@ -136,6 +147,7 @@ jobs:
             target/reports/screenshots/
             target/reports-angle/
             target/reports/trace-coverage.log
+            target/reports/unit-tests.log
             target/reports/lane-comparison.md
 
       - name: Summarise
