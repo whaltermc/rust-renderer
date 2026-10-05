@@ -12,7 +12,7 @@
 mod raw;
 
 use renderer_core::{Backend, BackendError, BackendKind, Capabilities, DeviceInfo};
-use std::ffi::c_void;
+use std::ffi::{c_char, c_void};
 use std::ptr;
 
 use raw::{Api, VkDeviceCreateInfo, VkDeviceQueueCreateInfo};
@@ -353,7 +353,7 @@ fn try_probe() -> Result<VulkanBackend, String> {
         };
 
         let extension_name = b"VK_KHR_swapchain\0";
-        let swapchain_ext = extension_name.as_ptr() as *const *const i8;
+        let swapchain_ext = extension_name.as_ptr() as *const *const c_char;
         let device_info = VkDeviceCreateInfo {
             s_type: raw::VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
             p_next: ptr::null(),
@@ -511,7 +511,7 @@ fn try_probe() -> Result<VulkanBackend, String> {
                 flags: 0,
                 stage: raw::VK_SHADER_STAGE_VERTEX_BIT,
                 module: vert_module,
-                p_name: b"main\0".as_ptr() as *const i8,
+                p_name: b"main\0".as_ptr() as *const c_char,
                 p_specialization_info: ptr::null(),
             },
             raw::VkPipelineShaderStageCreateInfo {
@@ -520,7 +520,7 @@ fn try_probe() -> Result<VulkanBackend, String> {
                 flags: 0,
                 stage: raw::VK_SHADER_STAGE_FRAGMENT_BIT,
                 module: frag_module,
-                p_name: b"main\0".as_ptr() as *const i8,
+                p_name: b"main\0".as_ptr() as *const c_char,
                 p_specialization_info: ptr::null(),
             },
         ];
