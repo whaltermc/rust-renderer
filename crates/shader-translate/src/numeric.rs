@@ -562,19 +562,16 @@ fn collect_declared<'a>(src: &'a str) -> Declared {
             // `uvec3 unpack(uvec2 data)` declares a function: its return type is what a call
             // needs, and recording the name as a variable would let a rewrite wrap the callee.
             if toks.get(next + 1).is_some_and(|t| t.is_punct('(')) {
-                eprintln!("DEBUG: found function {} at line", name.text);
                 if let Some(components) = match ty {
                     Ty::IntScalar => Some(None),
                     Ty::IntVector(n) => Some(Some(n)),
                     Ty::Float => None,
                 } {
-                    funcs.entry(name.text.to_string()).or_insert(components);
+                    funcs.entry(name.text).or_insert(components);
                 }
                 if ty == Ty::Float {
-                    eprintln!("DEBUG: inserting {} into float_funcs", name.text);
                     float_funcs.insert(name.text.to_string());
                 }
-                eprintln!("DEBUG: float_funcs now = {:?}", float_funcs);
                 continue;
             }
             observe(name.text, ty, &mut vars, &mut conflicted);
@@ -607,7 +604,6 @@ fn collect_declared<'a>(src: &'a str) -> Declared {
     }
 
     let mut declared = Declared::default();
-    let mut float_funcs = HashSet::new();
     for (name, ty) in vars {
         if conflicted.contains(name) {
             continue;
@@ -799,6 +795,13 @@ fn widen_line(line: &str, declared: &Declared) -> String {
     if toks.is_empty() {
         return line.to_string();
     }
+    
+    // DEBUG
+    if line.contains("linear_fog_value") {
+        eprintln!("DEBUG widen_line: input={}", line);
+        eprintln!("DEBUG widen_line: float_funcs={:?}", declared.float_funcs);
+    }
+    
     // Overlapping rewrites of the same operand are de-duplicated by start index.
     let mut edits: Vec<EditAt> = Vec::new();
     let text_of = |range: (usize, usize)| {
@@ -1216,36 +1219,8 @@ mod tests {
     #[test]
     fn user_defined_float_function_args_are_retargeted() {
         let src = "float linear_fog_value(float a, float b){ return a + b; }\nfloat f(){ return linear_fog_value(0.0, 1); }\n";
-        let declared = collect_declared(src);
-        eprintln!("float_funcs: {:?}", declared.float_funcs);
-        eprintln!("int_funcs: {:?}", declared.int_funcs);
-        eprintln!("floats: {:?}", declared.floats);
-        
-        // Direct check
-        let toks = tokenize("float linear_fog_value(float a, float b){ return a + b; }");
-        eprintln!("tokens: {:?}", toks.iter().map(|t| (t.kind, t.text)).collect::<Vec<_>>());
-        
-        // Check if the function declaration is detected
-        let mut found = false;
-        for (index, tok) in toks.iter().enumerate() {
-            if tok.kind == Kind::Ident && tok.text == "float" {
-                let next = index + 1;
-                if let Some(name_tok) = toks.get(next) {
-                    if name_tok.kind == Kind::Ident && name_tok.text == "linear_fog_value" {
-                        if let Some(next_tok) = toks.get(next + 1) {
-                            if next_tok.is_punct('(') {
-                                found = true;
-                                eprintln!("Found function declaration at index {}", index);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        eprintln!("found declaration: {}", found);
-        
         let out = widen(src);
-        eprintln!("out: {}", out);
+        eprintln!("FULL OUT:\n{}", out);
         assert!(out.contains("linear_fog_value(0.0, 1.0)"), "{out}");
     }
 
