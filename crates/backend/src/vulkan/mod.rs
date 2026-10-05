@@ -353,7 +353,8 @@ fn try_probe() -> Result<VulkanBackend, String> {
         };
 
         let extension_name = b"VK_KHR_swapchain\0";
-        let swapchain_ext = extension_name.as_ptr() as *const *const c_char;
+        let extension_name_ptr = extension_name.as_ptr() as *const c_char;
+        let swapchain_ext = &extension_name_ptr;
         let device_info = VkDeviceCreateInfo {
             s_type: raw::VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
             p_next: ptr::null(),
