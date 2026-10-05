@@ -130,6 +130,13 @@ tasks.register<Copy>("packageRustGlApk") {
     rename { "RustGL.apk" }
 }
 
+tasks.register<Copy>("packageRustGlAar") {
+    dependsOn(":renderer:assembleRelease")
+    from(rootProject.layout.projectDirectory.dir("android/renderer/build/outputs/aar/renderer-release.aar"))
+    into(layout.buildDirectory.dir("outputs/aar"))
+    rename { "RustGL.aar" }
+}
+
 android {
     namespace = "dev.rustrenderer.plugin"
     compileSdk = 34

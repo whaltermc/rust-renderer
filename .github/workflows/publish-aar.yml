@@ -1,17 +1,17 @@
-name: Build Renderer Plugin APK
+name: Publish AAR to GitHub Releases
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  apk:
-    name: Build APK
+  publish-aar:
+    name: Publish AAR
     runs-on: ubuntu-24.04
 
     steps:
@@ -60,32 +60,12 @@ jobs:
         run: |
           install -D \
             target/aarch64-linux-android/release/librust_gl.so \
-            android/app/src/main/jniLibs/arm64-v8a/librust_gl.so
-
-          install -D \
-            target/aarch64-linux-android/release/librust_gl.so \
             android/renderer/src/main/jniLibs/arm64-v8a/librust_gl.so
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: "8.7"
-
-      - name: Build APK
-        working-directory: android
-        run: gradle :app:assembleDebug --stacktrace --no-daemon
-
-      - name: Verify APK
-        run: |
-          test -f android/app/build/outputs/apk/debug/app-debug.apk
-          ls -lh android/app/build/outputs/apk/debug/app-debug.apk
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: rust-renderer-plugin
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
 
       - name: Build AAR
         working-directory: android
@@ -96,9 +76,10 @@ jobs:
           test -f android/renderer/build/outputs/aar/renderer-release.aar
           ls -lh android/renderer/build/outputs/aar/renderer-release.aar
 
-      - name: Upload AAR
-        uses: actions/upload-artifact@v4
+      - name: Upload AAR to GitHub Release
+        uses: softprops/action-gh-release@v1
         with:
-          name: rust-renderer-library
-          path: android/renderer/build/outputs/aar/renderer-release.aar
-          if-no-files-found: error
+          files: android/renderer/build/outputs/aar/renderer-release.aar
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

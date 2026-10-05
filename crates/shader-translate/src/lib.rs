@@ -113,6 +113,8 @@ fn rewrite_es300_tokens(mut s: String) -> String {
             l = strip_layout_key(&l, "binding");
             l = strip_layout_key(&l, "index");
             l = strip_layout_key(&l, "component");
+            l = strip_layout_key(&l, "origin_upper_left");
+            l = strip_layout_key(&l, "pixel_center_integer");
             if l == before { break; }
         }
         // GLSL desktop permits `layout(location=0, binding=1)`; after removing binding
@@ -143,17 +145,52 @@ fn rewrite_es300_tokens(mut s: String) -> String {
 }
 
 fn strip_layout_key(line: &str, key: &str) -> String {
-    let needle = format!("{} =", key);
     let mut out = line.to_string();
-    while let Some(pos) = out.find(&needle) {
-        let start = out[..pos].rfind(',').map(|p| p + 1)
-            .or_else(|| out[..pos].rfind('(').map(|p| p + 1));
-        let Some(start) = start else { break; };
-        let tail = &out[pos + needle.len()..];
-        let end_rel = tail.find(',').or_else(|| tail.find(')'));
-        let Some(end_rel) = end_rel else { break; };
-        let end = pos + needle.len() + end_rel + if tail.as_bytes()[end_rel] == b',' { 1 } else { 0 };
-        out.replace_range(start..end, "");
+    // Try two patterns: `key = N` (desktop binding/index/component) and bare `key`
+    // (origin_upper_left, pixel_center_integer).
+    let needle_eq = format!("{} =", key);
+    let mut changed = true;
+    while changed {
+        changed = false;
+        // First try the `key = N` pattern.
+        if let Some(pos) = out.find(&needle_eq) {
+            let start = out[..pos].rfind(',').map(|p| p + 1)
+                .or_else(|| out[..pos].rfind('(').map(|p| p + 1));
+            let Some(start) = start else { continue; };
+            let tail = &out[pos + needle_eq.len()..];
+            let end_rel = tail.find(',').or_else(|| tail.find(')'));
+            let Some(end_rel) = end_rel else { continue; };
+            let end = pos + needle_eq.len() + end_rel + if tail.as_bytes()[end_rel] == b',' { 1 } else { 0 };
+            out.replace_range(start..end, "");
+            changed = true;
+            continue;
+        }
+        // Then try the bare `key` pattern, matching only whole words.
+        let mut search_from = 0;
+        while let Some(rel) = out[search_from..].find(key) {
+            let pos = search_from + rel;
+            let start = pos;
+            let end = pos + key.len();
+            let bytes = out.as_bytes();
+            let before_ok = start == 0 || !matches!(bytes[start - 1], b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_');
+            let after_ok = end == bytes.len() || !matches!(bytes[end], b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_');
+            if before_ok && after_ok {
+                // Remove the keyword and any immediately following whitespace/comma.
+                let mut del_start = start;
+                let mut del_end = end;
+                while del_end < bytes.len() && matches!(bytes[del_end], b' ' | b'\t' | b',') {
+                    del_end += 1;
+                }
+                // If we removed the first item in a comma-list, also remove the comma after it.
+                if del_end < bytes.len() && bytes[del_end] == b',' {
+                    del_end += 1;
+                }
+                out.replace_range(del_start..del_end, "");
+                changed = true;
+                break;
+            }
+            search_from = end;
+        }
     }
     out
 }
@@ -917,12 +954,22 @@ pub fn translate(src: &str) -> Result<String, String> {
     let layers = fragment_output_layers(src);
     let needs_frag_out = use_300 && layers > 0;
     let rewrite_ftransform = !declares_ftransform(src);
+    let uses_point_size = src.contains("gl_PointSize");
 
     let mut out = String::with_capacity(src.len() + 512);
     out.push_str(header);
     out.push('\n');
-
-    let mut inserted_precision = false;
+    out.push_str(precision);
+    if needs_int_mod {
+        out.push_str(numeric::int_mod_helper());
+        out.push('\n');
+    }
+    if needs_frag_out {
+        out.push_str(&fragment_output_decls(layers));
+    }
+    if use_300 && uses_point_size && !is_frag {
+        out.push_str("out float gl_PointSize;\n");
+    }
 
     for line in src.lines() {
         let line = sanitize_error_directive(line);
@@ -949,18 +996,6 @@ pub fn translate(src: &str) -> Result<String, String> {
             continue;
         }
 
-        if !inserted_precision && !t.is_empty() && !t.starts_with('#') && !t.starts_with("//") {
-            out.push_str(precision);
-            if needs_int_mod {
-                out.push_str(numeric::int_mod_helper());
-                out.push('\n');
-            }
-            if needs_frag_out {
-                out.push_str(&fragment_output_decls(layers));
-            }
-            inserted_precision = true;
-        }
-
         let mut rewritten = rewrite_line_body(line, use_300, is_frag, needs_frag_out, rewrite_ftransform);
         if use_300 {
             rewritten = rewrite_es300_tokens(rewritten);
@@ -976,13 +1011,6 @@ pub fn translate(src: &str) -> Result<String, String> {
         // a blank one, which both bloats the shader and shifts every line number a driver
         // reports away from the source it came from.
         out.push('\n');
-    }
-
-    if !inserted_precision {
-        out.push_str(precision);
-        if needs_frag_out {
-            out.push_str(&fragment_output_decls(layers));
-        }
     }
 
     Ok(out)
@@ -1288,5 +1316,64 @@ mod tests {
     fn es_300_shader_passes_through_unchanged() {
         let s = "#version 300 es\nprecision highp float;\nout vec4 c;\nvoid main(){ c = vec4(1.0); }\n";
         assert_eq!(translate(s).unwrap(), s);
+    }
+
+    #[test]
+    fn origin_upper_left_and_pixel_center_integer_are_stripped() {
+        let o = translate(
+            "#version 330 core\n\
+             layout(origin_upper_left, pixel_center_integer) in vec4 pos;\n\
+             void main(){ gl_Position = vec4(0.0); }\n",
+        )
+        .unwrap();
+        assert!(!o.contains("origin_upper_left"));
+        assert!(!o.contains("pixel_center_integer"));
+        assert!(o.contains("in vec4 pos"));
+    }
+
+    #[test]
+    fn gl_point_size_is_declared_for_vertex_shaders() {
+        let o = translate(
+            "#version 330 core\n\
+             void main() {\n\
+                 gl_PointSize = 4.0;\n\
+                 gl_Position = vec4(0.0);\n\
+             }\n",
+        )
+        .unwrap();
+        assert!(o.contains("out float gl_PointSize;"));
+        assert!(o.contains("gl_PointSize = 4.0;"));
+    }
+
+    #[test]
+    fn gl_point_size_is_not_declared_for_fragment_shaders() {
+        let o = translate(
+            "#version 330 core\n\
+             void main() {\n\
+                 gl_FragColor = vec4(1.0);\n\
+             }\n",
+        )
+        .unwrap();
+        assert!(!o.contains("gl_PointSize"));
+    }
+
+    #[test]
+    fn derivative_shader_compiles_and_preserves_calls() {
+        let o = translate(
+            "#version 330 core\n\
+             varying vec2 texcoord;\n\
+             uniform sampler2D tex;\n\
+             void main() {\n\
+                 vec2 dx = dFdx(texcoord);\n\
+                 vec2 dy = dFdy(texcoord);\n\
+                 float w = fwidth(texcoord.x);\n\
+                 gl_FragColor = textureGrad(tex, texcoord, dx, dy);\n\
+             }\n",
+        )
+        .unwrap();
+        assert!(o.contains("dFdx(texcoord)"), "got: {o}");
+        assert!(o.contains("dFdy(texcoord)"), "got: {o}");
+        assert!(o.contains("fwidth(texcoord.x)"), "got: {o}");
+        assert!(o.contains("textureGrad(tex, texcoord, dx, dy)"), "got: {o}");
     }
 }

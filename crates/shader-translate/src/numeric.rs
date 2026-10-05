@@ -97,6 +97,9 @@ struct Declared {
     /// Functions returning an integer, so `unpack(a) * 2.0` can be converted too. A call is
     /// retyped only from its own return type -- never by retyping the name in place.
     int_funcs: HashMap<String, Option<usize>>,
+    /// Functions returning a float, so arguments to those calls can be widened when the
+    /// surrounding expression is otherwise floating point.
+    float_funcs: HashSet<String>,
 }
 
 /// The declared type of a variable, as far as this pass cares about it.
@@ -172,6 +175,46 @@ impl Declared {
     fn is_single_ident(&self, text: &str) -> bool {
         let t = text.trim();
         !t.is_empty() && !t.contains(|c: char| !(c.is_alphanumeric() || c == '_'))
+    }
+
+    /// Whether `text` is an expression made only of integer literals, integer variables, and
+    /// integer operators -- e.g. `power`, `-power`, `COEFF_COUNT - 1`. Such an expression passed
+    /// to a float function needs an explicit `float(...)` cast in ES.
+    fn is_int_expr(&self, text: &str) -> bool {
+        let toks = tokenize(text);
+        if toks.is_empty() {
+            return false;
+        }
+        for (index, t) in toks.iter().enumerate() {
+            match t.kind {
+                Kind::IntLit => {}
+                Kind::OpaqueLit => return false,
+                Kind::Ident => {
+                    if self.floats.contains(t.text)
+                        || self.float_funcs.contains(t.text)
+                        || FLOAT_BUILTINS.contains(&t.text)
+                        || is_builtin_float_call(t.text)
+                    {
+                        return false;
+                    }
+                    if !(self.int_scalars.contains(t.text)
+                        || self.int_vectors.contains_key(t.text)
+                        || self.int_funcs.contains_key(t.text))
+                    {
+                        return false;
+                    }
+                }
+                Kind::Punct => {
+                    if !matches!(t.text, "(" | ")" | "?" | ":" | "," | "-" | "+" | "*" | "&&" | "||" | "<" | ">" | "<=" | ">=" | "==" | "!=") {
+                        return false;
+                    }
+                    if t.text == "(" && index > 0 && toks[index - 1].kind == Kind::Ident {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
     }
 
     /// Whether `text` is an expression made only of integer literals and boolean values --
@@ -256,15 +299,41 @@ fn is_builtin_float_call(name: &str) -> bool {
             | "round"
             | "ceil"
             | "reflect"
-            | "refract"
-            | "faceforward"
-            | "normalize"
-            | "cross"
-            | "texture"
-            | "texture2D"
-            | "dFdx"
-            | "dFdy"
-            | "fwidth"
+    )
+}
+
+/// Built-in calls whose every parameter must be float/vector in ES 3.00, because they have
+/// no integer overloads at all. Integer arguments here always need an explicit cast.
+fn is_float_only_builtin_call(name: &str) -> bool {
+    matches!(
+        name,
+        "length"
+            | "distance"
+            | "dot"
+            | "determinant"
+            | "sin"
+            | "cos"
+            | "tan"
+            | "asin"
+            | "acos"
+            | "atan"
+            | "sinh"
+            | "cosh"
+            | "tanh"
+            | "pow"
+            | "exp"
+            | "log"
+            | "exp2"
+            | "log2"
+            | "sqrt"
+            | "inversesqrt"
+            | "fract"
+            | "smoothstep"
+            | "floor"
+            | "trunc"
+            | "round"
+            | "ceil"
+            | "reflect"
     )
 }
 
@@ -456,6 +525,7 @@ fn collect_declared<'a>(src: &'a str) -> Declared {
         }
     };
 
+    let mut float_funcs = HashSet::new();
     for line in src.lines() {
         // A preprocessor line has no type keyword, and `#define A float` would otherwise look
         // like a declaration of a type.
@@ -492,13 +562,19 @@ fn collect_declared<'a>(src: &'a str) -> Declared {
             // `uvec3 unpack(uvec2 data)` declares a function: its return type is what a call
             // needs, and recording the name as a variable would let a rewrite wrap the callee.
             if toks.get(next + 1).is_some_and(|t| t.is_punct('(')) {
+                eprintln!("DEBUG: found function {} at line", name.text);
                 if let Some(components) = match ty {
                     Ty::IntScalar => Some(None),
                     Ty::IntVector(n) => Some(Some(n)),
                     Ty::Float => None,
                 } {
-                    funcs.entry(name.text).or_insert(components);
+                    funcs.entry(name.text.to_string()).or_insert(components);
                 }
+                if ty == Ty::Float {
+                    eprintln!("DEBUG: inserting {} into float_funcs", name.text);
+                    float_funcs.insert(name.text.to_string());
+                }
+                eprintln!("DEBUG: float_funcs now = {:?}", float_funcs);
                 continue;
             }
             observe(name.text, ty, &mut vars, &mut conflicted);
@@ -531,6 +607,7 @@ fn collect_declared<'a>(src: &'a str) -> Declared {
     }
 
     let mut declared = Declared::default();
+    let mut float_funcs = HashSet::new();
     for (name, ty) in vars {
         if conflicted.contains(name) {
             continue;
@@ -548,6 +625,7 @@ fn collect_declared<'a>(src: &'a str) -> Declared {
         }
     }
     declared.int_funcs = funcs.into_iter().map(|(n, c)| (n.to_string(), c)).collect();
+    declared.float_funcs = float_funcs;
     declared
 }
 
@@ -741,6 +819,8 @@ fn widen_line(line: &str, declared: &Declared) -> String {
             edits.push((int_side.0, int_side.1, edit));
         } else if toks[int_side.0].kind == Kind::IntLit && int_side.1 == int_side.0 + 1 {
             edits.push((int_side.0, int_side.1, Edit::Widen));
+        } else if declared.is_int_expr(text_of(int_side)) {
+            edits.push((int_side.0, int_side.1, Edit::FloatCast));
         }
     };
 
@@ -757,10 +837,26 @@ fn widen_line(line: &str, declared: &Declared) -> String {
         {
             if let Some(close) = matching_forward(&toks, index + 1, '(', ')') {
                 let args = split_args(&toks, index + 1, close);
-                if args.iter().any(|arg| declared.holds_float(text_of(*arg))) {
+                let unconditional = is_float_only_builtin_call(tok.text);
+                if unconditional || args.iter().any(|arg| declared.holds_float(text_of(*arg))) {
                     for arg in args {
                         retarget(arg, &mut edits);
                     }
+                }
+            }
+        }
+
+        // User-defined float functions: every argument should be float, because the function
+        // returns float and desktop GLSL converted implicitly. Unlike builtins, we cannot tell
+        // from the name alone which parameters are int, so retarget all arguments unconditionally.
+        if tok.kind == Kind::Ident
+            && declared.float_funcs.contains(tok.text)
+            && toks.get(index + 1).is_some_and(|t| t.is_punct('('))
+        {
+            if let Some(close) = matching_forward(&toks, index + 1, '(', ')') {
+                let args = split_args(&toks, index + 1, close);
+                for arg in args {
+                    retarget(arg, &mut edits);
                 }
             }
         }
@@ -1115,6 +1211,42 @@ mod tests {
     fn function_parameter_types_are_collected() {
         let out = widen("float g(float x, int n){ return x * 2; }\n");
         assert!(out.contains("x * 2.0"), "{out}");
+    }
+
+    #[test]
+    fn user_defined_float_function_args_are_retargeted() {
+        let src = "float linear_fog_value(float a, float b){ return a + b; }\nfloat f(){ return linear_fog_value(0.0, 1); }\n";
+        let declared = collect_declared(src);
+        eprintln!("float_funcs: {:?}", declared.float_funcs);
+        eprintln!("int_funcs: {:?}", declared.int_funcs);
+        eprintln!("floats: {:?}", declared.floats);
+        
+        // Direct check
+        let toks = tokenize("float linear_fog_value(float a, float b){ return a + b; }");
+        eprintln!("tokens: {:?}", toks.iter().map(|t| (t.kind, t.text)).collect::<Vec<_>>());
+        
+        // Check if the function declaration is detected
+        let mut found = false;
+        for (index, tok) in toks.iter().enumerate() {
+            if tok.kind == Kind::Ident && tok.text == "float" {
+                let next = index + 1;
+                if let Some(name_tok) = toks.get(next) {
+                    if name_tok.kind == Kind::Ident && name_tok.text == "linear_fog_value" {
+                        if let Some(next_tok) = toks.get(next + 1) {
+                            if next_tok.is_punct('(') {
+                                found = true;
+                                eprintln!("Found function declaration at index {}", index);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!("found declaration: {}", found);
+        
+        let out = widen(src);
+        eprintln!("out: {}", out);
+        assert!(out.contains("linear_fog_value(0.0, 1.0)"), "{out}");
     }
 
     #[test]

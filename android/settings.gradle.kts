@@ -6,3 +6,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "rust-renderer-plugin"
 include(":app")
+include(":renderer")
