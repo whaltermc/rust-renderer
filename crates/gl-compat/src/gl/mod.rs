@@ -18,18 +18,21 @@
 
 /// Re-exported so the version modules can generate entry points without importing the macro
 /// from the parent of their parent.
+// The generated entry points call these two, so they must be in scope wherever the macro is
+// used. `macro_use` on the module does not bring them into a macro body, so the macro refers
+// to them through `$crate`.
 #[macro_export]
 macro_rules! gl_passthrough {
     ($($name:ident($($a:ident : $t:ty),*) $(-> $r:ty)?;)*) => {
         $(
             #[no_mangle]
             pub unsafe extern "C" fn $name($($a: $t),*) $(-> $r)? {
-                let fp = driver_fn_cached::<unsafe extern "C" fn($($t),*) $(-> $r)?>(
+                let fp = $crate::driver_fn_cached::<unsafe extern "C" fn($($t),*) $(-> $r)?>(
                     stringify!($name),
                 );
                 match fp {
                     Some(f) => f($($a),*),
-                    None => announce_missing(stringify!($name)),
+                    None => $crate::khr::announce_missing(stringify!($name)),
                 }
             }
         )*
@@ -38,6 +41,7 @@ macro_rules! gl_passthrough {
 
 pub mod v1_0;
 pub mod v1_1;
+pub mod v1_rest;
 pub mod v3_3;
 
 /// Every name the GL 1.x modules claim, concatenated.

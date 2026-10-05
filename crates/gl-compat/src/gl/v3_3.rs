@@ -740,3 +740,12 @@ pub fn resolve(name: &[u8]) -> *const c_void {
         b"glTexBufferRange"=>glTexBufferRange,
     )
 }
+
+// The GL 3.0 vector forms of glVertexAttrib. A measured pass against the GL 3.0 core list
+// showed these four were the only ones never wired up; ES 3.x implements all of them.
+crate::gl_passthrough!(
+    glVertexAttrib1fv(index: u32, v: *const f32);
+    glVertexAttrib2fv(index: u32, v: *const f32);
+    glVertexAttrib3fv(index: u32, v: *const f32);
+    glVertexAttrib4fv(index: u32, v: *const f32);
+);

@@ -599,6 +599,26 @@ have. See `third_party/README.md` for the exact commands and what remains.
 Consequently `backend::vulkan::can_render()` is still `false` and `compile_shader` still
 returns the honest *"no SPIR-V compiler is linked"*. Nothing about rendering has changed yet.
 
+### GL 1.x-4.x coverage
+
+The surface was measured against the core function lists for each version. A measured pass
+found roughly 90 entry points that were never wired up at all, concentrated in GL 1.2-1.3
+(lighting/material getters, fog coordinates, the multi-texture and transpose-matrix families)
+and GL 1.4 (secondary colour, window positioning). All of them are now implemented: **669
+entry points exported, up from 591.**
+
+The split is deliberate rather than uniform. Where ES 3.x implements a call it is forwarded --
+lighting and material getters, `glFogCoord*`, `glMultiTexCoord*`, `glSecondaryColor*`,
+`glWindowPos*`, `glPointParameter*`, the GL 3.0 vertex-attrib vector forms. Where ES has no
+equivalent it is exported as a stub that announces itself once: 1D texture entry points, pixel
+maps, rasterisation and window rectangles (all removed in ES 2.0), transpose matrices, and
+fragment-depth writing. `glSwapBuffers` is exported and reports that presentation is EGL's
+concern, not GL's.
+
+Remaining gaps are all in GL 4.x, where ES has no equivalent at all: `Vk`-era draw and
+descriptor APIs, compute, geometry and tessellation stages, and indirect draws. Those are
+tracked rather than stubbed into misleading no-ops.
+
 ### Backends are one module with two implementations
 
 `crates/backend/` holds both, as `gles` and `vulkan`. They shared the `Backend` trait and the
