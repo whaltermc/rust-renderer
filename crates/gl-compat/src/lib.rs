@@ -69,7 +69,10 @@ pub(crate) fn current_array_buffer() -> u32 {
 ///
 /// Enabled with `RENDERER_TRACE_GL=1` so the common path stays a single relaxed atomic load.
 const TRACE_LEN: usize = 16;
-static TRACE: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+/// Entries kept when tracing. A test asserting a translation needs the whole sequence, not a
+/// ring of the last few, so `RENDERER_TRACE_GL=all` keeps everything up to this cap.
+const TRACE_MAX: usize = 4096;
+static TRACE: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static TRACE_ON: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(u8::MAX);
 
 fn trace_enabled() -> bool {
@@ -77,22 +80,63 @@ fn trace_enabled() -> bool {
     if cached != u8::MAX {
         return cached != 0;
     }
-    let on = std::env::var("RENDERER_TRACE_GL").map(|v| v == "1").unwrap_or(false);
-    TRACE_ON.store(u8::from(on), Ordering::Relaxed);
-    on
+    let on = match std::env::var("RENDERER_TRACE_GL").as_deref() {
+        Ok("1") => 1,
+        Ok("all") => 2,
+        _ => 0,
+    };
+    TRACE_ON.store(on, Ordering::Relaxed);
+    on != 0
 }
 
 /// Records a forwarded GL call. Called from `forward_all!`, so it covers every pass-through.
 #[inline]
-pub(crate) fn trace_call(name: &'static str) {
-    if !trace_enabled() {
+pub(crate) fn trace_call(name: &str) {
+    let mut mode = TRACE_ON.load(Ordering::Relaxed);
+    if mode == u8::MAX {
+        trace_enabled();
+        mode = TRACE_ON.load(Ordering::Relaxed);
+    }
+    if mode == 0 {
         return;
     }
     let mut t = TRACE.lock().unwrap_or_else(|e| e.into_inner());
-    if t.len() == TRACE_LEN {
-        t.remove(0);
+    if mode == 2 {
+        if t.len() < TRACE_MAX {
+            t.push(name.to_string());
+        }
+    } else {
+        if t.len() == TRACE_LEN {
+            t.remove(0);
+        }
+        t.push(name.to_string());
     }
-    t.push(name);
+}
+
+/// Records a translation decision -- what a desktop GL call was rewritten into -- so a test can
+/// assert the rewrite rather than inferring it from pixels.
+pub(crate) fn trace_translation(what: &str) {
+    trace_call(what);
+}
+
+/// Introspection for the harness: clears the trace, reports its length, and returns entry `i`.
+#[no_mangle]
+pub extern "C" fn glcompat_trace_reset() {
+    TRACE.lock().unwrap_or_else(|e| e.into_inner()).clear();
+}
+
+#[no_mangle]
+pub extern "C" fn glcompat_trace_len() -> u32 {
+    TRACE.lock().unwrap_or_else(|e| e.into_inner()).len() as u32
+}
+
+#[no_mangle]
+pub extern "C" fn glcompat_trace_at(i: u32) -> *const u8 {
+    let t = TRACE.lock().unwrap_or_else(|e| e.into_inner());
+    match t.get(i as usize) {
+        Some(s) => s.as_ptr(),
+        None => std::ptr::null(),
+    }
 }
 
 /// Dumps the recent call history, newest last. Called when the game sees a GL error.
@@ -104,7 +148,7 @@ fn dump_trace(reason: &str) {
     if t.is_empty() {
         return;
     }
-    log(&format!("[GLTrace] {reason}; last calls: {}", t.join(" -> ")));
+    log(&format!("[GLTrace] {reason}; calls: {}", t.join(" -> ")));
 }
 
 /// Runs `f` only the first time it is called. Used for one-time diagnostics that would
@@ -1053,6 +1097,9 @@ pub unsafe extern "C" fn glTexImage2D(
     // The whole format triple has to be mapped, not just the internal format: ES requires a
     // sized depth internal format to be paired with a matching type.
     let (ifmt2, f2, ty2) = format_translate::map_upload_format(ifmt, f, ty);
+    if ifmt2 != ifmt || ty2 != ty {
+        trace_translation(&format!("texImage2D format {ifmt:#06x}/{f:#06x}/{ty:#06x} -> {ifmt2:#06x}/{f2:#06x}/{ty2:#06x}"));
+    }
     let f = f2;
     let ty = ty2;
     let conv = convert_pixel_upload(w, h, f, ty, d);

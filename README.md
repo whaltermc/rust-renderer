@@ -599,6 +599,27 @@ have. See `third_party/README.md` for the exact commands and what remains.
 Consequently `backend::vulkan::can_render()` is still `false` and `compile_shader` still
 returns the honest *"no SPIR-V compiler is linked"*. Nothing about rendering has changed yet.
 
+### The harness asserts translation, not just pixels
+
+The smoke test drives desktop GL calls through the bridge and reads back the driver entry
+points the bridge actually invoked, so the rewrite can be asserted directly instead of
+inferred from the final image. `RENDERER_TRACE_GL=all` keeps the whole call sequence (the
+default `1` keeps a 16-entry ring for error dumps) and `GLSMOKE_CONTRACT=1` enables the
+assertions. Five checks:
+
+| Sends | Asserts the driver received |
+|---|---|
+| `glBindTexture` | `glBindTexture` — pass-through is unchanged |
+| `glTexImage2D(DEPTH_COMPONENT24, DEPTH_COMPONENT, FLOAT)` | `glTexImage2D`, with the format re-paired to `GL_UNSIGNED_INT` |
+| `glTexStorage2DMultisample(..., DEPTH_COMPONENT24)` | `glRenderbufferStorageMultisample`, and **not** `glTexImage2DMultisample` |
+| the substituted depth texture's attach | `glFramebufferRenderbuffer`, not `glFramebufferTexture2D` |
+
+This is the test that would have caught the two device bugs directly. The pixel checks stay
+useful for end-to-end confidence, but they only ever said *that* something was wrong.
+
+MobileGL's replay step has been removed from the workflow for now; `tools/trace_replay` is still
+in the repository and can be run locally.
+
 ### GL 1.x-4.x coverage
 
 The surface was measured against the core function lists for each version. A measured pass

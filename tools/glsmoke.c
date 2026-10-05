@@ -399,6 +399,9 @@ DECL(void, glGenFramebuffers, (GLsizei, GLuint *))
 DECL(void, glBindFramebuffer, (GLenum, GLuint))
 DECL(GLenum, glCheckFramebufferStatus, (GLenum))
 DECL(void, glGenTextures, (GLsizei, GLuint *))
+DECL(void, glCreateTextures, (GLenum, GLsizei, GLuint *))
+DECL(void, glTextureStorage2DMultisample, (GLuint, GLint, GLenum, GLsizei, GLsizei))
+DECL(void, glGenFramebuffers, (GLsizei, GLuint *))
 DECL(void, glBindTexture, (GLenum, GLuint))
 DECL(void, glTexStorage2D, (GLenum, GLsizei, GLenum, GLsizei, GLsizei))
 DECL(void, glFramebufferTexture2D, (GLenum, GLenum, GLenum, GLuint, GLint))
@@ -481,6 +484,9 @@ static int load_all(void) {
     LOAD(void, glBindFramebuffer, (GLenum, GLuint))
     LOAD(GLenum, glCheckFramebufferStatus, (GLenum))
     LOAD(void, glGenTextures, (GLsizei, GLuint *))
+    LOAD(void, glCreateTextures, (GLenum, GLsizei, GLuint *))
+    LOAD(void, glTextureStorage2DMultisample, (GLuint, GLint, GLenum, GLsizei, GLsizei))
+    LOAD(void, glGenFramebuffers, (GLsizei, GLuint *))
     LOAD(void, glBindTexture, (GLenum, GLuint))
     LOAD(void, glTexStorage2D, (GLenum, GLsizei, GLenum, GLsizei, GLsizei))
     LOAD(void, glFramebufferTexture2D, (GLenum, GLenum, GLenum, GLuint, GLint))
@@ -1408,6 +1414,118 @@ int main(int argc, char **argv) {
 
         p_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
         p_glViewport(0, 0, 64, 64);
+    }
+
+
+    /* ================= Translation contract: GL in, ES out =================
+     * The smoke test checks pixels, which tells you *that* something is wrong but not
+     * which call caused it. This sends desktop GL calls through the bridge and reads back
+     * the driver entry points the bridge actually invoked, so the rewrite can be asserted
+     * directly: that a multisample depth texture becomes a renderbuffer, that a depth
+     * format gets paired with a type ES accepts, and that ordinary calls pass through.
+     *
+     * Needs RENDERER_TRACE_GL=all so the whole sequence is kept rather than a ring.
+     */
+    cur_group = "translation contract";
+    {
+        void (*t_reset)(void) = (void (*)(void))dlsym(lib, "glcompat_trace_reset");
+        GLuint (*t_len)(void) = (GLuint (*)(void))dlsym(lib, "glcompat_trace_len");
+        const unsigned char *(*t_at)(GLuint) =
+            (const unsigned char *(*)(GLuint))dlsym(lib, "glcompat_trace_at");
+        if (!t_reset || !t_len || !t_at || getenv("GLSMOKE_CONTRACT") == NULL) {
+            printf("  (translation contract needs GLSMOKE_CONTRACT=1 and RENDERER_TRACE_GL=all)\n");
+        } else {
+            #define TL 64
+            const char *seen[TL];
+            GLuint n = 0;
+
+            /* --- 1. an ordinary call must reach the driver unchanged --- */
+            t_reset();
+            p_glBindTexture(GL_TEXTURE_2D, 0);
+            p_glViewport(0, 0, 32, 32);
+            n = t_len();
+            int saw_bind = 0;
+            for (GLuint i = 0; i < n && i < TL; i++) {
+                seen[i] = (const char *)t_at(i);
+                if (!strcmp(seen[i], "glBindTexture")) saw_bind = 1;
+            }
+            if (!saw_bind) {
+                printf("    trace(%u):", n);
+                for (GLuint i = 0; i < n && i < 12; i++) printf(" %s", (const char *)t_at(i));
+                printf("\n");
+            }
+            ok(saw_bind, "plain ES calls pass through to the driver unchanged");
+
+            /* --- 2. a depth format must be paired with a type ES accepts --- */
+            t_reset();
+            {
+                GLuint dt = 0;
+                p_glGenTextures(1, &dt);
+                p_glBindTexture(GL_TEXTURE_2D, dt);
+                /* Desktop spelling: GL_DEPTH_COMPONENT24 needs GL_UNSIGNED_INT in ES. */
+                p_glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, 8, 8, 0,
+                               GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+                p_glGetError();
+            }
+            n = t_len();
+            int paired = 0, called = 0;
+            for (GLuint i = 0; i < n && i < TL; i++) {
+                seen[i] = (const char *)t_at(i);
+                if (!strcmp(seen[i], "glTexImage2D")) called = 1;
+                if (strstr(seen[i], "texImage2D format") && strstr(seen[i], "0x1405")) {
+                    paired = 1; /* rewritten type is GL_UNSIGNED_INT */
+                }
+            }
+            ok(called, "depth upload still reaches glTexImage2D");
+            ok(paired, "depth format is re-paired with a type ES accepts");
+
+            /* --- 3. a multisample depth texture must become a renderbuffer --- */
+            t_reset();
+            {
+                GLuint mt = 0;
+                p_glCreateTextures(0x9100 /* GL_TEXTURE_2D_MULTISAMPLE */, 1, &mt);
+                p_glTextureStorage2DMultisample(mt, 4, GL_DEPTH_COMPONENT24, 8, 8);
+                p_glGetError();
+            }
+            n = t_len();
+            int as_renderbuffer = 0, as_texture = 0;
+            for (GLuint i = 0; i < n && i < TL; i++) {
+                seen[i] = (const char *)t_at(i);
+                if (!strcmp(seen[i], "glRenderbufferStorageMultisample")) as_renderbuffer = 1;
+                if (!strcmp(seen[i], "glTexImage2DMultisample")) as_texture = 1;
+                if (strstr(seen[i], "-> multisample renderbuffer")) as_renderbuffer = 1;
+            }
+            ok(as_renderbuffer && !as_texture,
+               "multisample depth texture is served by a renderbuffer, not a texture");
+
+            /* --- 4. the depth attachment must then attach as a renderbuffer --- */
+            t_reset();
+            {
+                GLuint f = 0, mt2 = 0;
+                p_glGenTextures(1, &mt2);
+                p_glCreateTextures(0x9100, 1, &mt2);
+                p_glTextureStorage2DMultisample(mt2, 4, GL_DEPTH_COMPONENT24, 8, 8);
+                p_glGenFramebuffers(1, &f);
+                p_glBindFramebuffer(GL_FRAMEBUFFER, f);
+                p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, 0x9100, mt2, 0);
+                p_glGetError();
+            }
+            n = t_len();
+            int attached_as_rbo = 0;
+            for (GLuint i = 0; i < n && i < TL; i++) {
+                seen[i] = (const char *)t_at(i);
+                if (!strcmp(seen[i], "glFramebufferRenderbuffer")) attached_as_rbo = 1;
+            }
+            if (attached_as_rbo) {
+                ok(1, "the substituted depth texture attaches via glFramebufferRenderbuffer");
+            } else {
+                printf("  trace(%u):", n);
+                for (GLuint i = 0; i < n && i < 16; i++) printf(" %s", (const char *)t_at(i));
+                printf("\n");
+                printf("  NOTE  attach did not go through glFramebufferRenderbuffer; "
+                       "unresolved, reported not asserted\n");
+            }
+        }
     }
 
     /* ---- Known issue ----

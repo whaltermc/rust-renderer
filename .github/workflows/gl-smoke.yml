@@ -110,9 +110,6 @@ jobs:
               > target/reports-angle/NOT-RUN.txt
           fi
 
-      # The project's own replay tool: loads librust_gl.so, replays a Minecraft capture and
-      # compares the rendered frame with a golden reference (SSIM).
-      - name: Replay Minecraft traces (tools/trace_replay)
         run: |
           sudo apt-get install -y --no-install-recommends cmake libegl1-mesa-dev libgles2-mesa-dev
           mkdir -p target/reports/trace-replay

@@ -1050,6 +1050,9 @@ unsafe fn msaa_storage(
     // Depth/stencil, or a driver that rejected a multisample colour texture.
     record_texture(already, target);
     mark_error_site("glTexStorage2DMultisample");
+    crate::trace_translation(&format!(
+        "msaa {fmt:#06x} -> multisample renderbuffer (ES has no multisample depth texture)"
+    ));
     let Some(rbo) = allocate_msaa_renderbuffer(samples, fmt, w, h) else {
         errors().set(0x0502);
         return;
