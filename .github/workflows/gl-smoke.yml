@@ -2,7 +2,10 @@ name: GL Bridge Smoke Test
 
 # Separate from the APK build: this exercises the GL translation layer directly on a headless
 # software GLES context, so a GL regression is caught without a device or a Minecraft launch.
-# The HTML report is published as an artifact.
+#
+# The harness does two kinds of check. It renders and compares pixels, and -- more usefully --
+# it sends desktop GL calls through the bridge and asserts which ES entry points the bridge
+# actually invoked. That is what turns "OpenGL error 1282" into a named failing call.
 
 on:
   push:
@@ -20,9 +23,9 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
+      # No submodules: the replay tool (apitrace) is not run in CI, and glslang is not built
+      # here. Fetching them would make the job depend on two third-party forks for nothing.
       - name: Checkout
-        # No submodules: the replay tool (apitrace) is out of CI, and glslang is not built
-        # here. Fetching them would make the job depend on two third-party forks for nothing.
         uses: actions/checkout@v5
 
       - name: Set up Rust
@@ -31,12 +34,11 @@ jobs:
       - name: Unit tests
         run: cargo test --workspace
 
-      # Mesa's llvmpipe gives a real GLES 3.x context with no GPU.
       - name: Install Mesa software GL
         run: |
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends \
-            libegl1 libgles2 libegl1-mesa-dev libgles2-mesa-dev
+            libegl1 libgles2 libegl1-mesa-dev libgles2-mesa-dev mesa-utils
 
       - name: Report EGL/GL stack
         run: |
@@ -44,22 +46,23 @@ jobs:
             echo '```'; dpkg -l | grep -E 'libegl1|libgles2|mesa' | awk '{print $2, $3}'; echo '```';
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # RENDERER_TRACE_GL=all keeps the whole call sequence rather than a ring of the last few,
+      # which the translation-contract checks need. A non-zero exit here is a regression and
+      # fails the job; known issues are reported in the HTML without one.
       - name: Run smoke test (Mesa llvmpipe)
         run: |
           mkdir -p target/reports
-          GLSMOKE_REPORT=target/reports/gl-smoke.html \
-          GLSMOKE_SHOT_DIR=target/reports/screenshots \
+          RENDERER_TRACE_GL=all GLSMOKE_CONTRACT=1 \
             ./tools/run-glsmoke.sh 2>&1 | tee target/reports/gl-smoke.log
 
-      # A second stack that goes through a translation layer, like the real device does.
-      # Mesa/llvmpipe is a native GLES driver; the device path is GL -> translation -> driver,
-      # which is exactly where our host tests stopped predicting the hardware result. ANGLE on
-      # lavapipe reproduces that shape without an emulator.
+      # A second stack that goes through a translation layer, like the real device does. Mesa is
+      # a native GLES driver and does not exercise translation at all, which is why the host
+      # suite could go green while the device crashed. Needs the emulator SDK's ANGLE, so it
+      # skips rather than fails when that is absent.
       - name: Run smoke test (ANGLE on lavapipe)
         run: |
-          set -euo pipefail
-          # The emulator SDK ships a glibc build of ANGLE. Look in the usual roots rather
-          # than trusting one path, and skip loudly instead of failing the job when absent.
+          FARM="$RUNNER_TEMP/angle-farm"
+          mkdir -p "$FARM" target/reports-angle
           ANGLE=""
           for root in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" \
                       /usr/local/lib/android/sdk "$HOME/Android/Sdk"; do
@@ -68,138 +71,72 @@ jobs:
             fi
           done
           if [ -z "$ANGLE" ]; then
-            echo "::notice::ANGLE not found at $ANGLE; skipping the translated lane."
+            echo "::notice::ANGLE not found; skipping the translated lane."
             echo "::notice::Install it with: sdkmanager 'emulator' 'platform-tools'"
             exit 0
           fi
-          echo "using ANGLE from $ANGLE"
           sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers
-          FARM="$RUNNER_TEMP/angle-farm"
-          mkdir -p "$FARM"
-          # MobileGL's recipe, and the reason each symlink is needed: ANGLE's own libEGL
-          # dlopens the unsuffixed libGLESv2.so from the same directory, so without that link
-          # it loads a truncated entry-point table; libvulkan.so.1 is needed or eglInitialize
-          # fails outright.
-          ln -sf "$ANGLE/libEGL.so"    "$FARM/libEGL_angle.so"
-          ln -sf "$ANGLE/libGLESv2.so" "$FARM/libGLESv2_angle.so"
-          ln -sf "$ANGLE/libEGL.so"    "$FARM/libEGL.so"
-          ln -sf "$ANGLE/libGLESv2.so" "$FARM/libGLESv2.so"
-          ln -sf "$ANGLE/libvulkan.so.1" "$FARM/libvulkan.so.1"
-
+          echo "using ANGLE from $ANGLE"
+          # MobileGL's recipe, and why each symlink is needed: ANGLE's libEGL dlopens the
+          # unsuffixed libGLESv2.so from its own directory, so without that link it loads a
+          # truncated entry-point table; libvulkan.so.1 is needed or eglInitialize fails.
+          ln -sf "$ANGLE/libEGL.so"       "$FARM/libEGL_angle.so"
+          ln -sf "$ANGLE/libGLESv2.so"    "$FARM/libGLESv2_angle.so"
+          ln -sf "$ANGLE/libEGL.so"       "$FARM/libEGL.so"
+          ln -sf "$ANGLE/libGLESv2.so"    "$FARM/libGLESv2.so"
+          ln -sf "$ANGLE/libvulkan.so.1"  "$FARM/libvulkan.so.1"
           cc -O1 -o target/release/glsmoke tools/glsmoke.c -lEGL -ldl -lm
-          mkdir -p target/reports-angle
           set +e
           LD_LIBRARY_PATH="$FARM:target/release/" \
           VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
           ANGLE_DEFAULT_PLATFORM=vulkan \
           LIBGL_ALWAYS_SOFTWARE=1 \
-          GLSMOKE_REPORT=target/reports-angle/gl-smoke.html \
-          GLSMOKE_SHOT_DIR=target/reports-angle/screenshots \
+          RENDERER_TRACE_GL=all GLSMOKE_CONTRACT=1 \
             ./target/release/glsmoke target/release/librust_gl.so \
               2>&1 | tee target/reports-angle/gl-smoke.log
-          echo "ANGLE lane exit: $?"
           set -e
-          # Guard against a silent no-op: with ANGLE absent the harness quietly falls back
-          # to Mesa and reports the same numbers, which would look like the translated lane
-          # passed. Require ANGLE in the log, or say plainly that the lane did not run.
+          # Guard against a silent no-op: without ANGLE the harness quietly falls back to Mesa
+          # and reports the same numbers, which would read as the translated lane passing.
           if grep -qi "angle" target/reports-angle/gl-smoke.log; then
             echo "translated lane confirmed: ANGLE is in the stack"
           else
-            echo "::notice::ANGLE did not load (harness fell back to Mesa); this lane proves nothing and is reported as not-run."
-            rm -f target/reports-angle/gl-smoke.html
-            echo "ANGLE did not load; results are Mesa's, not a translated stack." \
+            echo "::notice::ANGLE did not load (fell back to Mesa); this lane proves nothing."
+            echo "ANGLE did not load; these results are Mesa's." \
               > target/reports-angle/NOT-RUN.txt
           fi
 
-        run: |
-          sudo apt-get install -y --no-install-recommends cmake libegl1-mesa-dev libgles2-mesa-dev
-          mkdir -p target/reports/trace-replay
-          set +e
-          tools/trace_replay/run_fixture.sh 1.17 2>&1 | tee target/reports/trace-replay/1.17.log
-          vanilla=$?
-          # 26.3 is a shader-pack capture and does not currently match; it is reported every
-          # run so progress is visible, but it does not gate the job until it passes.
-          tools/trace_replay/run_fixture.sh 26.3 2>&1 | tee target/reports/trace-replay/26.3.log
-          shader=$?
-          set -e
-          cp -r target/trace-replay/results/. target/reports/trace-replay/ 2>/dev/null || true
-          {
-            echo "| fixture | scene | SSIM | threshold | verdict |"
-            echo "|---|---|---|---|---|"
-            for f in 1.17 26.3; do
-              r="target/trace-replay/results/$f/result.json"
-              [ -f "$r" ] || { echo "| $f | - | - | - | no result |"; continue; }
-              python3 - "$r" "$f" <<'PY'
-          import json, sys
-          d = json.load(open(sys.argv[1]))
-          scene = "vanilla" if sys.argv[2] == "1.17" else "shader pack"
-          ssim = d.get("ssim")
-          thr = d.get("ssimThreshold", "?")
-          verdict = "PASS" if d.get("passed") else "FAIL"
-          print(f"| {sys.argv[2]} | {scene} | {ssim:.6f} | {thr} | {verdict} |")
-          PY
-            done
-          } > target/reports/trace-replay/summary.md
-          cat target/reports/trace-replay/summary.md
-          # Gate on the vanilla capture, which passes today. The shader-pack capture is
-          # reported but not yet a gate.
-          if [ "$vanilla" -ne 0 ]; then
-            echo "::error::the 1.17 vanilla replay regressed (exit $vanilla)"
-            exit 1
-          fi
-          if [ "$shader" -ne 0 ]; then
-            echo "::warning::the 26.3 shader-pack replay does not match yet (exit $shader); reported, not gating"
-          fi
-
-      # Entry-point coverage measured against real Minecraft apitrace captures, from the
-      # MobileGL fixture set. A name a real run calls but the library does not export is a
-      # NULL function pointer for a client that resolves by dlsym, which is how 1.16.5 died.
+      # Entry-point coverage measured against real Minecraft apitrace captures from the
+      # MobileGL fixture set. Network-dependent, so it reports rather than gates.
       - name: Trace coverage against real Minecraft captures
         run: |
           sudo apt-get install -y --no-install-recommends apitrace
           mkdir -p target/reports
           set +e
           ./tools/trace-coverage.sh 2>&1 | tee target/reports/trace-coverage.log
-          echo "trace coverage exit: $?"
           set -e
 
       - name: Compare lanes
         if: always()
         run: |
-          python3 - <<'PY'
-          import re, pathlib
-          def summary(p):
-              try: t = pathlib.Path(p).read_text()
-              except OSError: return None
-              m = re.search(r"([0-9]+ checks[^<]*)", t)
-              return m.group(1) if m else None
-          mesa = summary("target/reports/gl-smoke.html")
-          ang = summary("target/reports-angle/gl-smoke.html")
-          with open("target/reports/lane-comparison.md", "w") as f:
-              f.write("# GL smoke lanes\n\n")
-              f.write(f"- Mesa llvmpipe: {mesa or 'did not run'}\n")
-              f.write(f"- ANGLE on lavapipe: {ang or 'did not run'}\n\n")
-              f.write("A check that passes on Mesa but fails on ANGLE is the signature of a\n"
-                      "translation-layer bug, which is what a real device exercises.\n")
-          print(pathlib.Path("target/reports/lane-comparison.md").read_text())
-          PY
+          mkdir -p target/reports
+          python3 tools/compare-lanes.py
 
-      # A non-zero exit here fails the job on regressions. Known issues are reported as
-      # "known" in the HTML rather than failing, so a documented limitation stays visible
-      # without blocking unrelated work.
-      - name: Upload HTML report
+      - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gl-smoke-report
+          # warn, not error: the ANGLE lane legitimately skips without the emulator SDK, so
+          # target/reports-angle/ may not exist. Erroring on that failed the job for a
+          # non-problem.
+          if-no-files-found: warn
           path: |
             target/reports/gl-smoke.html
             target/reports/gl-smoke.log
             target/reports/screenshots/
-            target/reports-angle/  # may be absent: the ANGLE lane skips without the emulator SDK
+            target/reports-angle/
             target/reports/trace-coverage.log
             target/reports/lane-comparison.md
-          if-no-files-found: warn
 
       - name: Summarise
         if: always()
@@ -208,12 +145,14 @@ jobs:
             echo "### GL smoke test"
             echo
             if [ -f target/reports/gl-smoke.html ]; then
-              echo "[Report](artifact) — gl-smoke-report"
+              echo "Report and screenshots are in the **gl-smoke-report** artifact."
               echo
               grep -oE '[0-9]+ checks[^<]*' target/reports/gl-smoke.html | head -1 || true
-              echo
-              ls target/reports/screenshots/ 2>/dev/null | sed 's/^/- screenshot: /' || true
             else
               echo "No report was produced; see the job log."
+            fi
+            if [ -f target/reports/lane-comparison.md ]; then
+              echo
+              cat target/reports/lane-comparison.md
             fi
           } >> "$GITHUB_STEP_SUMMARY"

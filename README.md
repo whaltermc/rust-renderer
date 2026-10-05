@@ -626,6 +626,13 @@ The harness walks that table every run and reports **52 entry points: 0 unreacha
 *accepted by the driver* despite having no formal ES equivalent -- the table is deliberately
 conservative, and forwarding those is correct.
 
+### CI
+
+`.github/workflows/gl-smoke.yml` runs the harness on two stacks: Mesa llvmpipe, and ANGLE on
+lavapipe (GL through a translation layer, the shape a device actually has). It is validated
+with `actionlint`, because GitHub rejects a workflow on a malformed step with no jobs at all —
+a failure mode that looks identical to "the tests failed" from the run list alone.
+
 ### Exported names now resolve to their implementation
 
 A measured audit of `resolve_proc` found **127 exported symbols being served as the shared
