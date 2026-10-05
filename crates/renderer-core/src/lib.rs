@@ -45,6 +45,12 @@ impl BackendKind {
 pub struct Config {
     pub backend: BackendKind,
     pub debug: bool,
+    /// EGL display id/env hint. Empty means default/primary display.
+    pub display: String,
+    /// ANGLE-style backend hint (`vulkan`, `opengl`, `swiftshader`, ...).
+    pub angle_backend: String,
+    /// ANGLE-style renderer hint (`directx11`, `directx12`, `gl`, `vulkan`, ...).
+    pub angle_renderer: String,
 }
 
 impl Config {
@@ -54,9 +60,15 @@ impl Config {
         let select = std::env::var("RENDERER_BACKEND").ok();
         let base = std::env::var("RENDERER_BACKEND_SELECT").ok();
         let debug = std::env::var("RENDERER_DEBUG").map(|v| v == "1").unwrap_or(false);
+        let display = std::env::var("RENDERER_DISPLAY").unwrap_or_default();
+        let angle_backend = std::env::var("RENDERER_ANGLE_BACKEND").unwrap_or_default();
+        let angle_renderer = std::env::var("RENDERER_ANGLE_RENDERER").unwrap_or_default();
         Self {
             backend: select_backend(select.as_deref(), base.as_deref()),
             debug,
+            display,
+            angle_backend,
+            angle_renderer,
         }
     }
 }

@@ -23,6 +23,7 @@ mod named_objects;
 mod fixed_func;
 mod fixed_draw;
 mod immediate;
+mod overlay;
 
 use renderer_core::{Backend, BackendKind, Config, GlErrorState};
 use std::ffi::{c_char, c_void, CStr, CString};
@@ -234,6 +235,18 @@ fn backend() -> Option<&'static dyn Backend> {
         "[Renderer] Initializing, requested backend: {}",
         cfg.backend.as_str()
     ));
+    if !cfg.display.is_empty() {
+        log(&format!("[Renderer] Display: {}", cfg.display));
+    }
+    if !cfg.angle_backend.is_empty() {
+        log(&format!("[Renderer] ANGLE backend: {}", cfg.angle_backend));
+    }
+    if !cfg.angle_renderer.is_empty() {
+        log(&format!("[Renderer] ANGLE renderer: {}", cfg.angle_renderer));
+    }
+    if cfg.debug {
+        log("[Renderer] Debug overlay enabled");
+    }
 
     let gles = || match backend::GlesBackend::new() {
         Ok(b) => Some(Box::new(b) as Box<dyn Backend>),
@@ -323,6 +336,8 @@ fn backend() -> Option<&'static dyn Backend> {
                 c.es_major, c.es_minor, c.extensions.len(), c.max_texture_size, c.max_draw_buffers
             ));
             let _ = BACKEND.set(b);
+            let cfg = Config::from_env();
+            overlay::set_enabled(cfg.debug);
             BACKEND.get().map(|b| b.as_ref())
         }
         None => {
@@ -2586,7 +2601,6 @@ egl_export!(eglGetCurrentContext() -> *mut c_void);
 egl_export!(eglGetCurrentDisplay() -> *mut c_void);
 egl_export!(eglGetCurrentSurface(readdraw: i32) -> *mut c_void);
 egl_export!(eglQuerySurface(dpy: *mut c_void, surface: *mut c_void, attr: i32, value: *mut i32) -> u32);
-egl_export!(eglSwapBuffers(dpy: *mut c_void, surface: *mut c_void) -> u32);
 egl_export!(eglSwapInterval(dpy: *mut c_void, interval: i32) -> u32);
 egl_export!(eglQueryString(dpy: *mut c_void, name: i32) -> *const u8);
 egl_export!(eglGetError() -> u32);
@@ -2599,6 +2613,23 @@ egl_export!(eglWaitGL() -> u32);
 egl_export!(eglWaitNative(engine: i32) -> u32);
 egl_export!(eglQueryContext(dpy: *mut c_void, ctx: *mut c_void, attr: i32, value: *mut i32) -> u32);
 egl_export!(eglQueryAPI() -> u32);
+
+/// Custom `eglSwapBuffers` that draws the debug overlay before presenting.
+#[no_mangle]
+pub unsafe extern "C" fn eglSwapBuffers(dpy: *mut c_void, surface: *mut c_void) -> u32 {
+    // Draw overlay if enabled.
+    if overlay::is_enabled() {
+        let cfg = renderer_core::Config::from_env();
+        let be = crate::backend().map(|b| b as &dyn renderer_core::Backend);
+        overlay::draw(&cfg, be);
+    }
+    // Forward to system EGL.
+    type F = unsafe extern "C" fn(*mut c_void, *mut c_void) -> u32;
+    match egl_sym::<F>(b"eglSwapBuffers\0") {
+        Some(f) => f(dpy, surface),
+        None => 0x3001, // EGL_NOT_INITIALIZED
+    }
+}
 
 /// eglGetProcAddress: our GL symbols first, then system EGL.
 #[no_mangle]

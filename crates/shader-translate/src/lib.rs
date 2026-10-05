@@ -355,18 +355,25 @@ fn collect_potential_macro_names(src: &str) -> HashSet<String> {
         {
             if let Some((left, _)) = trimmed.split_once('=') {
                 let mut declaration = left.split_whitespace();
-                if let (Some(ty), Some(name)) = (declaration.next(), declaration.next()) {
-                    if declaration.next().is_none()
-                        && VALUE_TYPES.contains(&ty)
-                        && name.bytes().enumerate().all(|(index, byte)| {
-                            byte == b'_'
-                                || byte.is_ascii_alphabetic()
-                                || index > 0 && byte.is_ascii_digit()
-                        })
-                    {
-                        names.insert(name.to_string());
+                let mut ty_opt = None;
+                for tok in declaration.by_ref() {
+                    if VALUE_TYPES.contains(&tok) {
+                        ty_opt = Some(tok);
+                        break;
                     }
                 }
+                let ty = match ty_opt { Some(t) => t, None => continue };
+                let name = match declaration.next() { Some(n) => n, None => continue };
+                if declaration.next().is_some()
+                    || !name.bytes().enumerate().all(|(index, byte)| {
+                        byte == b'_'
+                            || byte.is_ascii_alphanumeric()
+                            || index > 0 && byte.is_ascii_digit()
+                    })
+                {
+                    continue;
+                }
+                names.insert(name.to_string());
             }
         }
         if !trimmed.starts_with("//") {
@@ -516,49 +523,54 @@ fn macroize_nonconstant_globals_with_params(
         "float", "double", "int", "uint", "bool", "vec2", "vec3", "vec4", "ivec2",
         "ivec3", "ivec4", "uvec2", "uvec3", "uvec4", "mat2", "mat3", "mat4",
     ];
-    let lines: Vec<&str> = src.lines().collect();
-    let mut out = String::with_capacity(src.len());
-    let mut brace_depth = 0isize;
-    for (line_number, line) in lines.iter().enumerate() {
-        let trimmed = line.trim_start();
-        let indent = &line[..line.len() - trimmed.len()];
-        let replacement = if brace_depth == 0
-            && !trimmed.starts_with("const ")
-            && !trimmed.starts_with("//")
-            && !trimmed.starts_with('#')
-        {
-            trimmed.split_once('=').and_then(|(left, right)| {
-                let mut declaration = left.split_whitespace();
-                let ty = declaration.next()?;
-                let name = declaration.next()?;
-                if declaration.next().is_some()
-                    || !VALUE_TYPES.contains(&ty)
-                    || param_names.contains(name)
-                    || !name.bytes().enumerate().all(|(index, byte)| {
-                        byte == b'_'
-                            || byte.is_ascii_alphabetic()
-                            || index > 0 && byte.is_ascii_digit()
-                    })
-                {
-                    return None;
-                }
-                let expression = right.trim().strip_suffix(';')?.trim();
-                if expression.is_empty() || has_later_assignment(&lines, line_number, name) {
-                    return None;
-                }
-                Some(format!("{indent}#define {name} ({expression})"))
-            })
-        } else {
-            None
-        };
-        out.push_str(replacement.as_deref().unwrap_or(line));
-        out.push('\n');
-        if !trimmed.starts_with("//") {
-            brace_depth += line.chars().filter(|&ch| ch == '{').count() as isize;
-            brace_depth -= line.chars().filter(|&ch| ch == '}').count() as isize;
+        let lines: Vec<&str> = src.lines().collect();
+        let mut out = String::with_capacity(src.len());
+        let mut brace_depth = 0isize;
+        for (line_number, line) in lines.iter().enumerate() {
+            let trimmed = line.trim_start();
+            let indent = &line[..line.len() - trimmed.len()];
+            let replacement = if brace_depth == 0
+                && !trimmed.starts_with("const ")
+                && !trimmed.starts_with("//")
+                && !trimmed.starts_with('#')
+            {
+                trimmed.split_once('=').and_then(|(left, right)| {
+                    let mut declaration = left.split_whitespace();
+                    let mut ty_opt = None;
+                    for tok in declaration.by_ref() {
+                        if VALUE_TYPES.contains(&tok) {
+                            ty_opt = Some(tok);
+                            break;
+                        }
+                    }
+                    let ty = ty_opt?;
+                    let name = declaration.next()?;
+                    if declaration.next().is_some()
+                        || !name.bytes().enumerate().all(|(index, byte)| {
+                            byte == b'_'
+                                || byte.is_ascii_alphabetic()
+                                || index > 0 && byte.is_ascii_digit()
+                        })
+                    {
+                        return None;
+                    }
+                    let expression = right.trim().strip_suffix(';')?.trim();
+                    if expression.is_empty() || has_later_assignment(&lines, line_number, name) {
+                        return None;
+                    }
+                    Some(format!("{indent}#define {name} ({expression})"))
+                })
+            } else {
+                None
+            };
+            out.push_str(replacement.as_deref().unwrap_or(line));
+            out.push('\n');
+            if !trimmed.starts_with("//") {
+                brace_depth += line.chars().filter(|&ch| ch == '{').count() as isize;
+                brace_depth -= line.chars().filter(|&ch| ch == '}').count() as isize;
+            }
         }
-    }
-    out
+        out
 }
 
 

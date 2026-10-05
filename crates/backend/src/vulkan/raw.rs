@@ -21,6 +21,30 @@ pub const VK_PHYSICAL_DEVICE_TYPE_CPU: u32 = 4;
 
 pub const VK_QUEUE_GRAPHICS_BIT: u32 = 0x1;
 
+pub const VK_ATTACHMENT_LOAD_OP_CLEAR: u32 = 0;
+pub const VK_ATTACHMENT_STORE_OP_STORE: u32 = 0;
+pub const VK_IMAGE_LAYOUT_UNDEFINED: u32 = 0;
+pub const VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL: u32 = 2;
+pub const VK_IMAGE_LAYOUT_PRESENT_SRC_KHR: u32 = 1000001002;
+pub const VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT: u32 = 0x10;
+pub const VK_SHADER_STAGE_VERTEX_BIT: u32 = 0x1;
+pub const VK_SHADER_STAGE_FRAGMENT_BIT: u32 = 0x10;
+pub const VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST: u32 = 3;
+pub const VK_CULL_MODE_BACK_BIT: u32 = 0x2;
+pub const VK_FRONT_FACE_CLOCKWISE: u32 = 0;
+pub const VK_SAMPLE_COUNT_1_BIT: u32 = 1;
+pub const VK_LOGIC_OP_COPY: u32 = 0x100;
+pub const VK_COLOR_COMPONENT_R_BIT: u32 = 0x1;
+pub const VK_COLOR_COMPONENT_G_BIT: u32 = 0x2;
+pub const VK_COLOR_COMPONENT_B_BIT: u32 = 0x4;
+pub const VK_COLOR_COMPONENT_A_BIT: u32 = 0x8;
+pub const VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT: u32 = 0x800;
+pub const VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT: u32 = 0x100;
+pub const VK_COMMAND_BUFFER_LEVEL_PRIMARY: u32 = 0;
+pub const VK_DYNAMIC_STATE_VIEWPORT: u32 = 100;
+pub const VK_DYNAMIC_STATE_SCISSOR: u32 = 101;
+pub const VK_SUBPASS_EXTERNAL: u32 = 0xFFFFFFFF;
+
 pub const VENDOR_NAMES: &[(u32, &str)] = &[
     (0x1002, "AMD"),
     (0x1010, "ImgTec"),
@@ -131,8 +155,348 @@ pub struct VkDeviceCreateInfo {
     pub p_enabled_features: *const c_void,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkAttachmentDescription {
+    pub flags: u32,
+    pub format: u32,
+    pub samples: u32,
+    pub load_op: u32,
+    pub store_op: u32,
+    pub stencil_load_op: u32,
+    pub stencil_store_op: u32,
+    pub initial_layout: u32,
+    pub final_layout: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkAttachmentReference {
+    pub attachment: u32,
+    pub layout: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkSubpassDescription {
+    pub flags: u32,
+    pub pipeline_bind_point: u32,
+    pub input_attachment_count: u32,
+    pub p_input_attachments: *const VkAttachmentReference,
+    pub color_attachment_count: u32,
+    pub p_color_attachments: *const VkAttachmentReference,
+    pub p_resolve_attachments: *const VkAttachmentReference,
+    pub depth_stencil_attachment: *const VkAttachmentReference,
+    pub preserve_attachment_count: u32,
+    pub p_preserve_attachments: *const u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkSubpassDependency {
+    pub src_subpass: u32,
+    pub dst_subpass: u32,
+    pub src_stage_mask: u32,
+    pub dst_stage_mask: u32,
+    pub src_access_mask: u32,
+    pub dst_access_mask: u32,
+    pub dependency_flags: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkRenderPassCreateInfo {
+    pub s_type: u32,
+    pub p_next: *const c_void,
+    pub flags: u32,
+    pub attachment_count: u32,
+    pub p_attachments: *const VkAttachmentDescription,
+    pub subpass_count: u32,
+    pub p_subpasses: *const VkSubpassDescription,
+    pub dependency_count: u32,
+    pub p_dependencies: *const VkSubpassDependency,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkPipelineShaderStageCreateInfo {
+    pub s_type: u32,
+    pub p_next: *const c_void,
+    pub flags: u32,
+    pub stage: u32,
+    pub module: *mut c_void,
+    pub p_name: *const c_char,
+    pub p_specialization_info: *const c_void,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkPipelineVertexInputStateCreateInfo {
+    pub s_type: u32,
+    pub p_next: *const c_void,
+    pub flags: u32,
+    pub vertex_attribute_description_count: u32,
+    pub p_vertex_attribute_descriptions: *const c_void,
+    pub vertex_binding_description_count: u32,
+    pub p_vertex_binding_descriptions: *const c_void,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkPipelineInputAssemblyStateCreateInfo {
+    pub s_type: u32,
+    pub p_next: *const c_void,
+    pub flags: u32,
+    pub topology: u32,
+    pub primitive_restart_enable: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkPipelineViewportStateCreateInfo {
+    pub s_type: u32,
+    pub p_next: *const c_void,
+    pub flags: u32,
+    pub viewport_count: u32,
+    pub p_viewports: *const c_void,
+    pub scissor_count: u32,
+    pub p_scissors: *const c_void,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkPipelineRasterizationStateCreateInfo {
+    pub s_type: u32,
+    pub p_next: *const c_void,
+    pub flags: u32,
+    pub depth_clamp_enable: u32,
+    pub rasterizer_discard_enable: u32,
+    pub polygon_mode: u32,
+    pub cull_mode: u32,
+    pub front_face: u32,
+    pub depth_bias_enable: u32,
+    pub depth_bias_constant_factor: f32,
+    pub depth_bias_clamp: f32,
+    pub depth_bias_slope_factor: f32,
+    pub line_width: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkPipelineMultisampleStateCreateInfo {
+    pub s_type: u32,
+    pub p_next: *const c_void,
+    pub flags: u32,
+    pub rasterization_samples: u32,
+    pub sample_shading_enable: u32,
+    pub min_sample_shading: f32,
+    pub p_sample_mask: *const u32,
+    pub alpha_to_coverage_enable: u32,
+    pub alpha_to_one_enable: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkPipelineColorBlendAttachmentState {
+    pub blend_enable: u32,
+    pub src_color_blend_factor: u32,
+    pub dst_color_blend_factor: u32,
+    pub color_blend_op: u32,
+    pub src_alpha_blend_factor: u32,
+    pub dst_alpha_blend_factor: u32,
+    pub alpha_blend_op: u32,
+    pub color_write_mask: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkPipelineColorBlendStateCreateInfo {
+    pub s_type: u32,
+    pub p_next: *const c_void,
+    pub flags: u32,
+    pub logic_op_enable: u32,
+    pub logic_op: u32,
+    pub attachment_count: u32,
+    pub p_attachments: *const VkPipelineColorBlendAttachmentState,
+    pub blend_constants: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkGraphicsPipelineCreateInfo {
+    pub s_type: u32,
+    pub p_next: *const c_void,
+    pub flags: u32,
+    pub stage_count: u32,
+    pub p_stages: *const VkPipelineShaderStageCreateInfo,
+    pub p_vertex_input_state: *const VkPipelineVertexInputStateCreateInfo,
+    pub p_input_assembly_state: *const VkPipelineInputAssemblyStateCreateInfo,
+    pub p_tessellation_state: *const c_void,
+    pub p_viewport_state: *const VkPipelineViewportStateCreateInfo,
+    pub p_rasterization_state: *const VkPipelineRasterizationStateCreateInfo,
+    pub p_multisample_state: *const VkPipelineMultisampleStateCreateInfo,
+    pub p_depth_stencil_state: *const c_void,
+    pub p_color_blend_state: *const VkPipelineColorBlendStateCreateInfo,
+    pub p_dynamic_state: *const c_void,
+    pub layout: *mut c_void,
+    pub render_pass: *mut c_void,
+    pub subpass: u32,
+    pub base_pipeline_handle: *mut c_void,
+    pub base_pipeline_index: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkFramebufferCreateInfo {
+    pub s_type: u32,
+    pub p_next: *const c_void,
+    pub flags: u32,
+    pub render_pass: *mut c_void,
+    pub attachment_count: u32,
+    pub p_attachments: *const *mut c_void,
+    pub width: u32,
+    pub height: u32,
+    pub layers: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkCommandPoolCreateInfo {
+    pub s_type: u32,
+    pub p_next: *const c_void,
+    pub flags: u32,
+    pub queue_family_index: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkCommandBufferAllocateInfo {
+    pub s_type: u32,
+    pub p_next: *const c_void,
+    pub command_pool: *mut c_void,
+    pub level: u32,
+    pub command_buffer_count: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkCommandBufferBeginInfo {
+    pub s_type: u32,
+    pub p_next: *const c_void,
+    pub flags: u32,
+    pub p_inheritance_info: *const c_void,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkClearValue {
+    pub color: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkRenderPassBeginInfo {
+    pub s_type: u32,
+    pub p_next: *const c_void,
+    pub render_pass: *mut c_void,
+    pub framebuffer: *mut c_void,
+    pub render_area: [u32; 4],
+    pub clear_value_count: u32,
+    pub p_clear_values: *const VkClearValue,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkSubmitInfo {
+    pub s_type: u32,
+    pub p_next: *const c_void,
+    pub wait_semaphore_count: u32,
+    pub p_wait_semaphores: *const *mut c_void,
+    pub p_wait_dst_stage_mask: *const u32,
+    pub command_buffer_count: u32,
+    pub p_command_buffers: *const *mut c_void,
+    pub signal_semaphore_count: u32,
+    pub p_signal_semaphores: *const *mut c_void,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkPresentInfoKHR {
+    pub s_type: u32,
+    pub p_next: *const c_void,
+    pub wait_semaphore_count: u32,
+    pub p_wait_semaphores: *const *mut c_void,
+    pub swapchain_count: u32,
+    pub p_swapchains: *const *mut c_void,
+    pub p_image_indices: *const u32,
+    pub p_results: *mut i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkSwapchainCreateInfoKHR {
+    pub s_type: u32,
+    pub p_next: *const c_void,
+    pub flags: u32,
+    pub surface: *mut c_void,
+    pub min_image_count: u32,
+    pub image_format: u32,
+    pub image_color_space: u32,
+    pub image_extent: [u32; 2],
+    pub image_array_layers: u32,
+    pub image_usage: u32,
+    pub image_sharing_mode: u32,
+    pub queue_family_index_count: u32,
+    pub p_queue_family_indices: *const u32,
+    pub pre_transform: u32,
+    pub composite_alpha: u32,
+    pub present_mode: u32,
+    pub clipped: u32,
+    pub old_swapchain: *mut c_void,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkShaderModuleCreateInfo {
+    pub s_type: u32,
+    pub p_next: *const c_void,
+    pub flags: u32,
+    pub code_size: usize,
+    pub p_code: *const u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VkPipelineLayoutCreateInfo {
+    pub s_type: u32,
+    pub p_next: *const c_void,
+    pub flags: u32,
+    pub set_layout_count: u32,
+    pub p_set_layouts: *const *mut c_void,
+    pub push_constant_range_count: u32,
+    pub p_push_constant_ranges: *const c_void,
+}
+
 pub const VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO: u32 = 9;
 pub const VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO: u32 = 10;
+
+pub const VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO: u32 = 46;
+pub const VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO: u32 = 51;
+pub const VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO: u32 = 35;
+pub const VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO: u32 = 21;
+pub const VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO: u32 = 22;
+pub const VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO: u32 = 23;
+pub const VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO: u32 = 25;
+pub const VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO: u32 = 28;
+pub const VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO: u32 = 29;
+pub const VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO: u32 = 30;
+pub const VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO: u32 = 32;
+pub const VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO: u32 = 40;
+pub const VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO: u32 = 33;
+pub const VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO: u32 = 34;
+pub const VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO: u32 = 47;
+pub const VK_STRUCTURE_TYPE_SUBMIT_INFO: u32 = 36;
+pub const VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO: u32 = 33;
 
 pub type PFN = unsafe extern "C" fn();
 
@@ -159,6 +523,102 @@ pub type PfnCreateDevice = unsafe extern "C" fn(
 pub type PfnDestroyDevice = unsafe extern "C" fn(*mut c_void, *const c_void);
 pub type PfnGetDeviceQueue =
     unsafe extern "C" fn(*mut c_void, u32, u32, *mut *mut c_void);
+
+pub type PfnCreateSwapchainKHR = unsafe extern "C" fn(
+    *mut c_void,
+    *const VkSwapchainCreateInfoKHR,
+    *const c_void,
+    *mut *mut c_void,
+) -> i32;
+pub type PfnDestroySwapchainKHR =
+    unsafe extern "C" fn(*mut c_void, *mut c_void, *const c_void);
+pub type PfnGetSwapchainImagesKHR = unsafe extern "C" fn(
+    *mut c_void,
+    *mut c_void,
+    *mut u32,
+    *mut *mut c_void,
+) -> i32;
+pub type PfnAcquireNextImageKHR = unsafe extern "C" fn(
+    *mut c_void,
+    u64,
+    *mut c_void,
+    *mut c_void,
+    *mut u32,
+) -> i32;
+pub type PfnQueuePresentKHR =
+    unsafe extern "C" fn(*mut c_void, *const VkPresentInfoKHR) -> i32;
+pub type PfnCreateRenderPass = unsafe extern "C" fn(
+    *mut c_void,
+    *const VkRenderPassCreateInfo,
+    *const c_void,
+    *mut *mut c_void,
+) -> i32;
+pub type PfnCreateGraphicsPipelines = unsafe extern "C" fn(
+    *mut c_void,
+    *mut c_void,
+    u32,
+    *const VkGraphicsPipelineCreateInfo,
+    *const c_void,
+    *mut *mut c_void,
+) -> i32;
+pub type PfnCreateFramebuffer = unsafe extern "C" fn(
+    *mut c_void,
+    *const VkFramebufferCreateInfo,
+    *const c_void,
+    *mut *mut c_void,
+) -> i32;
+pub type PfnCreateCommandPool = unsafe extern "C" fn(
+    *mut c_void,
+    *const VkCommandPoolCreateInfo,
+    *const c_void,
+    *mut *mut c_void,
+) -> i32;
+pub type PfnAllocateCommandBuffers = unsafe extern "C" fn(
+    *mut c_void,
+    *const VkCommandBufferAllocateInfo,
+    *mut *mut c_void,
+) -> i32;
+pub type PfnBeginCommandBuffer =
+    unsafe extern "C" fn(*mut c_void, *const VkCommandBufferBeginInfo) -> i32;
+pub type PfnCmdBeginRenderPass =
+    unsafe extern "C" fn(*mut c_void, *const VkRenderPassBeginInfo, u32);
+pub type PfnCmdBindPipeline =
+    unsafe extern "C" fn(*mut c_void, u32, *mut c_void);
+pub type PfnCmdDraw =
+    unsafe extern "C" fn(*mut c_void, u32, u32, u32, u32);
+pub type PfnCmdEndRenderPass =
+    unsafe extern "C" fn(*mut c_void);
+pub type PfnEndCommandBuffer = unsafe extern "C" fn(*mut c_void) -> i32;
+pub type PfnQueueSubmit = unsafe extern "C" fn(
+    *mut c_void,
+    u32,
+    *const VkSubmitInfo,
+    *mut c_void,
+) -> i32;
+pub type PfnCreateShaderModule = unsafe extern "C" fn(
+    *mut c_void,
+    *const VkShaderModuleCreateInfo,
+    *const c_void,
+    *mut *mut c_void,
+) -> i32;
+pub type PfnDestroyShaderModule =
+    unsafe extern "C" fn(*mut c_void, *mut c_void, *const c_void);
+pub type PfnDestroyRenderPass =
+    unsafe extern "C" fn(*mut c_void, *mut c_void, *const c_void);
+pub type PfnDestroyPipeline =
+    unsafe extern "C" fn(*mut c_void, *mut c_void, *const c_void);
+pub type PfnDestroyCommandPool =
+    unsafe extern "C" fn(*mut c_void, *mut c_void, *const c_void);
+pub type PfnDestroyFramebuffer =
+    unsafe extern "C" fn(*mut c_void, *mut c_void, *const c_void);
+pub type PfnCreatePipelineLayout = unsafe extern "C" fn(
+    *mut c_void,
+    *const VkPipelineLayoutCreateInfo,
+    *const c_void,
+    *mut *mut c_void,
+) -> i32;
+pub type PfnDestroyPipelineLayout =
+    unsafe extern "C" fn(*mut c_void, *mut c_void, *const c_void);
 
 /// Byte offsets inside `VkPhysicalDeviceProperties` (Vulkan 1.0, 64-bit):
 /// `apiVersion` 0, `driverVersion` 4, `vendorID` 8, `deviceID` 12, `deviceType` 16,
@@ -194,6 +654,31 @@ pub struct Api {
     pub create_device: PfnCreateDevice,
     pub destroy_device: PfnDestroyDevice,
     pub get_device_queue: PfnGetDeviceQueue,
+    pub create_swapchain_khr: PfnCreateSwapchainKHR,
+    pub destroy_swapchain_khr: PfnDestroySwapchainKHR,
+    pub get_swapchain_images_khr: PfnGetSwapchainImagesKHR,
+    pub acquire_next_image_khr: PfnAcquireNextImageKHR,
+    pub queue_present_khr: PfnQueuePresentKHR,
+    pub create_render_pass: PfnCreateRenderPass,
+    pub create_graphics_pipelines: PfnCreateGraphicsPipelines,
+    pub create_framebuffer: PfnCreateFramebuffer,
+    pub create_command_pool: PfnCreateCommandPool,
+    pub allocate_command_buffers: PfnAllocateCommandBuffers,
+    pub begin_command_buffer: PfnBeginCommandBuffer,
+    pub cmd_begin_render_pass: PfnCmdBeginRenderPass,
+    pub cmd_bind_pipeline: PfnCmdBindPipeline,
+    pub cmd_draw: PfnCmdDraw,
+    pub cmd_end_render_pass: PfnCmdEndRenderPass,
+    pub end_command_buffer: PfnEndCommandBuffer,
+    pub queue_submit: PfnQueueSubmit,
+    pub create_shader_module: PfnCreateShaderModule,
+    pub destroy_shader_module: PfnDestroyShaderModule,
+    pub destroy_render_pass: PfnDestroyRenderPass,
+    pub destroy_pipeline: PfnDestroyPipeline,
+    pub destroy_command_pool: PfnDestroyCommandPool,
+    pub destroy_framebuffer: PfnDestroyFramebuffer,
+    pub create_pipeline_layout: PfnCreatePipelineLayout,
+    pub destroy_pipeline_layout: PfnDestroyPipelineLayout,
 }
 
 impl Api {
@@ -270,6 +755,31 @@ impl Api {
                 create_device: std::mem::transmute(need("vkCreateDevice")?),
                 destroy_device: std::mem::transmute(need("vkDestroyDevice")?),
                 get_device_queue: std::mem::transmute(need("vkGetDeviceQueue")?),
+                create_swapchain_khr: std::mem::transmute(need("vkCreateSwapchainKHR")?),
+                destroy_swapchain_khr: std::mem::transmute(need("vkDestroySwapchainKHR")?),
+                get_swapchain_images_khr: std::mem::transmute(need("vkGetSwapchainImagesKHR")?),
+                acquire_next_image_khr: std::mem::transmute(need("vkAcquireNextImageKHR")?),
+                queue_present_khr: std::mem::transmute(need("vkQueuePresentKHR")?),
+                create_render_pass: std::mem::transmute(need("vkCreateRenderPass")?),
+                create_graphics_pipelines: std::mem::transmute(need("vkCreateGraphicsPipelines")?),
+                create_framebuffer: std::mem::transmute(need("vkCreateFramebuffer")?),
+                create_command_pool: std::mem::transmute(need("vkCreateCommandPool")?),
+                allocate_command_buffers: std::mem::transmute(need("vkAllocateCommandBuffers")?),
+                begin_command_buffer: std::mem::transmute(need("vkBeginCommandBuffer")?),
+                cmd_begin_render_pass: std::mem::transmute(need("vkCmdBeginRenderPass")?),
+                cmd_bind_pipeline: std::mem::transmute(need("vkCmdBindPipeline")?),
+                cmd_draw: std::mem::transmute(need("vkCmdDraw")?),
+                cmd_end_render_pass: std::mem::transmute(need("vkCmdEndRenderPass")?),
+                end_command_buffer: std::mem::transmute(need("vkEndCommandBuffer")?),
+                queue_submit: std::mem::transmute(need("vkQueueSubmit")?),
+                create_shader_module: std::mem::transmute(need("vkCreateShaderModule")?),
+                destroy_shader_module: std::mem::transmute(need("vkDestroyShaderModule")?),
+                destroy_render_pass: std::mem::transmute(need("vkDestroyRenderPass")?),
+                destroy_pipeline: std::mem::transmute(need("vkDestroyPipeline")?),
+                destroy_command_pool: std::mem::transmute(need("vkDestroyCommandPool")?),
+                destroy_framebuffer: std::mem::transmute(need("vkDestroyFramebuffer")?),
+                create_pipeline_layout: std::mem::transmute(need("vkCreatePipelineLayout")?),
+                destroy_pipeline_layout: std::mem::transmute(need("vkDestroyPipelineLayout")?),
             })
         }
     }

@@ -202,7 +202,7 @@ impl Declared {
                     }
                 }
                 Kind::Punct => {
-                    if !matches!(t.text, "(" | ")" | "?" | ":" | "," | "-" | "+" | "&&" | "||") {
+                    if !matches!(t.text, "(" | ")" | "?" | ":" | "," | "-" | "+" | "*" | "&&" | "||" | "<" | ">" | "<=" | ">=" | "==" | "!=") {
                         return false;
                     }
                     // A `(` that follows an identifier is a call. Widening the literals *inside* it
