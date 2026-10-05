@@ -5,6 +5,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
+use crate::log;
+
 static OVERLAY_ENABLED: AtomicBool = AtomicBool::new(false);
 static OVERLAY_INIT: OnceLock<bool> = OnceLock::new();
 
@@ -29,7 +31,7 @@ pub unsafe fn draw(cfg: &renderer_core::Config, backend: Option<&dyn renderer_co
     let _ = *OVERLAY_INIT.get_or_init(|| {
         #[cfg(target_os = "android")]
         {
-            log_once(crate::log_once, "[Overlay] debug overlay enabled");
+            log("[Overlay] debug overlay enabled");
         }
         true
     });
