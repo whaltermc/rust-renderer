@@ -73,6 +73,11 @@ macro_rules! es_absent {
                 if ONCE.swap(1, Ordering::Relaxed) == 0 {
                     announce_missing(stringify!($name));
                 }
+                // Returning quietly would let the caller believe the state was applied.
+                // GL_INVALID_OPERATION is the honest answer: OpenGL ES has no equivalent, so
+                // the call did not happen. A caller that checks -- which Minecraft does after
+                // resource setup -- then knows, instead of rendering with silent garbage.
+                errors().set(0x0502 /* GL_INVALID_OPERATION */);
             }
         )*
     };
