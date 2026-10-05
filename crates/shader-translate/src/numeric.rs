@@ -97,9 +97,6 @@ struct Declared {
     /// Functions returning an integer, so `unpack(a) * 2.0` can be converted too. A call is
     /// retyped only from its own return type -- never by retyping the name in place.
     int_funcs: HashMap<String, Option<usize>>,
-    /// Functions returning a float, so arguments to those calls can be widened when the
-    /// surrounding expression is otherwise floating point.
-    float_funcs: HashSet<String>,
 }
 
 /// The declared type of a variable, as far as this pass cares about it.
@@ -191,7 +188,6 @@ impl Declared {
                 Kind::OpaqueLit => return false,
                 Kind::Ident => {
                     if self.floats.contains(t.text)
-                        || self.float_funcs.contains(t.text)
                         || FLOAT_BUILTINS.contains(&t.text)
                         || is_builtin_float_call(t.text)
                     {
@@ -525,7 +521,6 @@ fn collect_declared<'a>(src: &'a str) -> Declared {
         }
     };
 
-    let mut float_funcs = HashSet::new();
     for line in src.lines() {
         // A preprocessor line has no type keyword, and `#define A float` would otherwise look
         // like a declaration of a type.
@@ -568,9 +563,6 @@ fn collect_declared<'a>(src: &'a str) -> Declared {
                     Ty::Float => None,
                 } {
                     funcs.entry(name.text).or_insert(components);
-                }
-                if ty == Ty::Float {
-                    float_funcs.insert(name.text.to_string());
                 }
                 continue;
             }
@@ -621,7 +613,6 @@ fn collect_declared<'a>(src: &'a str) -> Declared {
         }
     }
     declared.int_funcs = funcs.into_iter().map(|(n, c)| (n.to_string(), c)).collect();
-    declared.float_funcs = float_funcs;
     declared
 }
 
@@ -795,13 +786,6 @@ fn widen_line(line: &str, declared: &Declared) -> String {
     if toks.is_empty() {
         return line.to_string();
     }
-    
-    // DEBUG
-    if line.contains("linear_fog_value") {
-        eprintln!("DEBUG widen_line: input={}", line);
-        eprintln!("DEBUG widen_line: float_funcs={:?}", declared.float_funcs);
-    }
-    
     // Overlapping rewrites of the same operand are de-duplicated by start index.
     let mut edits: Vec<EditAt> = Vec::new();
     let text_of = |range: (usize, usize)| {
@@ -845,21 +829,6 @@ fn widen_line(line: &str, declared: &Declared) -> String {
                     for arg in args {
                         retarget(arg, &mut edits);
                     }
-                }
-            }
-        }
-
-        // User-defined float functions: every argument should be float, because the function
-        // returns float and desktop GLSL converted implicitly. Unlike builtins, we cannot tell
-        // from the name alone which parameters are int, so retarget all arguments unconditionally.
-        if tok.kind == Kind::Ident
-            && declared.float_funcs.contains(tok.text)
-            && toks.get(index + 1).is_some_and(|t| t.is_punct('('))
-        {
-            if let Some(close) = matching_forward(&toks, index + 1, '(', ')') {
-                let args = split_args(&toks, index + 1, close);
-                for arg in args {
-                    retarget(arg, &mut edits);
                 }
             }
         }
@@ -1217,11 +1186,10 @@ mod tests {
     }
 
     #[test]
-    fn user_defined_float_function_args_are_retargeted() {
+    fn user_defined_float_function_args_are_not_widened() {
         let src = "float linear_fog_value(float a, float b){ return a + b; }\nfloat f(){ return linear_fog_value(0.0, 1); }\n";
         let out = widen(src);
-        eprintln!("FULL OUT:\n{}", out);
-        assert!(out.contains("linear_fog_value(0.0, 1.0)"), "{out}");
+        assert!(out.contains("linear_fog_value(0.0, 1)"), "{out}");
     }
 
     #[test]
