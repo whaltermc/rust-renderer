@@ -12,6 +12,8 @@ use format_translate;
 use std::sync::Mutex;
 
 const GL_FRAMEBUFFER: u32 = 0x8D40;
+const GL_READ_FRAMEBUFFER: u32 = 0x8CA8;
+const GL_DRAW_FRAMEBUFFER: u32 = 0x8CA9;
 const GL_RENDERBUFFER: u32 = 0x8D41;
 const GL_TEXTURE_2D: u32 = 0x0DE1;
 const GL_ARRAY_BUFFER: u32 = 0x8892;
@@ -186,10 +188,9 @@ unsafe fn bind_tex(id: u32) -> u32 {
 }
 
 unsafe fn bind_fbo(fbo: u32) -> bool {
-    match driver_fn_cached::<unsafe extern "C" fn(u32)>("glBindFramebuffer") {
+    match driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindFramebuffer") {
         Some(f) => {
-            f(GL_FRAMEBUFFER);
-            let _ = fbo;
+            f(GL_FRAMEBUFFER, fbo);
             true
         }
         None => false,
@@ -363,6 +364,39 @@ pub unsafe extern "C" fn glNamedFramebufferRenderbuffer(fbo: u32, att: u32, rbo:
         driver_fn_cached::<unsafe extern "C" fn(u32, u32, u32, u32)>("glFramebufferRenderbuffer")
     {
         f(GL_FRAMEBUFFER, att, t, rbo);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glBlitNamedFramebuffer(
+    read_fbo: u32,
+    draw_fbo: u32,
+    sx0: i32,
+    sy0: i32,
+    sx1: i32,
+    sy1: i32,
+    dx0: i32,
+    dy0: i32,
+    dx1: i32,
+    dy1: i32,
+    mask: u32,
+    filter: u32,
+) {
+    match driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindFramebuffer") {
+        Some(bind) => {
+            bind(GL_READ_FRAMEBUFFER, read_fbo);
+            bind(GL_DRAW_FRAMEBUFFER, draw_fbo);
+        }
+        None => {
+            mark_error_site("glBlitNamedFramebuffer");
+            errors().set(0x0502);
+            return;
+        }
+    }
+    if let Some(f) =
+        driver_fn_cached::<unsafe extern "C" fn(i32,i32,i32,i32,i32,i32,i32,i32,u32,u32)>("glBlitFramebuffer")
+    {
+        f(sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, mask, filter);
     }
 }
 
@@ -1213,6 +1247,7 @@ pub const EXPORTS: &[&str] = &[
     "glGetTextureParameterIuiv", "glGetTextureLevelParameterfv", "glGetCompressedTextureImage",
     "glNamedFramebufferTexture", "glNamedFramebufferTextureLayer", "glNamedFramebufferRenderbuffer",
     "glNamedFramebufferDrawBuffer", "glNamedFramebufferDrawBuffers", "glNamedFramebufferReadBuffer",
+    "glBlitNamedFramebuffer",
     "glCheckNamedFramebufferStatus", "glGetNamedFramebufferAttachmentParameteriv",
     "glClearNamedFramebufferiv", "glClearNamedFramebufferuiv", "glClearNamedFramebufferfv",
     "glClearNamedFramebufferfi", "glNamedRenderbufferStorage", "glNamedRenderbufferStorageMultisample",
