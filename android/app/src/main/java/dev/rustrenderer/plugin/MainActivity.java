@@ -30,12 +30,14 @@ public class MainActivity extends Activity {
         TextView info = new TextView(this);
         info.setText("\nRenderer options (env vars):\n"
             + "RENDERER_BACKEND=gles|vulkan|hybrid|auto\n"
+            + "RENDERER_BACKEND_SELECT=gles|vulkan|hybrid|auto (legacy)\n"
             + "RENDERER_DISPLAY=\n"
             + "RENDERER_ANGLE_BACKEND=\n"
             + "RENDERER_ANGLE_RENDERER=\n"
             + "RENDERER_DEBUG=1\n"
             + "RENDERER_SPOOF_GL=1\n"
             + "RENDERER_TRACE_GL=1\n"
+            + "RENDERER_DUMP_SHADER_DIR=/path/to/dir\n"
             + "\nSet these in ZalithLauncher renderer settings.");
         root.addView(info);
 
