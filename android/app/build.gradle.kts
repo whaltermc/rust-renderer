@@ -86,7 +86,7 @@ val pluginRendererConfig = buildJsonValue {
             selectable(
                 key = "RENDERER_SPOOF_GL",
                 items = RendererConfig.EnvItems(
-                    defaultValue = "1",
+                    defaultValue = "0",
                     values = listOf(
                         "1",
                         "0"
@@ -113,6 +113,68 @@ val pluginRendererConfig = buildJsonValue {
                     values = listOf(
                         "0",
                         "1"
+                    )
+                )
+            )
+            selectable(
+                key = "RENDERER_BACKEND",
+                items = RendererConfig.EnvItems(
+                    defaultValue = "gles",
+                    values = listOf(
+                        "gles",
+                        "vulkan",
+                        "hybrid",
+                        "auto"
+                    )
+                )
+            )
+            selectable(
+                key = "RENDERER_DISPLAY",
+                items = RendererConfig.EnvItems(
+                    defaultValue = "",
+                    values = listOf(
+                        "",
+                        "1",
+                        "2"
+                    )
+                )
+            )
+            selectable(
+                key = "RENDERER_ANGLE_BACKEND",
+                items = RendererConfig.EnvItems(
+                    defaultValue = "",
+                    values = listOf(
+                        "",
+                        "vulkan",
+                        "opengl",
+                        "swiftshader",
+                        "d3d11",
+                        "d3d12"
+                    )
+                )
+            )
+            selectable(
+                key = "RENDERER_ANGLE_RENDERER",
+                items = RendererConfig.EnvItems(
+                    defaultValue = "",
+                    values = listOf(
+                        "",
+                        "vulkan",
+                        "opengl",
+                        "d3d11",
+                        "d3d12",
+                        "metal"
+                    )
+                )
+            )
+            selectable(
+                key = "RENDERER_DUMP_SHADER_DIR",
+                items = RendererConfig.EnvItems(
+                    defaultValue = "",
+                    values = listOf(
+                        "",
+                        "/sdcard/Download/shaders",
+                        "/storage/emulated/0/Download/shaders"
                     )
                 )
             )
