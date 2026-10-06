@@ -1186,14 +1186,22 @@ pub unsafe extern "C" fn glBindBuffer(t: u32, b: u32) {
     }
 }
 
-/// Attaches a texture, redirecting to the renderbuffer substitute when a multisample depth
-/// texture could not be represented in ES. See `dsa_named` for why that substitution exists.
+/// Attaches a texture, redirecting to the renderbuffer substitute when a multisample texture
+/// (depth/stencil or colour) could not be represented in ES. See `dsa_named` for why that
+/// substitution exists: ES has no multisample depth textures, and some drivers also reject
+/// multisample colour textures, so `glTexStorage2DMultisample` falls back to a renderbuffer in
+/// both cases. The later `glFramebufferTexture2D` has to use that renderbuffer instead.
 #[no_mangle]
 pub unsafe extern "C" fn glFramebufferTexture2D(t: u32, a: u32, tt: u32, tex: u32, l: i32) {
     const GL_TEXTURE_2D_MULTISAMPLE: u32 = 0x9100;
     const GL_RENDERBUFFER: u32 = 0x8D41;
     const GL_FRAMEBUFFER: u32 = 0x8D40;
-    if tt == GL_TEXTURE_2D_MULTISAMPLE && matches!(a, 0x8D00 | 0x8D20 | 0x821A) {
+    const GL_COLOR_ATTACHMENT0: u32 = 0x8CE0;
+    const GL_COLOR_ATTACHMENT15: u32 = 0x8CEF;
+    if tt == GL_TEXTURE_2D_MULTISAMPLE
+        && (matches!(a, 0x8D00 | 0x8D20 | 0x821A)
+            || (a >= GL_COLOR_ATTACHMENT0 && a <= GL_COLOR_ATTACHMENT15))
+    {
         if let Some(rbo) = named_objects::msaa_substitute_for(tex) {
             if let Some(f) =
                 driver_fn_cached::<unsafe extern "C" fn(u32, u32, u32, u32)>(

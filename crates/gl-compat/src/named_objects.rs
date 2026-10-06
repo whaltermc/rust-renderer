@@ -330,11 +330,12 @@ pub unsafe extern "C" fn glNamedFramebufferTexture(fbo: u32, att: u32, tex: u32,
         errors().set(0x0502);
         return;
     }
-    if let Some(f) =
-        driver_fn_cached::<unsafe extern "C" fn(u32, u32, u32, u32, i32)>("glFramebufferTexture2D")
-    {
-        f(GL_FRAMEBUFFER, att, texture_target(tex), tex, level);
-    }
+    // Route through the shim's glFramebufferTexture2D so the multisample
+    // depth/colour -> renderbuffer substitution applies on the DSA path too.
+    // Calling the driver entry point directly here used to attach the original
+    // texture name even when glTexStorage2DMultisample had substituted a
+    // renderbuffer, leaving the framebuffer in GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT.
+    crate::glFramebufferTexture2D(GL_FRAMEBUFFER, att, texture_target(tex), tex, level);
 }
 
 #[no_mangle]
