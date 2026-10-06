@@ -922,6 +922,7 @@ pub(crate) unsafe fn bind_dsa_texture(id: u32) -> Option<u32> {
 
 #[no_mangle]
 pub unsafe extern "C" fn glTextureStorage2D(id: u32, levels: i32, internalformat: u32, w: i32, h: i32) {
+    let internalformat = format_translate::map_storage_internal(internalformat, crate::render_caps());
     let Some(target) = bind_dsa_texture(id) else {
         errors().set(GL_INVALID_OPERATION);
         return;
@@ -944,6 +945,7 @@ pub unsafe extern "C" fn glTextureStorage3D(
     h: i32,
     d: i32,
 ) {
+    let internalformat = format_translate::map_storage_internal(internalformat, crate::render_caps());
     let Some(target) = bind_dsa_texture(id) else {
         errors().set(GL_INVALID_OPERATION);
         return;

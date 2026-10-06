@@ -1186,6 +1186,115 @@ pub unsafe extern "C" fn glBindBuffer(t: u32, b: u32) {
     }
 }
 
+
+
+fn fbo_status_name(status: u32) -> &'static str {
+    match status {
+        0x8CD5 => "COMPLETE",
+        0x8CD6 => "INCOMPLETE_ATTACHMENT",
+        0x8CD7 => "INCOMPLETE_MISSING_ATTACHMENT",
+        0x8CD9 => "INCOMPLETE_DIMENSIONS",
+        0x8CDD => "UNSUPPORTED",
+        0x8D56 => "INCOMPLETE_MULTISAMPLE",
+        0x8DA8 => "INCOMPLETE_LAYER_TARGETS",
+        _ => "UNKNOWN",
+    }
+}
+
+/// `glCheckFramebufferStatus` that explains itself. A bare 0x8CD6 from a shader pack says
+/// nothing about *which* attachment failed; this logs type, name and channel sizes of every
+/// attachment of the incomplete framebuffer (a size of 0 means the texture never got storage,
+/// usually because the allocation was rejected). Rate limited so a per-frame check cannot
+/// flood logcat.
+pub(crate) unsafe fn checked_framebuffer_status(target: u32) -> u32 {
+    let Some(check) = driver_fn_cached::<unsafe extern "C" fn(u32) -> u32>("glCheckFramebufferStatus")
+    else {
+        errors().set(GL_INVALID_OPERATION);
+        return 0;
+    };
+    let status = check(target);
+    if status == 0x8CD5 || status == 0 {
+        return status;
+    }
+    static REPORTED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    if REPORTED.fetch_add(1, Ordering::Relaxed) >= 16 {
+        return status;
+    }
+    log(&format!(
+        "[GLCompat] framebuffer incomplete: 0x{status:04X} ({})",
+        fbo_status_name(status)
+    ));
+    let Some(get) = driver_fn_cached::<unsafe extern "C" fn(u32, u32, u32, *mut i32)>(
+        "glGetFramebufferAttachmentParameteriv",
+    ) else {
+        return status;
+    };
+    let max_color = gles3::caps().max_color_attachments.clamp(1, 8) as u32;
+    let mut atts: Vec<u32> = (0..max_color).map(|i| 0x8CE0 + i).collect();
+    atts.push(0x8D00); // DEPTH
+    atts.push(0x8D20); // STENCIL
+    for att in atts {
+        let q = |pname: u32| -> i32 {
+            let mut v = -1i32;
+            get(target, att, pname, &mut v);
+            v
+        };
+        let kind = q(0x8CD0); // OBJECT_TYPE
+        if kind <= 0 || kind == 0x0000 {
+            continue; // GL_NONE or query rejected
+        }
+        let kind_name = match kind as u32 {
+            0x1702 => "TEXTURE",
+            0x8D41 => "RENDERBUFFER",
+            _ => "?",
+        };
+        log(&format!(
+            "[GLCompat]   attachment {att:#06x}: {kind_name} name={} rgba={}/{}/{}/{} depth={} stencil={} type={:#06x}",
+            q(0x8CD1),
+            q(0x8212), q(0x8213), q(0x8214), q(0x8215),
+            q(0x8216), q(0x8217), q(0x8211),
+        ));
+    }
+    // The queries above can leave driver errors behind that the application never caused.
+    let _ = errors().take();
+    status
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glCheckFramebufferStatus(target: u32) -> u32 {
+    trace_call("glCheckFramebufferStatus");
+    checked_framebuffer_status(target)
+}
+
+/// What the GPU can render to, from the capability probe. Before a context exists nothing is
+/// downgraded.
+pub(crate) fn render_caps() -> format_translate::RenderCaps {
+    let c = gles3::caps();
+    if !c.valid {
+        return format_translate::RenderCaps::default();
+    }
+    format_translate::RenderCaps {
+        float_rt: c.supports_float_color_targets(),
+        half_float_rt: c.supports_half_float_color_targets(),
+        norm16: c.has(b"GL_EXT_texture_norm16\0"),
+    }
+}
+
+/// Logs each distinct internal-format/type rewrite once, so a logcat shows exactly which
+/// shader-pack render-target formats were adapted without needing RENDERER_TRACE_GL.
+pub(crate) fn note_format_change(site: &str, from: (u32, u32, u32), to: (u32, u32, u32)) {
+    static SEEN: std::sync::Mutex<Vec<((u32, u32, u32), (u32, u32, u32))>> =
+        std::sync::Mutex::new(Vec::new());
+    let mut seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+    if seen.len() < 64 && !seen.contains(&(from, to)) {
+        seen.push((from, to));
+        log(&format!(
+            "[GLCompat] {site}: format {:#06x}/{:#06x}/{:#06x} -> {:#06x}/{:#06x}/{:#06x}",
+            from.0, from.1, from.2, to.0, to.1, to.2
+        ));
+    }
+}
+
 /// Attaches a texture, redirecting to the renderbuffer substitute when a multisample texture
 /// (depth/stencil or colour) could not be represented in ES. See `dsa_named` for why that
 /// substitution exists: ES has no multisample depth textures, and some drivers also reject
@@ -1223,7 +1332,10 @@ pub unsafe extern "C" fn glFramebufferTexture2D(t: u32, a: u32, tt: u32, tex: u3
 
 #[no_mangle]
 pub unsafe extern "C" fn glRenderbufferStorage(t: u32, f: u32, w: i32, h: i32) {
-    let f2 = format_translate::map_renderbuffer_internal_format(f);
+    let f2 = format_translate::map_storage_internal(f, render_caps());
+    if f2 != f {
+        note_format_change("glRenderbufferStorage", (f, 0, 0), (f2, 0, 0));
+    }
     match driver_fn_cached::<unsafe extern "C" fn(u32, u32, i32, i32)>("glRenderbufferStorage") {
         Some(g) => g(t, f2, w, h),
         None => errors().set(GL_INVALID_OPERATION),
@@ -1241,9 +1353,14 @@ pub unsafe extern "C" fn glTexImage2D(
     }
     // The whole format triple has to be mapped, not just the internal format: ES requires a
     // sized depth internal format to be paired with a matching type.
-    let (ifmt2, f2, ty2) = format_translate::map_upload_format(ifmt, f, ty);
-    if ifmt2 != ifmt || ty2 != ty {
+    // With NULL data (render-target allocation) the pair is replaced by the one ES 3.0
+    // accepts and unrenderable internal formats (RGB16F, RGBA16, ...) are swapped for the
+    // nearest renderable one. Real pixel data keeps its layout. See `conform_upload`.
+    let (ifmt2, f2, ty2) =
+        format_translate::conform_upload(ifmt, f, ty, !d.is_null(), render_caps());
+    if ifmt2 != ifmt || f2 != f || ty2 != ty {
         trace_translation(&format!("texImage2D format {ifmt:#06x}/{f:#06x}/{ty:#06x} -> {ifmt2:#06x}/{f2:#06x}/{ty2:#06x}"));
+        note_format_change("glTexImage2D", (ifmt as u32, f, ty), (ifmt2 as u32, f2, ty2));
     }
     let f = f2;
     let ty = ty2;
@@ -1520,7 +1637,6 @@ forward_all! {
     glBlendEquationSeparate(a: u32, b: u32);
     glBlendFunc(s: u32, d: u32);
     glBlendFuncSeparate(a: u32, b: u32, c: u32, d: u32);
-    glCheckFramebufferStatus(t: u32) -> u32;
     glClearStencil(s: i32);
     glColorMask(r: u8, g: u8, b: u8, a: u8);
     glCreateProgram() -> u32;
@@ -2314,6 +2430,7 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glBindTexture" => glBindTexture as *const c_void,
         b"glLightModeliv" => glLightModeliv as *const c_void,
         b"glFramebufferTexture2D" => glFramebufferTexture2D as *const c_void,
+        b"glCheckFramebufferStatus" => glCheckFramebufferStatus as *const c_void,
         b"glFogColor" => fixed_func::glFogColor as *const c_void,
         b"glGetTexLevelParameteriv" => glGetTexLevelParameteriv as *const c_void,
         b"eglGetDisplay" => eglGetDisplay as *const c_void,

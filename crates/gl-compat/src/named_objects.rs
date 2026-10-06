@@ -119,8 +119,8 @@ fn is_depth_or_stencil(fmt: u32) -> bool {
         0x81A5 /* GL_DEPTH_COMPONENT16 */
             | 0x81A6 /* GL_DEPTH_COMPONENT24 */
             | 0x8CAC /* GL_DEPTH_COMPONENT32F */
-            | 0x8CAD /* GL_DEPTH24_STENCIL8 */
-            | 0x8CDF /* GL_DEPTH32F_STENCIL8 */
+            | 0x88F0 /* GL_DEPTH24_STENCIL8 */
+            | 0x8CAD /* GL_DEPTH32F_STENCIL8 */
     )
 }
 
@@ -187,6 +187,7 @@ unsafe fn bind_tex(id: u32) -> u32 {
     target
 }
 
+#[allow(dead_code)]
 unsafe fn bind_fbo(fbo: u32) -> bool {
     match driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindFramebuffer") {
         Some(f) => {
@@ -195,6 +196,37 @@ unsafe fn bind_fbo(fbo: u32) -> bool {
         }
         None => false,
     }
+}
+
+/// Desktop DSA calls take the framebuffer by name and leave the current binding alone. ES has
+/// no DSA, so the name is bound for the call; this guard puts the previous draw/read bindings
+/// back afterwards. Without it, `glNamedFramebufferDrawBuffers(fboX)` issued while rendering
+/// to fboY silently redirected every later draw to fboX.
+pub(crate) struct FboScope {
+    draw: i32,
+    read: i32,
+}
+
+impl Drop for FboScope {
+    fn drop(&mut self) {
+        if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindFramebuffer") {
+            // SAFETY: restores bindings the application itself made.
+            unsafe {
+                f(GL_DRAW_FRAMEBUFFER, self.draw as u32);
+                f(GL_READ_FRAMEBUFFER, self.read as u32);
+            }
+        }
+    }
+}
+
+unsafe fn scoped_fbo(fbo: u32) -> Option<FboScope> {
+    let get = driver_fn_cached::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv")?;
+    let bind = driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindFramebuffer")?;
+    let (mut draw, mut read) = (0i32, 0i32);
+    get(0x8CA6 /* DRAW_FRAMEBUFFER_BINDING */, &mut draw);
+    get(0x8CAA /* READ_FRAMEBUFFER_BINDING */, &mut read);
+    bind(GL_FRAMEBUFFER, fbo);
+    Some(FboScope { draw, read })
 }
 
 unsafe fn bind_rbo(rbo: u32) -> bool {
@@ -325,11 +357,11 @@ pub unsafe extern "C" fn glGenerateTextureMipmap(id: u32) {
 
 #[no_mangle]
 pub unsafe extern "C" fn glNamedFramebufferTexture(fbo: u32, att: u32, tex: u32, level: i32) {
-    if !unsafe { bind_fbo(fbo) } {
+    let Some(_fbo_scope) = (unsafe { scoped_fbo(fbo) }) else {
         mark_error_site("glNamedFramebufferTexture");
         errors().set(0x0502);
         return;
-    }
+    };
     // Route through the shim's glFramebufferTexture2D so the multisample
     // depth/colour -> renderbuffer substitution applies on the DSA path too.
     // Calling the driver entry point directly here used to attach the original
@@ -342,11 +374,11 @@ pub unsafe extern "C" fn glNamedFramebufferTexture(fbo: u32, att: u32, tex: u32,
 pub unsafe extern "C" fn glNamedFramebufferTextureLayer(
     fbo: u32, att: u32, tex: u32, level: i32, layer: i32,
 ) {
-    if !unsafe { bind_fbo(fbo) } {
+    let Some(_fbo_scope) = (unsafe { scoped_fbo(fbo) }) else {
         mark_error_site("glNamedFramebufferTextureLayer");
         errors().set(0x0502);
         return;
-    }
+    };
     if let Some(f) =
         driver_fn_cached::<unsafe extern "C" fn(u32, u32, u32, i32, i32)>("glFramebufferTextureLayer")
     {
@@ -356,11 +388,11 @@ pub unsafe extern "C" fn glNamedFramebufferTextureLayer(
 
 #[no_mangle]
 pub unsafe extern "C" fn glNamedFramebufferRenderbuffer(fbo: u32, att: u32, rbo: u32, t: u32) {
-    if !unsafe { bind_fbo(fbo) } {
+    let Some(_fbo_scope) = (unsafe { scoped_fbo(fbo) }) else {
         mark_error_site("glNamedFramebufferRenderbuffer");
         errors().set(0x0502);
         return;
-    }
+    };
     if let Some(f) =
         driver_fn_cached::<unsafe extern "C" fn(u32, u32, u32, u32)>("glFramebufferRenderbuffer")
     {
@@ -383,6 +415,14 @@ pub unsafe extern "C" fn glBlitNamedFramebuffer(
     mask: u32,
     filter: u32,
 ) {
+    let _restore = match scoped_fbo(0) {
+        Some(s) => s,
+        None => {
+            mark_error_site("glBlitNamedFramebuffer");
+            errors().set(0x0502);
+            return;
+        }
+    };
     match driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindFramebuffer") {
         Some(bind) => {
             bind(GL_READ_FRAMEBUFFER, read_fbo);
@@ -403,11 +443,11 @@ pub unsafe extern "C" fn glBlitNamedFramebuffer(
 
 #[no_mangle]
 pub unsafe extern "C" fn glNamedFramebufferDrawBuffer(fbo: u32, mode: u32) {
-    if !unsafe { bind_fbo(fbo) } {
+    let Some(_fbo_scope) = (unsafe { scoped_fbo(fbo) }) else {
         mark_error_site("glNamedFramebufferDrawBuffer");
         errors().set(0x0502);
         return;
-    }
+    };
     if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32)>("glDrawBuffer") {
         f(mode);
     }
@@ -415,11 +455,11 @@ pub unsafe extern "C" fn glNamedFramebufferDrawBuffer(fbo: u32, mode: u32) {
 
 #[no_mangle]
 pub unsafe extern "C" fn glNamedFramebufferDrawBuffers(fbo: u32, n: i32, b: *const u32) {
-    if !unsafe { bind_fbo(fbo) } {
+    let Some(_fbo_scope) = (unsafe { scoped_fbo(fbo) }) else {
         mark_error_site("glNamedFramebufferDrawBuffers");
         errors().set(0x0502);
         return;
-    }
+    };
     let caps = gles3::caps();
     let max = if caps.valid {
         caps.max_draw_buffers.min(caps.max_color_attachments).max(0)
@@ -434,11 +474,11 @@ pub unsafe extern "C" fn glNamedFramebufferDrawBuffers(fbo: u32, n: i32, b: *con
 
 #[no_mangle]
 pub unsafe extern "C" fn glNamedFramebufferReadBuffer(fbo: u32, mode: u32) {
-    if !unsafe { bind_fbo(fbo) } {
+    let Some(_fbo_scope) = (unsafe { scoped_fbo(fbo) }) else {
         mark_error_site("glNamedFramebufferReadBuffer");
         errors().set(0x0502);
         return;
-    }
+    };
     if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32)>("glReadBuffer") {
         f(mode);
     }
@@ -446,17 +486,10 @@ pub unsafe extern "C" fn glNamedFramebufferReadBuffer(fbo: u32, mode: u32) {
 
 #[no_mangle]
 pub unsafe extern "C" fn glCheckNamedFramebufferStatus(fbo: u32, target: u32) -> u32 {
-    if !unsafe { bind_fbo(fbo) } {
+    let Some(_fbo_scope) = (unsafe { scoped_fbo(fbo) }) else {
         return 0x8CD6;
-    }
-    match driver_fn_cached::<unsafe extern "C" fn(u32) -> u32>("glCheckFramebufferStatus") {
-        Some(f) => f(target),
-        None => {
-            mark_error_site("glCheckNamedFramebufferStatus");
-            errors().set(0x0502);
-            0x8CD6
-        }
-    }
+    };
+    crate::checked_framebuffer_status(target)
 }
 
 #[no_mangle]
@@ -467,12 +500,12 @@ pub unsafe extern "C" fn glGetNamedFramebufferAttachmentParameteriv(
         errors().set(0x0501);
         return;
     }
-    if !unsafe { bind_fbo(fbo) } {
+    let Some(_fbo_scope) = (unsafe { scoped_fbo(fbo) }) else {
         *params = 0;
         mark_error_site("glGetNamedFramebufferAttachmentParameteriv");
         errors().set(0x0502);
         return;
-    }
+    };
     match driver_fn_cached::<unsafe extern "C" fn(u32, u32, u32, *mut i32)>(
         "glGetFramebufferAttachmentParameteriv",
     ) {
@@ -489,11 +522,11 @@ pub unsafe extern "C" fn glGetNamedFramebufferAttachmentParameteriv(
 pub unsafe extern "C" fn glClearNamedFramebufferiv(
     fbo: u32, buffer: u32, drawbuffer: i32, value: *const i32
 ) {
-    if !unsafe { bind_fbo(fbo) } {
+    let Some(_fbo_scope) = (unsafe { scoped_fbo(fbo) }) else {
         mark_error_site("glClearNamedFramebufferiv");
         errors().set(0x0502);
         return;
-    }
+    };
     if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, i32, *const i32)>("glClearBufferiv") {
         f(buffer, drawbuffer, value);
     }
@@ -503,11 +536,11 @@ pub unsafe extern "C" fn glClearNamedFramebufferiv(
 pub unsafe extern "C" fn glClearNamedFramebufferuiv(
     fbo: u32, buffer: u32, drawbuffer: i32, value: *const u32
 ) {
-    if !unsafe { bind_fbo(fbo) } {
+    let Some(_fbo_scope) = (unsafe { scoped_fbo(fbo) }) else {
         mark_error_site("glClearNamedFramebufferuiv");
         errors().set(0x0502);
         return;
-    }
+    };
     if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, i32, *const u32)>("glClearBufferuiv") {
         f(buffer, drawbuffer, value);
     }
@@ -517,11 +550,11 @@ pub unsafe extern "C" fn glClearNamedFramebufferuiv(
 pub unsafe extern "C" fn glClearNamedFramebufferfv(
     fbo: u32, buffer: u32, drawbuffer: i32, value: *const f32
 ) {
-    if !unsafe { bind_fbo(fbo) } {
+    let Some(_fbo_scope) = (unsafe { scoped_fbo(fbo) }) else {
         mark_error_site("glClearNamedFramebufferfv");
         errors().set(0x0502);
         return;
-    }
+    };
     if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, i32, *const f32)>("glClearBufferfv") {
         f(buffer, drawbuffer, value);
     }
@@ -531,11 +564,11 @@ pub unsafe extern "C" fn glClearNamedFramebufferfv(
 pub unsafe extern "C" fn glClearNamedFramebufferfi(
     fbo: u32, buffer: u32, drawbuffer: i32, depth: f32, stencil: i32
 ) {
-    if !unsafe { bind_fbo(fbo) } {
+    let Some(_fbo_scope) = (unsafe { scoped_fbo(fbo) }) else {
         mark_error_site("glClearNamedFramebufferfi");
         errors().set(0x0502);
         return;
-    }
+    };
     if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, i32, f32, i32)>("glClearBufferfi") {
         f(buffer, drawbuffer, depth, stencil);
     }
@@ -550,7 +583,7 @@ pub unsafe extern "C" fn glNamedRenderbufferStorage(rbo: u32, t: u32, w: i32, h:
         errors().set(0x0502);
         return;
     }
-    let fmt = format_translate::map_renderbuffer_internal_format(t);
+    let fmt = format_translate::map_storage_internal(t, crate::render_caps());
     bind_rbo(rbo);
     if let Some(store) =
         driver_fn_cached::<unsafe extern "C" fn(u32, u32, i32, i32)>("glRenderbufferStorage")
@@ -568,7 +601,7 @@ pub unsafe extern "C" fn glNamedRenderbufferStorageMultisample(
         errors().set(0x0502);
         return;
     }
-    let fmt = format_translate::map_renderbuffer_internal_format(t);
+    let fmt = format_translate::map_storage_internal(t, crate::render_caps());
     bind_rbo(rbo);
     if let Some(store) = driver_fn_cached::<
         unsafe extern "C" fn(u32, i32, u32, i32, i32),
@@ -1072,7 +1105,7 @@ pub unsafe extern "C" fn glTextureStorage2DMultisample(
 unsafe fn msaa_storage(
     target: u32, id: u32, samples: i32, internalformat: u32, w: i32, h: i32,
 ) {
-    let fmt = format_translate::map_internal_format(internalformat as i32, 0, 0) as u32;
+    let fmt = format_translate::map_storage_internal(internalformat, crate::render_caps());
     let already = if id != 0 {
         id
     } else {
@@ -1301,7 +1334,7 @@ mod tests {
     fn depth_and_stencil_formats_take_the_renderbuffer_path() {
         // ES has no multisample depth texture; these are the formats that must not be
         // attempted as a texture.
-        for f in [0x81A5, 0x81A6, 0x8CAC, 0x8CAD, 0x8CDF] {
+        for f in [0x81A5, 0x81A6, 0x8CAC, 0x8CAD, 0x88F0] {
             assert!(is_depth_or_stencil(f), "{f:#06x} should use a renderbuffer");
         }
         // Colour formats stay on the texture path.

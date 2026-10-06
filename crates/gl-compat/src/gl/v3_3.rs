@@ -199,7 +199,7 @@ pub unsafe extern "C" fn glBlitFramebuffer(sx0:i32,sy0:i32,sx1:i32,sy1:i32,dx0:i
 }
 #[no_mangle]
 pub unsafe extern "C" fn glRenderbufferStorageMultisample(target:u32,samples:i32,internalformat:u32,w:i32,h:i32){
-    let ifmt = format_translate::map_renderbuffer_internal_format(internalformat);
+    let ifmt = format_translate::map_storage_internal(internalformat, crate::render_caps());
     if let Some(x)=f::<unsafe extern "C" fn(u32,i32,u32,i32,i32)>("glRenderbufferStorageMultisample"){x(target,samples,ifmt,w,h)}else{err(GL_INVALID_OPERATION)}
 }
 
@@ -212,10 +212,12 @@ pub unsafe extern "C" fn glTexStorage1D(target:u32,levels:i32,internalformat:u32
 }
 #[no_mangle]
 pub unsafe extern "C" fn glTexStorage2D(target:u32,levels:i32,internalformat:u32,width:i32,height:i32){
+    let internalformat = format_translate::map_storage_internal(internalformat, crate::render_caps());
     if let Some(x)=f::<unsafe extern "C" fn(u32,i32,u32,i32,i32)>("glTexStorage2D"){x(target,levels,internalformat,width,height)}else{err(GL_INVALID_OPERATION)}
 }
 #[no_mangle]
 pub unsafe extern "C" fn glTexStorage3D(target:u32,levels:i32,internalformat:u32,width:i32,height:i32,depth:i32){
+    let internalformat = format_translate::map_storage_internal(internalformat, crate::render_caps());
     if let Some(x)=f::<unsafe extern "C" fn(u32,i32,u32,i32,i32,i32)>("glTexStorage3D"){x(target,levels,internalformat,width,height,depth)}else{err(GL_INVALID_OPERATION)}
 }
 
