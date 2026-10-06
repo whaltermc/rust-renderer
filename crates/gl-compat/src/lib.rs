@@ -504,7 +504,7 @@ const GL_SHADING_LANGUAGE_VERSION: u32 = 0x8B8C;
 const GL_MAJOR_VERSION: u32 = 0x821B;
 const GL_MINOR_VERSION: u32 = 0x821C;
 
-static SPOOF_VERSION: &[u8] = b"3.3 (Core Profile) RustRenderer GLES translation\0";
+static SPOOF_VERSION: &[u8] = b"OpenGL ES 3.2 RustGL\0";
 static SPOOF_GLSL: &[u8] = b"3.30\0";
 
 /// OPT-IN, EXPERIMENTAL: `RENDERER_SPOOF_GL=1` makes the renderer claim OpenGL 3.3 core.
@@ -686,8 +686,9 @@ fn sys_egl_get_proc(name: &str) -> Option<*const c_void> {
 /// renders, instead of pointing at the layer.
 fn renderer_identity() -> (&'static CStr, &'static CStr) {
     static IDENTITY: OnceLock<(&'static CStr, &'static CStr)> = OnceLock::new();
-    *IDENTITY.get_or_init(|| (c"WhalterMC", c"RustGL (WhalterMC)"))
+    *IDENTITY.get_or_init(|| (c"WhalterMC", c"OpenGL ES 3.2 RustGL"))
 }
+
 static SPOOF_EXTENSIONS: &[u8] = b"\0"; // empty; use glGetStringi when needed
 
 #[no_mangle]
@@ -2744,7 +2745,7 @@ mod tests {
     fn minecraft_gpu_identity_uses_rustgl_brand() {
         let (vendor, renderer) = renderer_identity();
         assert_eq!(vendor.to_bytes(), b"WhalterMC");
-        assert_eq!(renderer.to_bytes(), b"RustGL (WhalterMC)");
+        assert_eq!(renderer.to_bytes(), b"OpenGL ES 3.2 RustGL");
     }
 
     /// One representative entry point per advertised extension. Claiming an extension
