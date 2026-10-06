@@ -42,6 +42,9 @@ jobs:
             "platforms;android-34" \
             "build-tools;34.0.0" \
             "ndk;27.2.12479018"
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends jq
 
       - name: Configure Android environment
         run: |
@@ -85,8 +88,19 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p target/reports
-          RENDERER_TRACE_GL=1 tools/trace_replay/run_fixture.sh 1.21.4 \
-            2>&1 | tee target/reports/minecraft-1.21.4-retrace.log
+          tools/trace_replay/run_fixture.sh 1.21.4 \
+            2>&1 | tee target/reports/minecraft-1.21.4-retrace.log || true
+          # Check if retrace actually passed by examining result.json
+          if [ -f target/trace-replay/results/1.21.4/result.json ]; then
+            PASSED=$(jq -r '.passed' target/trace-replay/results/1.21.4/result.json)
+            if [ "$PASSED" != "true" ]; then
+              echo "Retrace failed for 1.21.4"
+              exit 1
+            fi
+          else
+            echo "Result file not found"
+            exit 1
+          fi
 
       - name: Retrace Minecraft 1.21.4 world
         run: |
@@ -94,6 +108,16 @@ jobs:
           mkdir -p target/reports
           RENDERER_TRACE_GL=1 tools/trace_replay/run_fixture.sh 1.21.4-world \
             2>&1 | tee target/reports/minecraft-1.21.4-world-retrace.log
+          if [ -f target/trace-replay/results/1.21.4-world/result.json ]; then
+            PASSED=$(jq -r '.passed' target/trace-replay/results/1.21.4-world/result.json)
+            if [ "$PASSED" != "true" ]; then
+              echo "Retrace failed for 1.21.4-world"
+              exit 1
+            fi
+          else
+            echo "Result file not found"
+            exit 1
+          fi
 
       - name: Retrace Minecraft 1.21.4 shaders (Iris/BSL)
         run: |
@@ -101,6 +125,16 @@ jobs:
           mkdir -p target/reports
           RENDERER_TRACE_GL=1 tools/trace_replay/run_fixture.sh 1.21.4-shaders \
             2>&1 | tee target/reports/minecraft-1.21.4-shaders-retrace.log
+          if [ -f target/trace-replay/results/1.21.4-shaders/result.json ]; then
+            PASSED=$(jq -r '.passed' target/trace-replay/results/1.21.4-shaders/result.json)
+            if [ "$PASSED" != "true" ]; then
+              echo "Retrace failed for 1.21.4-shaders"
+              exit 1
+            fi
+          else
+            echo "Result file not found"
+            exit 1
+          fi
 
       - name: Generate HTML report
         run: |
