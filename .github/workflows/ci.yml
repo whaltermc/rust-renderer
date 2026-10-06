@@ -76,6 +76,9 @@ jobs:
           path: target/trace-replay/downloads
           key: trace-fixtures-${{ hashFiles('tools/trace_replay/run_fixture.sh') }}
 
+      - name: Make fixture script executable
+        run: chmod +x tools/trace_replay/run_fixture.sh
+
       - name: Retrace Minecraft 1.21.4
         run: |
           set -o pipefail
