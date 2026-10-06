@@ -42,7 +42,7 @@ jobs:
             "platforms;android-34" \
             "build-tools;34.0.0" \
             "ndk;27.2.12479018"
-        run: |
+
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends jq
 
@@ -89,8 +89,7 @@ jobs:
           set -o pipefail
           mkdir -p target/reports
           tools/trace_replay/run_fixture.sh 1.21.4 \
-            2>&1 | tee target/reports/minecraft-1.21.4-retrace.log || true
-          # Check if retrace actually passed by examining result.json
+            2>&1 | tee target/reports/minecraft-1.21.4-retrace.log
           if [ -f target/trace-replay/results/1.21.4/result.json ]; then
             PASSED=$(jq -r '.passed' target/trace-replay/results/1.21.4/result.json)
             if [ "$PASSED" != "true" ]; then
