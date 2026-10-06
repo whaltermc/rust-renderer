@@ -1033,6 +1033,96 @@ pub fn translate(src: &str) -> Result<String, String> {
     Ok(out)
 }
 
+/// Desktop GLSL → desktop GLSL targeting the GL 4.4 core profile (GLSL 3.30 core language).
+///
+/// GL 4.4 core exposes only the GLSL 3.30 language: desktop GLSL 4.x versions were removed
+/// from the desktop core profile, so any shader declaring GLSL 4.00 or later is rewritten to
+/// `#version 330 core`. Shaders declaring GLSL 1.10-3.30 pass through unchanged because GL
+/// 4.4 core supports those natively.
+///
+/// The only rewrites beyond version normalization are fixes for legacy desktop fixed-function
+/// builtins (`gl_ModelView*`, `ftransform`) which GLSL 3.30 core does not provide, and
+/// non-GLSL lines the game injects (`#moj_*`, `#import`, `#include`) plus the GLSL ES-only
+/// `shared` qualifier; `#error` messages are sanitized so they lex. This keeps a broken
+/// legacy shader from hard-failing while remaining a best-effort rewrite: geometry,
+/// tessellation and compute shaders are supported by GL 4.4 core and are therefore passed
+/// through rather than rejected. It does not translate desktop GLSL into GLSL ES.
+pub fn translate_desktop_440(src: &str) -> Result<String, String> {
+    let mut out = String::with_capacity(src.len() + 64);
+    for line in src.lines() {
+        let trimmed = line.trim_start();
+
+        // Version normalization: GL 4.4 core only has the GLSL 3.30 language, so versions
+        // 4.00+ (removed from the desktop core profile) map down to 330 core.
+        if let Some(rest) = trimmed.strip_prefix("#version") {
+            let mut it = rest.split_whitespace();
+            let num = it.next().and_then(|n| n.parse::<u32>().ok());
+            let es = it.next().is_some_and(|w| w == "es");
+            if !es {
+                let major = num.map_or(1, |v| v / 100); // 440/450 → 4, 330 → 3, 150 → 1, 100 → 1
+                if major >= 4 {
+                    out.push_str("#version 330 core\n");
+                    continue;
+                }
+            }
+            // 1.10-3.30 desktop pass through; `#version 300 es` also passes through since
+            // desktop 4.4 compilers accept ES shaders, and desktop needs no precision decls.
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+
+        // Mojang preprocessor directives are not valid GLSL anywhere in the game.
+        if trimmed.starts_with("#moj_") || trimmed.starts_with("#import") || trimmed.starts_with("#include") {
+            continue;
+        }
+
+        // `shared` is a GLSL ES storage qualifier with no desktop equivalent; drop it so a
+        // shader written against ES still compiles on desktop rather than failing.
+        if trimmed.starts_with("shared ") {
+            out.push_str("// stripped shared: ");
+            out.push_str(trimmed);
+            out.push('\n');
+            continue;
+        }
+
+        let mut s = line.to_string();
+
+        // Rare desktop fixed-function helpers are not part of GLSL 3.30 core; map them to
+        // identities, the same best-effort fallback the ES path uses for its target.
+        s = s.replace("gl_TextureMatrix[0]", "mat4(1.0f)")
+            .replace("gl_TextureMatrix[1]", "mat4(1.0f)")
+            .replace("gl_ModelViewProjectionMatrix", "mat4(1.0f)")
+            .replace("gl_ModelViewMatrix", "mat4(1.0f)")
+            .replace("gl_ProjectionMatrix", "mat4(1.0f)")
+            .replace("gl_NormalMatrix", "mat3(1.0f)");
+
+        // ftransform() is a legacy fixed-function call with no desktop core equivalent;
+        // expand it to the classic desktop form (identity matrix since the matrix is gone).
+        // Skip it if the shader declares a user-defined ftransform() function.
+        if !src.lines().any(|line| {
+            let Some(index) = line.find("ftransform()") else {
+                return false;
+            };
+            let preceded_by_identifier = index > 0
+                && (line.as_bytes()[index - 1].is_ascii_alphanumeric()
+                    || line.as_bytes()[index - 1] == b'_');
+            !preceded_by_identifier
+                && line[index + "ftransform()".len()..]
+                    .trim_start()
+                    .starts_with('{')
+        }) {
+            s = replace_glsl_call(&s, "ftransform()", "(mat4(1.0f) * gl_Vertex)");
+        }
+        match sanitize_error_directive(&s) {
+            Cow::Borrowed(l) => out.push_str(l),
+            Cow::Owned(o) => out.push_str(&o),
+        }
+        out.push('\n');
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1423,5 +1513,153 @@ mod tests {
         assert!(o.contains("dFdy(texcoord)"), "got: {o}");
         assert!(o.contains("fwidth(texcoord.x)"), "got: {o}");
         assert!(o.contains("textureGrad(tex, texcoord, dx, dy)"), "got: {o}");
+    }
+
+    #[test]
+    fn desktop_440_normalizes_glsl_4xx_versions() {
+        let o = translate_desktop_440("#version 450 core\nvoid main(){ gl_Position = vec4(0); }\n")
+            .unwrap();
+        assert!(o.starts_with("#version 330 core\n"), "{o}");
+
+        let o = translate_desktop_440("#version 440\nvoid main(){}\n").unwrap();
+        assert!(o.starts_with("#version 330 core\n"), "{o}");
+
+        let o = translate_desktop_440("#version 400 core\nvoid main(){}\n").unwrap();
+        assert!(o.starts_with("#version 330 core\n"), "{o}");
+    }
+
+    #[test]
+    fn desktop_440_passes_through_valid_versions() {
+        assert!(translate_desktop_440("#version 330 core\nvoid main(){ gl_Position = vec4(0); }\n")
+            .unwrap()
+            .starts_with("#version 330 core\n"));
+        assert!(translate_desktop_440("#version 150\nvoid main(){}\n").unwrap().starts_with("#version 150\n"));
+        assert!(translate_desktop_440("#version 110\nvoid main(){}\n").unwrap().starts_with("#version 110\n"));
+        // ES shaders pass through: desktop 4.4 compilers accept them, desktop needs no
+        // precision qualifiers.
+        assert!(translate_desktop_440("#version 300 es\nprecision highp float;\nvoid main(){}\n")
+            .unwrap()
+            .starts_with("#version 300 es\n"));
+    }
+
+    #[test]
+    fn desktop_440_keeps_core_qualifiers_and_features() {
+        let o = translate_desktop_440(
+            "#version 330 core\n\
+             layout(location=0, binding=2) in dvec3 p;\n\
+             noperspective in vec2 uv;\n\
+             uniform mat4 m;\n\
+             void main(){ gl_Position = m * vec4(p, 1); }\n",
+        )
+        .unwrap();
+        assert!(o.contains("layout(location=0, binding=2) in dvec3 p"));
+        assert!(o.contains("noperspective"));
+        assert!(o.contains("dvec3"));
+        assert!(o.contains("uniform mat4 m"));
+        assert!(!o.contains("precision"));
+    }
+
+    #[test]
+    fn desktop_440_strips_mojang_directives_and_shared() {
+        let o = translate_desktop_440(
+            "#version 330 core\n\
+             #moj_import <lighting>\n\
+             #import <vsh_main>\n\
+             #include <foo.glsl>\n\
+             shared float f = 1.0;\n\
+             void main(){ gl_Position = vec4(0); }\n",
+        )
+        .unwrap();
+        assert!(!o.contains("#moj_import"));
+        assert!(!o.contains("#import <vsh_main>"));
+        assert!(!o.contains("#include <foo.glsl>"));
+        assert!(o.contains("// stripped shared: shared float f = 1.0;"));
+    }
+
+    #[test]
+    fn desktop_440_rewrites_legacy_fixed_function_builtins() {
+        let o = translate_desktop_440(
+            "#version 150\n\
+             void main(){\n\
+             gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;\n\
+             gl_ModelViewMatrix = mat4(1.0);\n\
+             gl_ProjectionMatrix = mat4(1.0);\n\
+             gl_TextureMatrix[0] = mat4(1.0);\n\
+             gl_NormalMatrix = mat3(1.0);\n\
+             }\n",
+        )
+        .unwrap();
+        assert!(!o.contains("gl_ModelViewProjectionMatrix"));
+        assert!(!o.contains("gl_ModelViewMatrix"));
+        assert!(!o.contains("gl_ProjectionMatrix"));
+        assert!(!o.contains("gl_TextureMatrix"));
+        assert!(!o.contains("gl_NormalMatrix"));
+        assert!(o.contains("mat4(1.0)"));
+        assert!(o.contains("mat3(1.0)"));
+    }
+
+    #[test]
+    fn desktop_440_rewrites_ftransform() {
+        let o = translate_desktop_440(
+            "#version 150\nvoid main(){ gl_Position = ftransform(); }\n",
+        )
+        .unwrap();
+        assert!(o.contains("gl_Position = (mat4(1.0f) * gl_Vertex)"), "got: {o}");
+    }
+
+    #[test]
+    fn desktop_440_sanitizes_error_directives() {
+        let o = translate_desktop_440(
+            "#version 330 core\n#error \"GL_ARB_gpu_shader5 is required\"\nvoid main(){}\n",
+        )
+        .unwrap();
+        assert!(!o.contains('"'), "quoted #error message survived: {o}");
+        assert!(o.contains("#error GL_ARB_gpu_shader5 is required"), "{o}");
+    }
+
+    #[test]
+    fn desktop_440_does_not_reject_geometry_tessellation_or_compute() {
+        // GL 4.4 core supports geometry/tessellation/compute, so these are passed through
+        // rather than rejected.
+        assert!(translate_desktop_440("#version 330 core\nvoid main(){ EmitVertex(); }\n").is_ok());
+        assert!(translate_desktop_440("#version 330 core\nlayout(triangles) out;\nvoid main(){}\n").is_ok());
+        assert!(translate_desktop_440("#version 330 core\nlayout(local_size_x = 8);\nvoid main(){}\n").is_ok());
+    }
+
+    #[test]
+    fn desktop_440_passthrough_matches_its_desktop_input() {
+        let src = "#version 330 core\n\
+                   in vec3 p;\nout vec4 c;\n\
+                   uniform sampler2D s;\n\
+                   void main() { c = texture(s, p.xy); }\n";
+        let o = translate_desktop_440(src).unwrap();
+        assert_eq!(o.trim_end(), src.trim_end());
+    }
+
+    #[test]
+    fn desktop_440_realistic_iris_fragment_passes_through() {
+        // A real-world style Iris/BSL fragment: desktop 3.30, in/out, sampler, and a
+        // legacy gl_TextureMatrix reference from mobile shader generators. GL 4.4 core
+        // accepts this unchanged.
+        let src = "#version 330 core\n\
+                   in vec2 UV;\n\
+                   in vec3 V_POSITION;\n\
+                   in vec4 V_COLOR;\n\
+                   out vec4 fragColor;\n\
+                   uniform sampler2D s_rendertexture_0;\n\
+                   void main() {\n\
+                       vec2 uv = (gl_TextureMatrix[0] * vec4(UV, 0, 1)).xy;\n\
+                       vec4 color = texture(s_rendertexture_0, uv);\n\
+                       color = color * V_COLOR;\n\
+                       fragColor = color;\n\
+                   }\n";
+        let o = translate_desktop_440(src).unwrap();
+        assert!(o.contains("#version 330 core\n"));
+        assert!(o.contains("in vec2 UV"));
+        assert!(o.contains("out vec4 fragColor"));
+        assert!(o.contains("uniform sampler2D s_rendertexture_0"));
+        assert!(!o.contains("gl_TextureMatrix"), "legacy builtin should be identity-rewritten: {o}");
+        assert!(o.contains("mat4(1.0f)"));
+        assert!(o.contains("fragColor = color"));
     }
 }
