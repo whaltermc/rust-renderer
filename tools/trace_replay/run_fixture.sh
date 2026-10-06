@@ -102,7 +102,7 @@ fi
 cargo build --release -p gl-compat
 
 # The retrace has to see the context the capture recorded, which is an ES context. With the
-# spoof on, glGetString reports a desktop "3.3 (Core Profile)" string, the replay tool takes a
+# spoof on, glGetString reports a desktop "4.4 (Core Profile)" string, the replay tool takes a
 # desktop framebuffer readback path against an ES context, and the snapshot comes back empty
 # ("failed to get snapshot") even though every call replayed. Spoofing is for the game, not
 # for a recorded capture.
@@ -116,8 +116,8 @@ fi
 
 export EGL_PLATFORM="${EGL_PLATFORM:-surfaceless}"
 export LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}"
-export MESA_GL_VERSION_OVERRIDE="${MESA_GL_VERSION_OVERRIDE:-4.6}"
-export MESA_GLSL_VERSION_OVERRIDE="${MESA_GLSL_VERSION_OVERRIDE:-460}"
+export MESA_GL_VERSION_OVERRIDE="${MESA_GL_VERSION_OVERRIDE:-4.4}"
+export MESA_GLSL_VERSION_OVERRIDE="${MESA_GLSL_VERSION_OVERRIDE:-440}"
 
 "$BUILD_DIR/rust_renderer_trace_replay" \
     --trace "$TRACE_DIR/trace.trace" \

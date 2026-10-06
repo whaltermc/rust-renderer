@@ -504,10 +504,10 @@ const GL_SHADING_LANGUAGE_VERSION: u32 = 0x8B8C;
 const GL_MAJOR_VERSION: u32 = 0x821B;
 const GL_MINOR_VERSION: u32 = 0x821C;
 
-static SPOOF_VERSION: &[u8] = b"3.3 (Core Profile) RustGL\0";
+static SPOOF_VERSION: &[u8] = b"4.4 (Core Profile) RustGL\0";
 static SPOOF_GLSL: &[u8] = b"3.30\0";
 
-/// OPT-IN, EXPERIMENTAL: `RENDERER_SPOOF_GL=1` makes the renderer claim OpenGL 3.3 core.
+/// OPT-IN, EXPERIMENTAL: `RENDERER_SPOOF_GL=1` makes the renderer claim OpenGL 4.4 core.
 /// The claim is NOT backed by a full implementation. Off by default (spec: never advertise
 /// unsupported features).
 fn spoof_gl() -> bool {
@@ -549,6 +549,62 @@ fn gles_driver() -> Option<&'static GlesDriver> {
         None
     })
     .as_ref()
+}
+
+/// Whether the current driver context is OpenGL ES, which decides whether desktop GLSL is
+/// rewritten to GLSL ES 3.00 or to desktop GLSL targeting GL 4.4 core (GLSL 3.30 core
+/// language).
+///
+/// Probed once from the real driver's `GL_VERSION` string (never the spoofed one): ES
+/// drivers report "OpenGL ES 3.x ...", desktop drivers report "<major>.<minor> (Core
+/// Profile) ...". Cached for the lifetime of the process — the shader target is tied to the
+/// driver library, not to individual contexts.
+static SHADER_TRANSLATION_IS_ES: OnceLock<bool> = OnceLock::new();
+
+/// True when shaders must be rewritten to GLSL ES 3.00 (GLES driver); false when they can be
+/// compiled as desktop GLSL against a GL 4.4 core driver.
+pub(crate) fn shader_translation_is_es() -> bool {
+    // Optional explicit override (RENDERER_SHADER_TRANSLATION_TARGET=es|desktop_440),
+    // useful for testing the desktop path on an ES context and vice versa.
+    if let Ok(t) = std::env::var("RENDERER_SHADER_TRANSLATION_TARGET") {
+        return match t.as_str() {
+            "es" => true,
+            "desktop_440" => false,
+            other => {
+                log(&format!(
+                    "[GLBridge] unknown RENDERER_SHADER_TRANSLATION_TARGET={other:?}, ignoring"
+                ));
+                probe_shader_target_is_es()
+            }
+        };
+    }
+    *SHADER_TRANSLATION_IS_ES.get_or_init(probe_shader_target_is_es)
+}
+
+fn probe_shader_target_is_es() -> bool {
+    // Query the real driver, not the spoof: with `RENDERER_SPOOF_GL=1` GL_VERSION is
+    // always the desktop 4.4 string. A context must be current for `glGetString` to return
+    // anything useful, and shader compilation can only happen with one current.
+    unsafe {
+        type F = unsafe extern "C" fn(u32) -> *const u8;
+        if let Some(f) = driver_fn_cached::<F>("glGetString") {
+            let p = f(GL_VERSION);
+            if !p.is_null() {
+                let s = std::ffi::CStr::from_ptr(p as *const c_char).to_string_lossy();
+                return s.trim_start().starts_with("OpenGL ES");
+            }
+        }
+    }
+    // If the driver string can't be read, fall back to ES: the common Android path and the
+    // trace-replay desktop path both use an ES context even though they report the spoofed
+    // desktop version. A desktop-only build that somehow reaches here without a context
+    // would fail on the next shader compile anyway.
+    true
+}
+
+/// ES-vs-desktop driver detection used by the shader-translation router and its tests.
+pub(crate) fn probe_shader_target_is_es_for_test(version: &str) -> bool {
+    version.trim_start().starts_with("OpenGL ES")
 }
 
 /// Resolved driver entry points, keyed by the address of the NUL-terminated name literal.
@@ -961,22 +1017,41 @@ pub unsafe extern "C" fn glShaderSource(
         };
         src.push_str(&String::from_utf8_lossy(bytes));
     }
-    let translated = match shader_translate::translate(&src) {
+    let is_es = shader_translation_is_es();
+    let translated = if is_es {
+        shader_translate::translate(&src)
+    } else {
+        shader_translate::translate_desktop_440(&src)
+    };
+    let translated = match translated {
         Ok(t) => t,
         Err(e) => {
             // Do not abort with empty source — that freezes loading. Pass a tiny valid
             // shader so glCompileShader fails cleanly; the game can fall back.
             log(&format!("[ShaderTranslate] shader {shader} rejected: {e}"));
-            if src.contains("gl_Position") || src.contains("gl_Vertex") {
-                "#version 300 es
+            if is_es {
+                if src.contains("gl_Position") || src.contains("gl_Vertex") {
+                    "#version 300 es
 void main(){ gl_Position = vec4(0.0); }
 ".into()
-            } else {
-                "#version 300 es
+                } else {
+                    "#version 300 es
 precision highp float;
 layout(location=0) out vec4 c;
 void main(){ c = vec4(1.0); }
 ".into()
+                }
+            } else {
+                if src.contains("gl_Position") || src.contains("gl_Vertex") {
+                    "#version 330 core
+void main(){ gl_Position = vec4(0.0); }
+".into()
+                } else {
+                    "#version 330 core
+out vec4 c;
+void main(){ c = vec4(1.0); }
+".into()
+                }
             }
         }
     };
@@ -2352,6 +2427,10 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glGetVertexArrayAttribStride" => vertex_state::glGetVertexArrayAttribStride as *const c_void,
         b"glGetVertexAttribStride" => vertex_state::glGetVertexAttribStride as *const c_void,
         b"glVertexArrayAttribBinding" => vertex_state::glVertexArrayAttribBinding as *const c_void,
+        b"glVertexAttribFormat" => gl::v3_3::glVertexAttribFormat as *const c_void,
+        b"glVertexAttribBinding" => gl::v3_3::glVertexAttribBinding as *const c_void,
+        b"glVertexBindingDivisor" => gl::v3_3::glVertexBindingDivisor as *const c_void,
+        b"glVertexAttribIFormat" => gl::v3_3::glVertexAttribIFormat as *const c_void,
         b"glBindVertexBuffer" => vertex_state::glBindVertexBuffer as *const c_void,
         b"glEnableVertexArrayAttrib" => vertex_state::glEnableVertexArrayAttrib as *const c_void,
         b"glDisableVertexArrayAttrib" => vertex_state::glDisableVertexArrayAttrib as *const c_void,
@@ -3149,5 +3228,28 @@ mod tests {
         let ids = [7u32, 8u32];
         unsafe { glDeleteBuffers(2, ids.as_ptr()) };
         assert!(!is_immutable(7));
+    }
+
+    #[test]
+    fn shader_translation_is_es_probes_real_driver_version() {
+        // The probe examines the driver's real GL_VERSION, not the spoofed one: ES drivers
+        // report "OpenGL ES 3.x ...", desktop drivers report "<major>.<minor> (Core Profile) ...".
+        assert!(super::probe_shader_target_is_es_for_test("OpenGL ES 3.2 Mesa 24.3"));
+        assert!(super::probe_shader_target_is_es_for_test("OpenGL ES GLX Mesa 24.3"));
+        assert!(!super::probe_shader_target_is_es_for_test("4.6 (Core Profile) Mesa 24.3"));
+        assert!(!super::probe_shader_target_is_es_for_test("4.5 (Core Profile) NVIDIA Corp"));
+        assert!(!super::probe_shader_target_is_es_for_test("4.4 (Core Profile) RustGL"));
+    }
+
+    #[test]
+    fn shader_translation_target_overridable_via_env_var() {
+        std::env::set_var("RENDERER_SHADER_TRANSLATION_TARGET", "es");
+        assert!(crate::shader_translation_is_es());
+        std::env::set_var("RENDERER_SHADER_TRANSLATION_TARGET", "desktop_440");
+        assert!(!crate::shader_translation_is_es());
+        std::env::set_var("RENDERER_SHADER_TRANSLATION_TARGET", "invalid");
+        // Unknown values fall back to probing instead of panicking.
+        let _ = crate::shader_translation_is_es();
+        std::env::remove_var("RENDERER_SHADER_TRANSLATION_TARGET");
     }
 }

@@ -97,6 +97,53 @@ pub unsafe extern "C" fn glGetSamplerParameterfv(sampler: u32, pname: u32, p: *m
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn glVertexAttribFormat(
+    index: u32,
+    size: i32,
+    ty: u32,
+    normalized: bool,
+    relativeoffset: u32,
+) {
+    let mut vao = 0i32;
+    if let Some(get_int) = f::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
+        get_int(0x8CA6, &mut vao);
+    }
+    crate::vertex_state::glVertexArrayAttribFormat(vao as u32, index, size, ty, normalized, relativeoffset);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glVertexAttribBinding(attribindex: u32, bindingindex: u32) {
+    let mut vao = 0i32;
+    if let Some(get_int) = f::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
+        get_int(0x8CA6, &mut vao);
+    }
+    crate::vertex_state::glVertexArrayAttribBinding(vao as u32, attribindex, bindingindex);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glVertexBindingDivisor(bindingindex: u32, divisor: u32) {
+    if let Some(f) = f::<unsafe extern "C" fn(u32, u32)>("glVertexAttribDivisor") {
+        f(bindingindex, divisor);
+    } else {
+        err(GL_INVALID_OPERATION);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glVertexAttribIFormat(
+    index: u32,
+    size: i32,
+    ty: u32,
+    relativeoffset: u32,
+) {
+    let mut vao = 0i32;
+    if let Some(get_int) = f::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
+        get_int(0x8CA6, &mut vao);
+    }
+    crate::vertex_state::glVertexArrayAttribIFormat(vao as u32, index, size, ty, relativeoffset);
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn glVertexAttribDivisor(index: u32, divisor: u32) {
     if let Some(x)=f::<unsafe extern "C" fn(u32,u32)>("glVertexAttribDivisor") { x(index,divisor); } else { err(GL_INVALID_OPERATION); }
 }
