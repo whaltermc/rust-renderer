@@ -1395,19 +1395,29 @@ pub unsafe extern "C" fn glGetTexLevelParameteriv(target: u32, level: i32, pname
 /// ES 3.0 only guarantees four colour attachments, and passing the pack's full count to a
 /// driver that cannot honour it raises GL_INVALID_OPERATION — which shows up as a black or
 /// half-rendered world rather than a diagnosable error. Clamping keeps the frame drawing.
+///
+/// The clamp uses the *smaller* of `GL_MAX_DRAW_BUFFERS` and `GL_MAX_COLOR_ATTACHMENTS`
+/// because some Android GLES 3.0 drivers advertise more draw buffers than the framebuffer
+/// has colour-attachment slots for; exceeding the attachment limit leaves the framebuffer
+/// in `GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT` (0x8CD6) instead of failing cleanly.
 #[no_mangle]
 pub unsafe extern "C" fn glDrawBuffers(n: i32, b: *const u32) {
     if n < 0 || (n > 0 && b.is_null()) {
         errors().set(GL_INVALID_VALUE);
         return;
     }
-    let max = gles3::caps().max_draw_buffers;
+    let caps = gles3::caps();
+    let max = if caps.valid {
+        caps.max_draw_buffers.min(caps.max_color_attachments).max(0)
+    } else {
+        caps.max_draw_buffers
+    };
     let mut n = n;
     if max > 0 && n > max {
         static ONCE: AtomicBool = AtomicBool::new(false);
         if !ONCE.swap(true, Ordering::Relaxed) {
             log(&format!(
-                "[GLCompat] glDrawBuffers: device supports {max} draw buffers, \
+                "[GLCompat] glDrawBuffers: device supports {max} draw/color buffers, \
                  clamping the requested {n} (shader pack declares more layers than the GPU has)"
             ));
         }

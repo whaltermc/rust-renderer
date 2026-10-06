@@ -419,6 +419,13 @@ pub unsafe extern "C" fn glNamedFramebufferDrawBuffers(fbo: u32, n: i32, b: *con
         errors().set(0x0502);
         return;
     }
+    let caps = gles3::caps();
+    let max = if caps.valid {
+        caps.max_draw_buffers.min(caps.max_color_attachments).max(0)
+    } else {
+        caps.max_draw_buffers
+    };
+    let n = if max > 0 && n > max { max } else { n };
     if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(i32, *const u32)>("glDrawBuffers") {
         f(n, b);
     }
