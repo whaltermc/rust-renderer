@@ -504,7 +504,7 @@ const GL_SHADING_LANGUAGE_VERSION: u32 = 0x8B8C;
 const GL_MAJOR_VERSION: u32 = 0x821B;
 const GL_MINOR_VERSION: u32 = 0x821C;
 
-static SPOOF_VERSION: &[u8] = b"OpenGL ES 3.2 RustGL\0";
+static SPOOF_VERSION: &[u8] = b"3.3 (Core Profile) RustGL\0";
 static SPOOF_GLSL: &[u8] = b"3.30\0";
 
 /// OPT-IN, EXPERIMENTAL: `RENDERER_SPOOF_GL=1` makes the renderer claim OpenGL 3.3 core.
