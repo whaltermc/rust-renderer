@@ -7,6 +7,7 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 
+mod compat;
 mod numeric;
 
 const PRECISION_300: &str = "\
@@ -828,12 +829,20 @@ fn rewrite_line_body(
 
     if use_300 {
         if let Some(rest) = t.strip_prefix("attribute ") {
+            let rest = compat::rename_reserved_identifiers(rest);
             return format!("{indent}in {rest}");
         }
         if let Some(rest) = t.strip_prefix("varying ") {
             let kw = if is_frag { "in" } else { "out" };
+            let rest = compat::rename_reserved_identifiers(rest);
             return format!("{indent}{kw} {rest}");
         }
+
+        // Desktop-only spellings with ES 3.00 equivalents: derivative-control variants,
+        // ARB/EXT texture-LOD names and identifiers ES reserves.
+        s = compat::rewrite_extension_texture_names(&s);
+        s = compat::rewrite_derivative_names(&s);
+        s = compat::rename_reserved_identifiers(&s);
 
         s = s
             .replace("texture2DLod(", "textureLod(")
@@ -959,7 +968,15 @@ pub fn translate(src: &str) -> Result<String, String> {
     let mut out = String::with_capacity(src.len() + 512);
     out.push_str(header);
     out.push('\n');
+    // ES 1.00 only has derivatives behind an extension, and every #extension in the source is
+    // dropped below, so the one the shader needs is declared here, before any other token.
+    if !use_300 && is_frag && compat::uses_derivatives(src) {
+        out.push_str("#extension GL_OES_standard_derivatives : enable\n");
+    }
     out.push_str(precision);
+    if use_300 && compat::needs_fma_macro(src) {
+        out.push_str(compat::FMA_MACRO);
+    }
     if needs_int_mod {
         out.push_str(numeric::int_mod_helper());
         out.push('\n');
@@ -1019,6 +1036,37 @@ pub fn translate(src: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn derivative_control_functions_compile_as_es_derivatives() {
+        let o = translate(
+            "#version 450 core\nin vec3 p;\nout vec4 c;\nvoid main(){ vec3 n = cross(dFdxFine(p), dFdyCoarse(p)); c = vec4(n, fwidthCoarse(p.x)); }\n",
+        )
+        .unwrap();
+        assert!(!o.contains("Fine") && !o.contains("Coarse"), "{o}");
+        assert!(o.contains("dFdx(p)") && o.contains("dFdy(p)") && o.contains("fwidth(p.x)"));
+    }
+
+    #[test]
+    fn es100_derivative_shader_declares_the_extension() {
+        let o = translate("#version 100\nvarying vec2 uv;\nvoid main(){ gl_FragColor = vec4(dFdx(uv.x)); }\n").unwrap();
+        // version < 110 takes the ES 1.00 path
+        assert!(o.starts_with("#version 100\n#extension GL_OES_standard_derivatives : enable\n"), "{o}");
+    }
+
+    #[test]
+    fn reserved_identifiers_are_renamed_in_both_stages() {
+        let v = translate("#version 330 core\nout vec2 filter;\nvoid main(){ filter = vec2(0.); gl_Position = vec4(0.); }\n").unwrap();
+        let f = translate("#version 330 core\nin vec2 filter;\nout vec4 c;\nvoid main(){ c = vec4(filter, 0., 1.); }\n").unwrap();
+        assert!(v.contains("rs_id_filter") && f.contains("rs_id_filter"));
+        assert!(!v.contains(" filter") && !f.contains("(filter"));
+    }
+
+    #[test]
+    fn fma_is_available_without_the_gl4_builtin() {
+        let o = translate("#version 400 core\nout vec4 c;\nvoid main(){ c = vec4(fma(1.0, 2.0, 3.0)); }\n").unwrap();
+        assert!(o.contains("#define fma(a, b, c)"));
+    }
 
     #[test]
     fn core_150_header() {
