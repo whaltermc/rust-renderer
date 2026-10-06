@@ -4,7 +4,7 @@
 //! - shader source rewriting (desktop GLSL → GLSL ES)
 //! - BGRA upload swizzle, clamp-to-border → clamp-to-edge
 //! - glMapBuffer → glMapBufferRange, glDrawBuffer → glDrawBuffers, glClearDepth → f
-//! - optional GL 3.2 version spoof (`RENDERER_SPOOF_GL=1`, on by default via plugin env)
+//! - optional GL 3.2 version spoof (`RENDERER_SPOOF_GL=1`, off by default)
 //!
 //! This is still incomplete for full Minecraft parity (no Vulkan, limited shader rewrite,
 //! missing some desktop-only APIs). Expect crash/black-screen on unhandled paths.
@@ -513,10 +513,10 @@ static SPOOF_GLSL: &[u8] = b"3.30\0";
 fn spoof_gl() -> bool {
     static S: OnceLock<bool> = OnceLock::new();
     *S.get_or_init(|| {
-        // Default ON so Minecraft's GL version checks pass. Set RENDERER_SPOOF_GL=0 to disable.
+        // Default OFF so Minecraft/Iris sees the real GLES version. Set RENDERER_SPOOF_GL=1 to enable.
         let on = std::env::var("RENDERER_SPOOF_GL")
-            .map(|v| v != "0")
-            .unwrap_or(true);
+            .map(|v| v == "1")
+            .unwrap_or(false);
         if on {
             log("[GLCompat] RENDERER_SPOOF_GL enabled: advertising OpenGL 3.3 (passthrough GLES)");
         }

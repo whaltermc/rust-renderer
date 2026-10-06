@@ -35,7 +35,7 @@ public class MainActivity extends Activity {
             + "RENDERER_ANGLE_BACKEND=\n"
             + "RENDERER_ANGLE_RENDERER=\n"
             + "RENDERER_DEBUG=1\n"
-            + "RENDERER_SPOOF_GL=1\n"
+            + "RENDERER_SPOOF_GL=0\n"
             + "RENDERER_TRACE_GL=1\n"
             + "RENDERER_DUMP_SHADER_DIR=/path/to/dir\n"
             + "\nSet these in ZalithLauncher renderer settings.");
