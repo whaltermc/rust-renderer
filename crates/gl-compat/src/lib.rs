@@ -511,17 +511,7 @@ static SPOOF_GLSL: &[u8] = b"3.30\0";
 /// The claim is NOT backed by a full implementation. Off by default (spec: never advertise
 /// unsupported features).
 fn spoof_gl() -> bool {
-    static S: OnceLock<bool> = OnceLock::new();
-    *S.get_or_init(|| {
-        // Default OFF so Minecraft/Iris sees the real GLES version. Set RENDERER_SPOOF_GL=1 to enable.
-        let on = std::env::var("RENDERER_SPOOF_GL")
-            .map(|v| v == "1")
-            .unwrap_or(false);
-        if on {
-            log("[GLCompat] RENDERER_SPOOF_GL enabled: advertising OpenGL 3.3 (passthrough GLES)");
-        }
-        on
-    })
+    true
 }
 
 /// Resolves a driver function pointer of type `T` (must be a fn pointer type).

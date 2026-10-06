@@ -78,19 +78,17 @@ val pluginRendererConfig = buildJsonValue {
             // GLES is the only backend that currently draws Minecraft frames. Vulkan is
             // device discovery only, so don't expose non-rendering choices in the launcher.
             normal("RENDERER_BACKEND", "gles")
-            // 1 = report OpenGL 3.3 / GLSL 330 so version checks pass; 0 = report the real
-            // GLES strings (useful when diagnosing a driver-specific problem).
-            // Explicit values rather than `toggleable`, because this variable defaults to
-            // "on" in code: an unset value means spoof enabled, so a switch that removes the
-            // variable when disabled could not turn it off.
+// Always enabled so Iris/Minecraft sees OpenGL 3.3 Core Profile.
+            // Not toggleable since it must be on for version checks to pass.
             selectable(
                 key = "RENDERER_SPOOF_GL",
                 items = RendererConfig.EnvItems(
-                    defaultValue = "0",
+                    defaultValue = "1",
                     values = listOf(
-                        "1",
-                        "0"
+                        "1"
                     )
+                )
+            )
                 )
             )
             // Logs the last 16 forwarded GL calls whenever glGetError returns non-zero.
