@@ -60,6 +60,10 @@ jobs:
           cargo test -p renderer-core
           cargo ndk -t arm64-v8a build --release -p gl-compat
 
+      - name: Build Rust renderer for host (for trace replay)
+        run: |
+          cargo build --release -p gl-compat
+
       - name: Install renderer library
         run: |
           install -D \
