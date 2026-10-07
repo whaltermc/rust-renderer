@@ -39,6 +39,33 @@ pub struct GlesCapabilities {
     pub device_description: String,
     /// `GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT`; 0 when unsupported.
     pub max_anisotropy: i32,
+    /// Whether compute shaders are supported (ES 3.1+ or GL_EXT_compute_shader).
+    pub has_compute_shader: bool,
+    /// Maximum number of work groups in X, Y, Z dimensions.
+    pub max_compute_work_group_count: [i32; 3],
+    /// Maximum size of a work group in X, Y, Z dimensions.
+    pub max_compute_work_group_size: [i32; 3],
+    /// Maximum number of uniform components in a compute shader.
+    pub max_compute_uniform_components: i32,
+    /// Maximum number of work group invocations.
+    pub max_compute_work_group_invocations: i32,
+    /// Whether indirect draws are supported (ES 3.2+ or GL_EXT_multi_draw_indirect).
+    pub has_indirect_draw: bool,
+    /// Maximum number of draw commands for indirect draws.
+    pub max_draw_indirect_commands: i32,
+    /// Whether KHR_debug is supported.
+    pub has_debug_output: bool,
+    /// Whether texture buffers are supported (ES 3.2+ or GL_EXT_texture_buffer).
+    pub has_texture_buffer: bool,
+    /// Whether texture view is supported (ES 3.2+ or GL_EXT_texture_view).
+    pub has_texture_view: bool,
+    /// Whether atomic counters are supported (ES 3.1+ or GL_EXT_shader_atomic_counters / GL_OES_shader_atomic_counters).
+    pub has_atomic_counter: bool,
+    /// Whether shader image load/store is supported (ES 3.1+ or GL_EXT_shader_image_load_store).
+    pub has_shader_image_load_store: bool,
+    /// Whether double-precision vertex attributes (GL 4.1 / ARB_vertex_attrib_64bit) are supported.
+    pub has_vertex_attrib_64bit: bool,
+    pub has_provoking_vertex: bool,
     /// Whether the probe ran against a live context.
     pub valid: bool,
 }
@@ -92,6 +119,11 @@ const GL_MAX_TEXTURE_IMAGE_UNITS: u32 = 0x8872;
 const GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS: u32 = 0x8B4D;
 const GL_MAX_UNIFORM_BLOCK_SIZE: u32 = 0x8A30;
 const GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT: u32 = 0x84FF;
+const GL_MAX_COMPUTE_WORK_GROUP_COUNT: u32 = 0x91BE;
+const GL_MAX_COMPUTE_WORK_GROUP_SIZE: u32 = 0x91BF;
+const GL_MAX_COMPUTE_UNIFORM_COMPONENTS: u32 = 0x8263;
+const GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS: u32 = 0x90EB;
+const GL_MAX_DRAW_INDIRECT_COUNT: u32 = 0x88FC;
 
 /// Reads extensions and limits from the current context. Returns an invalid `GlesCapabilities` when no
 /// context is current, so callers can fall back rather than trust empty answers.
@@ -174,6 +206,44 @@ pub fn probe() -> GlesCapabilities {
     limit(GL_MAX_UNIFORM_BLOCK_SIZE, &mut caps.max_uniform_block_size);
     limit(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &mut caps.max_anisotropy);
 
+    // Compute shader detection: ES 3.1+ or GL_EXT_compute_shader extension
+    let has_compute = caps.es_at_least(3, 1) || caps.has(b"GL_EXT_compute_shader\0");
+    caps.has_compute_shader = has_compute;
+    if has_compute {
+        let mut v = [0i32; 3];
+        unsafe { get_int(GL_MAX_COMPUTE_WORK_GROUP_COUNT, v.as_mut_ptr()) };
+        caps.max_compute_work_group_count = v;
+        unsafe { get_int(GL_MAX_COMPUTE_WORK_GROUP_SIZE, v.as_mut_ptr()) };
+        caps.max_compute_work_group_size = v;
+        limit(GL_MAX_COMPUTE_UNIFORM_COMPONENTS, &mut caps.max_compute_uniform_components);
+        limit(GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS, &mut caps.max_compute_work_group_invocations);
+    } else {
+        caps.max_compute_work_group_count = [0, 0, 0];
+        caps.max_compute_work_group_size = [0, 0, 0];
+        caps.max_compute_uniform_components = 0;
+        caps.max_compute_work_group_invocations = 0;
+    }
+
+    // Indirect draw detection: ES 3.2+ or GL_EXT_multi_draw_indirect extension
+    let has_indirect = caps.es_at_least(3, 2) || caps.has(b"GL_EXT_multi_draw_indirect\0");
+    caps.has_indirect_draw = has_indirect;
+    if has_indirect {
+        limit(GL_MAX_DRAW_INDIRECT_COUNT, &mut caps.max_draw_indirect_commands);
+    } else {
+        caps.max_draw_indirect_commands = 0;
+    }
+
+
+    // Texture buffer detection: ES 3.2+ or GL_EXT_texture_buffer extension
+    caps.has_texture_buffer = caps.es_at_least(3, 2) || caps.has(b"GL_EXT_texture_buffer\0");
+    // Texture view detection: ES 3.2+ or GL_EXT_texture_view extension
+    caps.has_texture_view = caps.es_at_least(3, 2) || caps.has(b"GL_EXT_texture_view\0");
+
+    // Shader image load/store detection: ES 3.1+ or GL_EXT_shader_image_load_store extension
+    caps.has_shader_image_load_store = caps.es_at_least(3, 1) || caps.has(b"GL_EXT_shader_image_load_store\0");
+    caps.has_vertex_attrib_64bit = caps.has(b"GL_ARB_vertex_attrib_64bit\0");
+    caps.has_provoking_vertex = caps.has(b"GL_ARB_provoking_vertex\0");
+
     caps.device_description = caps.version_string.clone();
     caps.valid = true;
     caps
@@ -238,6 +308,10 @@ pub fn supported_aliases(c: &GlesCapabilities) -> Vec<&'static [u8]> {
     if c.es_at_least(3, 1) {
         out.push(ext!("GL_ARB_program_interface_query"));
     }
+    // Indirect draws (multi-draw indirect) are ES 3.2+ or GL_EXT_multi_draw_indirect
+    if c.es_at_least(3, 2) || c.has(ext!("GL_EXT_multi_draw_indirect\0")) {
+        out.push(ext!("GL_ARB_multi_draw_indirect"));
+    }
     // Only claim what the driver actually reports and can actually do.
     #[cfg(test)]
     println!("INFN has={} max={} nexts={}", c.has(ext!("GL_EXT_texture_filter_anisotropic")), c.max_anisotropy, c.extensions.len());
@@ -249,6 +323,53 @@ pub fn supported_aliases(c: &GlesCapabilities) -> Vec<&'static [u8]> {
     }
     if c.supports_half_float_color_targets() {
         out.push(ext!("GL_EXT_color_buffer_half_float"));
+    }
+    if c.has_debug_output {
+        out.push(ext!("GL_KHR_debug"));
+    }
+    // Texture buffer support via ES 3.2+ or GL_EXT_texture_buffer
+    if c.has_texture_buffer {
+        out.push(ext!("GL_ARB_texture_buffer_object"));
+    }
+    // Texture view support via ES 3.2+ or GL_EXT_texture_view
+    if c.has_texture_view {
+        out.push(ext!("GL_ARB_texture_view"));
+    }
+    // Atomic counter support via ES 3.1+ or GL_EXT_shader_atomic_counters / GL_OES_shader_atomic_counters
+    if c.has_atomic_counter {
+        out.push(ext!("GL_ARB_atomic_counter"));
+    }
+    // Shader image load/store support via ES 3.1+ or GL_EXT_shader_image_load_store
+    if c.has_shader_image_load_store {
+        out.push(ext!("GL_ARB_shader_image_load_store"));
+    }
+    // Vertex attrib 64-bit support via GL_ARB_vertex_attrib_64bit
+    if c.has_vertex_attrib_64bit {
+        out.push(ext!("GL_ARB_vertex_attrib_64bit"));
+    }
+    // Provoking vertex support via GL_ARB_provoking_vertex
+    if c.has_provoking_vertex {
+        out.push(ext!("GL_ARB_provoking_vertex"));
+    }
+    // Shader storage buffer objects (SSBOs) via ES 3.1+ or GL_EXT_shader_storage_buffer_object
+    if c.es_at_least(3, 1) || c.has(b"GL_EXT_shader_storage_buffer_object\0") {
+        out.push(ext!("GL_ARB_shader_storage_buffer_object"));
+    }
+    // Internalformat query 2 via ES 3.1+ or GL_EXT_internalformat_query2
+    if c.es_at_least(3, 1) || c.has(ext!("GL_EXT_internalformat_query2\0")) {
+        out.push(ext!("GL_ARB_internalformat_query2"));
+    }
+    // Stencil texturing via ES 3.2+ or GL_EXT_stencil_texturing
+    if c.es_at_least(3, 2) || c.has(ext!("GL_EXT_stencil_texturing\0")) {
+        out.push(ext!("GL_ARB_stencil_texturing"));
+    }
+    // Texture mirror clamp to edge via ES 3.2+ or GL_EXT_texture_mirror_clamp_to_edge
+    if c.es_at_least(3, 2) || c.has(ext!("GL_EXT_texture_mirror_clamp_to_edge\0")) {
+        out.push(ext!("GL_ARB_texture_mirror_clamp_to_edge"));
+    }
+    // Texture stencil8 via ES 3.2+ or GL_EXT_texture_stencil8
+    if c.es_at_least(3, 2) || c.has(ext!("GL_EXT_texture_stencil8\0")) {
+        out.push(ext!("GL_ARB_texture_stencil8"));
     }
     out
 }

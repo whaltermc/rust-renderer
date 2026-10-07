@@ -666,11 +666,21 @@ bool setPbufferAttrib(Drawable *, const int *) {
 } // namespace glws
 
 extern "C" bool mobilegl_trace_get_drawable_bounds(int *width, int *height) {
+    FILE *f = fopen("/tmp/trace_drawable_bounds.log", "a");
+    if (f) {
+        fprintf(f, "mobilegl_trace_get_drawable_bounds called: gCurrentDrawable=%p\n", (void*)gCurrentDrawable);
+        fclose(f);
+    }
     if (gCurrentDrawable == nullptr || width == nullptr || height == nullptr) {
         return false;
     }
     *width = gCurrentDrawable->width;
     *height = gCurrentDrawable->height;
+    f = fopen("/tmp/trace_drawable_bounds.log", "a");
+    if (f) {
+        fprintf(f, "  -> %dx%d\n", *width, *height);
+        fclose(f);
+    }
     return *width > 0 && *height > 0;
 }
 

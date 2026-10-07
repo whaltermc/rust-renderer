@@ -381,7 +381,19 @@ bool ReadAttachmentFloats(const AttachmentDesc &desc, bool depth, unsigned chann
     }
 
     glReadPixels(0, 0, desc.width, desc.height, GL_RGBA, GL_FLOAT, pixels.data());
-    return DrainErrors() == 0;
+    if (DrainErrors() == 0) {
+        return true;
+    }
+
+    std::vector<std::uint8_t> raw(count);
+    glReadPixels(0, 0, desc.width, desc.height, GL_RGBA, GL_UNSIGNED_BYTE, raw.data());
+    if (DrainErrors() != 0) {
+        return false;
+    }
+    for (std::size_t i = 0; i < count; ++i) {
+        pixels[i] = static_cast<float>(raw[i]) / 255.0f;
+    }
+    return true;
 }
 
 std::string FormatStatistics(const std::vector<float> &pixels, unsigned channels) {

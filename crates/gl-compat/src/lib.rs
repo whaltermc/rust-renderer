@@ -804,8 +804,8 @@ pub unsafe extern "C" fn glGetIntegerv(pname: u32, data: *mut i32) {
     }
     if spoof_gl() {
         match pname {
-            GL_MAJOR_VERSION => { *data = 3; return; }
-            GL_MINOR_VERSION => { *data = 3; return; }
+            GL_MAJOR_VERSION => { *data = 4; return; }
+            GL_MINOR_VERSION => { *data = 4; return; }
             0x9126 => { *data = 0x0001; return; } // GL_CONTEXT_PROFILE_MASK = CORE_PROFILE_BIT
             GL_NUM_EXTENSIONS => {
                 *data = merged_extensions().len() as i32;
@@ -1354,6 +1354,43 @@ pub(crate) fn render_caps() -> format_translate::RenderCaps {
         norm16: c.has(b"GL_EXT_texture_norm16\0"),
     }
 }
+
+/// Whether texture buffers are supported (ES 3.2+ or GL_EXT_texture_buffer).
+pub(crate) fn has_texture_buffer() -> bool {
+    let c = gles3::caps();
+    c.valid && c.has_texture_buffer
+}
+
+/// Whether texture view is supported (ES 3.2+ or GL_EXT_texture_view).
+pub(crate) fn has_texture_view() -> bool {
+    let c = gles3::caps();
+    c.valid && c.has_texture_view
+}
+
+/// Whether atomic counters are supported (ES 3.1+ or GL_EXT_shader_atomic_counters / GL_OES_shader_atomic_counters).
+pub(crate) fn has_atomic_counter() -> bool {
+    let c = gles3::caps();
+    c.valid && c.has_atomic_counter
+}
+
+/// Whether shader image load/store is supported (ES 3.1+ or GL_EXT_shader_image_load_store).
+pub(crate) fn has_shader_image_load_store() -> bool {
+    let c = gles3::caps();
+    c.valid && c.has_shader_image_load_store
+}
+
+/// Whether double-precision vertex attributes (GL 4.1 / ARB_vertex_attrib_64bit) are supported.
+pub(crate) fn has_vertex_attrib_64bit() -> bool {
+    let c = gles3::caps();
+    c.valid && c.has_vertex_attrib_64bit
+}
+
+/// Whether GL_ARB_provoking_vertex (LAST_VERTEX_CONVENTION) is supported.
+pub(crate) fn has_provoking_vertex() -> bool {
+    let c = gles3::caps();
+    c.valid && c.has_provoking_vertex
+}
+
 
 /// Logs each distinct internal-format/type rewrite once, so a logcat shows exactly which
 /// shader-pack render-target formats were adapted without needing RENDERER_TRACE_GL.
@@ -2422,6 +2459,8 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glTexStorage2DMultisample" => named_objects::glTexStorage2DMultisample as *const c_void,
         b"glTexStorage3DMultisample" => named_objects::glTexStorage3DMultisample as *const c_void,
         b"glTextureStorage2DMultisample" => named_objects::glTextureStorage2DMultisample as *const c_void,
+        b"glTextureView" => named_objects::glTextureView as *const c_void,
+        b"glGetActiveAtomicCounterBufferiv" => named_objects::glGetActiveAtomicCounterBufferiv as *const c_void,
         b"glVertexArrayAttribStride" => vertex_state::glVertexArrayAttribStride as *const c_void,
         b"glVertexAttribStride" => vertex_state::glVertexAttribStride as *const c_void,
         b"glGetVertexArrayAttribStride" => vertex_state::glGetVertexArrayAttribStride as *const c_void,
@@ -2446,8 +2485,8 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glPopDebugGroup" => vertex_state::glPopDebugGroup as *const c_void,
         b"glDebugMessageCallback" => vertex_state::glDebugMessageCallback as *const c_void,
         b"glDebugMessageCallbackARB" => vertex_state::glDebugMessageCallbackARB as *const c_void,
-        b"glDebugMessageControl" => named_objects::glDebugMessageControl as *const c_void,
-        b"glDebugMessageControlARB" => named_objects::glDebugMessageControlARB as *const c_void,
+        b"glDebugMessageControl" => vertex_state::glDebugMessageControl as *const c_void,
+        b"glDebugMessageControlARB" => vertex_state::glDebugMessageControlARB as *const c_void,
         b"glBindImageTexture" => named_objects::glBindImageTexture as *const c_void,
         b"glMultiDrawElementsBaseVertex" => named_objects::glMultiDrawElementsBaseVertex as *const c_void,
         b"glGetGraphicsResetStatus" => vertex_state::glGetGraphicsResetStatus as *const c_void,

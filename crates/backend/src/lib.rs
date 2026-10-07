@@ -22,6 +22,11 @@ pub mod directvk;
 pub mod gles;
 #[cfg(feature = "spirv")]
 pub mod spirv;
+#[cfg(feature = "spirv")]
+pub mod naga_translate;
+
+#[cfg(feature = "spirv")]
+pub use naga_translate::translate;
 pub mod vulkan;
 
 pub use angel::{detect_angle_from_env, is_angle_active, AngleBackend, AngleConfig, AngleDriver};

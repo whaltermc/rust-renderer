@@ -29,7 +29,8 @@
 //! gets its bytes copied across.
 
 use super::*;
-use std::sync::atomic::AtomicU8;
+use std::ffi::{CStr, c_char, c_void};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Mutex;
 
 /// DSA buffer: name -> what this layer knows about it.
@@ -51,6 +52,88 @@ static BUFFERS: Mutex<Vec<(u32, DsaBuffer)>> = Mutex::new(Vec::new());
 static TEXTURES: Mutex<Vec<(u32, u32)>> = Mutex::new(Vec::new());
 /// DSA vertex array names.
 static VAOS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+/// Debug callback storage: (callback_fn, user_param as usize)
+static DEBUG_CALLBACK: Mutex<Option<(extern "C" fn(u32, u32, u32, u32, i32, *const c_char, *const c_void), usize)>> = Mutex::new(None);
+
+/// Debug message log storage for glGetDebugMessageLog
+static DEBUG_LOG: Mutex<Vec<DebugLogEntry>> = Mutex::new(Vec::new());
+
+/// Maximum debug log entries to store
+const MAX_DEBUG_LOG_ENTRIES: usize = 1024;
+
+/// Debug message control filters
+#[derive(Clone, Debug)]
+struct DebugFilter {
+    source: u32,
+    type_: u32,
+    severity: u32,
+    enabled: bool,
+    ids: Vec<u32>,
+}
+
+static DEBUG_FILTERS: Mutex<Vec<DebugFilter>> = Mutex::new(Vec::new());
+
+/// Debug group stack
+static DEBUG_GROUPS: Mutex<Vec<DebugGroup>> = Mutex::new(Vec::new());
+
+#[derive(Clone, Debug)]
+struct DebugGroup {
+    source: u32,
+    id: u32,
+    message: String,
+}
+
+#[derive(Clone, Debug)]
+struct DebugLogEntry {
+    source: u32,
+    type_: u32,
+    id: u32,
+    severity: u32,
+    message: String,
+}
+
+/// Debug output constants
+const GL_DEBUG_OUTPUT_SYNCHRONOUS: u32 = 0x8242;
+const GL_INVALID_ENUM: u32 = 0x0500;
+const GL_DEBUG_NEXT_LOGGED_MESSAGE_LENGTH: u32 = 0x8243;
+const GL_DEBUG_CALLBACK_FUNCTION: u32 = 0x8244;
+const GL_DEBUG_CALLBACK_USER_PARAM: u32 = 0x8245;
+const GL_DEBUG_SOURCE_API: u32 = 0x8246;
+const GL_DEBUG_SOURCE_WINDOW_SYSTEM: u32 = 0x8247;
+const GL_DEBUG_SOURCE_SHADER_COMPILER: u32 = 0x8248;
+const GL_DEBUG_SOURCE_THIRD_PARTY: u32 = 0x8249;
+const GL_DEBUG_SOURCE_APPLICATION: u32 = 0x824A;
+const GL_DEBUG_SOURCE_OTHER: u32 = 0x824B;
+const GL_DEBUG_TYPE_ERROR: u32 = 0x824C;
+const GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR: u32 = 0x824D;
+const GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR: u32 = 0x824E;
+const GL_DEBUG_TYPE_PORTABILITY: u32 = 0x824F;
+const GL_DEBUG_TYPE_PERFORMANCE: u32 = 0x8250;
+const GL_DEBUG_TYPE_OTHER: u32 = 0x8251;
+const GL_DEBUG_TYPE_MARKER: u32 = 0x8268;
+const GL_DEBUG_TYPE_PUSH_GROUP: u32 = 0x8269;
+const GL_DEBUG_TYPE_POP_GROUP: u32 = 0x826A;
+const GL_DEBUG_SEVERITY_HIGH: u32 = 0x9146;
+const GL_DEBUG_SEVERITY_MEDIUM: u32 = 0x9147;
+const GL_DEBUG_SEVERITY_LOW: u32 = 0x9148;
+const GL_DEBUG_SEVERITY_NOTIFICATION: u32 = 0x826B;
+const GL_MAX_DEBUG_MESSAGE_LENGTH: u32 = 0x9143;
+const GL_MAX_DEBUG_LOGGED_MESSAGES: u32 = 0x9144;
+const GL_DEBUG_LOGGED_MESSAGES: u32 = 0x9145;
+const GL_DEBUG_GROUP_STACK_DEPTH: u32 = 0x826C;
+const GL_BUFFER: u32 = 0x82E0;
+const GL_SHADER: u32 = 0x82E1;
+const GL_PROGRAM: u32 = 0x82E2;
+const GL_VERTEX_ARRAY: u32 = 0x8074;
+const GL_QUERY: u32 = 0x82E3;
+const GL_PROGRAM_PIPELINE: u32 = 0x82E4;
+const GL_SAMPLER: u32 = 0x82E6;
+const GL_MAX_LABEL_LENGTH: u32 = 0x82E8;
+const GL_DEBUG_OUTPUT: u32 = 0x92E0;
+const GL_CONTEXT_FLAG_DEBUG_BIT: u32 = 0x00000002;
+
+const GL_DONT_CARE: u32 = 0x1100;
 
 /// Attribute description recorded per vertex array: (vao, attrib, size, type, normalized,
 /// relative_offset, stride).
@@ -1060,6 +1143,280 @@ pub unsafe extern "C" fn glMemoryBarrierByRegion(barriers: u32) {
     }
 }
 
+/// Internal helper: log a debug message through the callback and log buffer.
+unsafe fn debug_log(source: u32, type_: u32, id: u32, severity: u32, message: &str) {
+    // Store in log buffer
+    {
+        let mut log = DEBUG_LOG.lock().unwrap_or_else(|e| e.into_inner());
+        log.push(DebugLogEntry {
+            source,
+            type_,
+            id,
+            severity,
+            message: message.to_string(),
+        });
+        if log.len() > MAX_DEBUG_LOG_ENTRIES {
+            log.remove(0);
+        }
+    }
+
+    // Call callback if registered
+    let callback = {
+        let guard = DEBUG_CALLBACK.lock().unwrap_or_else(|e| e.into_inner());
+        *guard
+    };
+    if let Some((cb_fn, user_param)) = callback {
+        // Convert message to C string
+        let c_msg = std::ffi::CString::new(message).unwrap_or_default();
+        cb_fn(source, type_, id, severity, message.len() as i32, c_msg.as_ptr(), user_param as *const c_void);
+    }
+}
+
+/// Check if a message passes the current debug filters
+fn debug_filter_passes(source: u32, type_: u32, severity: u32, id: u32) -> bool {
+    let filters = DEBUG_FILTERS.lock().unwrap_or_else(|e| e.into_inner());
+    if filters.is_empty() {
+        // Default: all messages pass
+        return true;
+    }
+    for filter in filters.iter() {
+        let source_match = filter.source == GL_DONT_CARE || filter.source == source;
+        let type_match = filter.type_ == GL_DONT_CARE || filter.type_ == type_;
+        let severity_match = filter.severity == GL_DONT_CARE || filter.severity == severity;
+        let id_match = filter.ids.is_empty() || filter.ids.contains(&id);
+        if source_match && type_match && severity_match && id_match {
+            return filter.enabled;
+        }
+    }
+    // Default deny if filters exist but none match
+    false
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glDebugMessageCallback(
+    callback: *const c_void,
+    user_param: *const c_void,
+) {
+    let mut guard = DEBUG_CALLBACK.lock().unwrap_or_else(|e| e.into_inner());
+    if callback.is_null() {
+        *guard = None;
+    } else {
+        *guard = Some((
+            std::mem::transmute::<*const c_void, extern "C" fn(u32, u32, u32, u32, i32, *const c_char, *const c_void)>(callback),
+            user_param as usize,
+        ));
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glDebugMessageCallbackARB(
+    callback: *const c_void,
+    user_param: *const c_void,
+) {
+    glDebugMessageCallback(callback, user_param);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glDebugMessageControl(
+    source: u32,
+    type_: u32,
+    severity: u32,
+    count: i32,
+    ids: *const u32,
+    enabled: u8,
+) {
+    if count < 0 {
+        errors().set(GL_INVALID_VALUE);
+        return;
+    }
+    let mut filter_ids = Vec::new();
+    if count > 0 && !ids.is_null() {
+        let slice = std::slice::from_raw_parts(ids, count as usize);
+        filter_ids.extend_from_slice(slice);
+    }
+    let mut filters = DEBUG_FILTERS.lock().unwrap_or_else(|e| e.into_inner());
+    // Remove existing filter for same source/type/severity if no specific IDs
+    if filter_ids.is_empty() {
+        filters.retain(|f| !(f.source == source && f.type_ == type_ && f.severity == severity && f.ids.is_empty()));
+    }
+    filters.push(DebugFilter {
+        source,
+        type_,
+        severity,
+        enabled: enabled != 0,
+        ids: filter_ids,
+    });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glDebugMessageControlARB(
+    source: u32,
+    type_: u32,
+    severity: u32,
+    count: i32,
+    ids: *const u32,
+    enabled: u8,
+) {
+    glDebugMessageControl(source, type_, severity, count, ids, enabled);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glDebugMessageInsert(
+    source: u32,
+    type_: u32,
+    id: u32,
+    severity: u32,
+    length: i32,
+    message: *const c_char,
+) {
+    if message.is_null() {
+        errors().set(GL_INVALID_VALUE);
+        return;
+    }
+    if length < 0 {
+        errors().set(GL_INVALID_VALUE);
+        return;
+    }
+    let msg = if length == 0 {
+        // Null-terminated string
+        CStr::from_ptr(message).to_string_lossy().into_owned()
+    } else {
+        // Length-specified string
+        std::slice::from_raw_parts(message as *const u8, length as usize)
+            .iter()
+            .map(|&c| c as char)
+            .collect::<String>()
+    };
+    if !debug_filter_passes(source, type_, severity, id) {
+        return;
+    }
+    debug_log(source, type_, id, severity, &msg);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glPushDebugGroup(
+    source: u32,
+    id: u32,
+    length: isize,
+    message: *const c_char,
+) {
+    if message.is_null() {
+        errors().set(GL_INVALID_VALUE);
+        return;
+    }
+    let msg = if length < 0 {
+        CStr::from_ptr(message).to_string_lossy().into_owned()
+    } else {
+        std::slice::from_raw_parts(message as *const u8, length as usize)
+            .iter()
+            .map(|&c| c as char)
+            .collect::<String>()
+    };
+    let mut groups = DEBUG_GROUPS.lock().unwrap_or_else(|e| e.into_inner());
+    groups.push(DebugGroup { source, id, message: msg.clone() });
+    debug_log(source, GL_DEBUG_TYPE_PUSH_GROUP, id, GL_DEBUG_SEVERITY_NOTIFICATION, &msg);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glPopDebugGroup() {
+    let mut groups = DEBUG_GROUPS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(group) = groups.pop() {
+        debug_log(group.source, GL_DEBUG_TYPE_POP_GROUP, group.id, GL_DEBUG_SEVERITY_NOTIFICATION, &group.message);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glGetDebugMessageLog(
+    count: u32,
+    buf_size: i32,
+    sources: *mut u32,
+    types: *mut u32,
+    ids: *mut u32,
+    severities: *mut u32,
+    lengths: *mut i32,
+    message_log: *mut c_char,
+) -> u32 {
+    let log = DEBUG_LOG.lock().unwrap_or_else(|e| e.into_inner());
+    let available = log.len().min(count as usize);
+    if available == 0 {
+        return 0;
+    }
+    let mut total_chars = 0;
+    for i in 0..available {
+        let entry = &log[i];
+        if !sources.is_null() {
+            *sources.add(i) = entry.source;
+        }
+        if !types.is_null() {
+            *types.add(i) = entry.type_;
+        }
+        if !ids.is_null() {
+            *ids.add(i) = entry.id;
+        }
+        if !severities.is_null() {
+            *severities.add(i) = entry.severity;
+        }
+        let msg_len = entry.message.len();
+        total_chars += msg_len + 1; // +1 for null terminator
+        if !lengths.is_null() {
+            *lengths.add(i) = msg_len as i32;
+        }
+        if !message_log.is_null() && buf_size > total_chars as i32 {
+            let dest = message_log.add(total_chars - msg_len - 1) as *mut u8;
+            std::ptr::copy_nonoverlapping(entry.message.as_ptr(), dest, msg_len);
+            *dest.add(msg_len) = 0;
+        }
+    }
+    available as u32
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glGetDebugMessageLogARB(
+    count: u32,
+    buf_size: i32,
+    sources: *mut u32,
+    types: *mut u32,
+    ids: *mut u32,
+    severities: *mut u32,
+    lengths: *mut i32,
+    message_log: *mut c_char,
+) -> u32 {
+    glGetDebugMessageLog(count, buf_size, sources, types, ids, severities, lengths, message_log)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glGetObjectLabel(
+    identifier: u32,
+    name: u32,
+    buf_size: i32,
+    length: *mut i32,
+    label: *mut c_char,
+) {
+    // This layer doesn't store object labels; return empty
+    if !length.is_null() {
+        *length = 0;
+    }
+    if !label.is_null() && buf_size > 0 {
+        *label = 0;
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glGetObjectPtrLabel(
+    ptr: *const c_void,
+    buf_size: i32,
+    length: *mut i32,
+    label: *mut c_char,
+) {
+    // This layer doesn't store object labels; return empty
+    if !length.is_null() {
+        *length = 0;
+    }
+    if !label.is_null() && buf_size > 0 {
+        *label = 0;
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn glObjectLabel(
     _identifier: u32,
@@ -1067,36 +1424,39 @@ pub unsafe extern "C" fn glObjectLabel(
     _label: *const c_char,
     _length: isize,
 ) {
-    // Debug labels only feed debug output, which this layer does not produce.
+    // Debug labels stored by application; this layer doesn't track them
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn glObjectPtrLabel(_identifier: u32, _ptr: *const c_void, _length: isize) {}
 
 #[no_mangle]
-pub unsafe extern "C" fn glPushDebugGroup(_source: u32, _id: u32, _length: isize, _message: *const c_char) {}
-
-#[no_mangle]
-pub unsafe extern "C" fn glPopDebugGroup() {}
-
-/// Accepts a debug callback and discards messages.
-///
-/// This must exist even though the layer does not advertise `GL_KHR_debug`: the driver's own
-/// extension list is passed through, so a device that really has KHR_debug makes the game
-/// install a callback. Returning null here would crash it, which is exactly the failure mode
-/// this replaces.
-#[no_mangle]
-pub unsafe extern "C" fn glDebugMessageCallback(
-    _callback: *const c_void,
-    _user_param: *const c_void,
-) {
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn glDebugMessageCallbackARB(
-    _callback: *const c_void,
-    _user_param: *const c_void,
-) {
+pub unsafe extern "C" fn glGetPointerv(pname: u32, params: *mut *mut c_void) {
+    if params.is_null() {
+        errors().set(GL_INVALID_VALUE);
+        return;
+    }
+    match pname {
+        GL_DEBUG_CALLBACK_FUNCTION => {
+            let guard = DEBUG_CALLBACK.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some((fn_ptr, _)) = *guard {
+                *params = fn_ptr as *mut c_void;
+            } else {
+                *params = std::ptr::null_mut();
+            }
+        }
+        GL_DEBUG_CALLBACK_USER_PARAM => {
+            let guard = DEBUG_CALLBACK.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some((_, user_param)) = *guard {
+                *params = user_param as *mut c_void;
+            } else {
+                *params = std::ptr::null_mut();
+            }
+        }
+        _ => {
+            errors().set(GL_INVALID_ENUM);
+        }
+    }
 }
 
 /// No way to observe context loss through this bridge, so report "no reset". Reporting a
@@ -1106,21 +1466,31 @@ pub unsafe extern "C" fn glGetGraphicsResetStatus() -> u32 {
     GL_NO_ERROR
 }
 
-/// Indirect draws need the command buffer readable by the CPU; ES 3.x has neither
-/// `glMultiDrawArraysIndirect` nor a way to make that cheap, so say so rather than silently
-/// drawing nothing.
+
+
+/// Indirect draws require the GL_ARB_multi_draw_indirect or GL_ES32 extension.
+/// If supported, forward to the driver; otherwise set GL_INVALID_OPERATION.
 #[no_mangle]
 pub unsafe extern "C" fn glMultiDrawElementsIndirect(
-    _mode: u32,
-    _type: u32,
-    _indirect: *const c_void,
-    _drawcount: i32,
-    _stride: i32,
+    mode: u32,
+    type_: u32,
+    indirect: *const c_void,
+    drawcount: i32,
+    stride: i32,
 ) {
+    if crate::gles3::caps().has_indirect_draw {
+        if let Some(f) = driver_fn_cached::<
+            unsafe extern "C" fn(u32, u32, *const c_void, i32, i32),
+        >("glMultiDrawElementsIndirect")
+        {
+            f(mode, type_, indirect, drawcount, stride);
+            return;
+        }
+    }
     static ONCE: AtomicBool = AtomicBool::new(false);
     log_once(
         &ONCE,
-        "[GLCompat] glMultiDrawElementsIndirect is not available on GLES 3.x (no indirect draw); \
+        "[GLCompat] glMultiDrawElementsIndirect is not available (no indirect draw support); \
          draw skipped",
     );
     errors().set(GL_INVALID_OPERATION);
@@ -1128,22 +1498,59 @@ pub unsafe extern "C" fn glMultiDrawElementsIndirect(
 
 #[no_mangle]
 pub unsafe extern "C" fn glMultiDrawArraysIndirect(
-    _mode: u32,
-    _indirect: *const c_void,
-    _drawcount: i32,
-    _stride: i32,
+    mode: u32,
+    indirect: *const c_void,
+    drawcount: i32,
+    stride: i32,
 ) {
+    if crate::gles3::caps().has_indirect_draw {
+        if let Some(f) = driver_fn_cached::<
+            unsafe extern "C" fn(u32, *const c_void, i32, i32),
+        >("glMultiDrawArraysIndirect")
+        {
+            f(mode, indirect, drawcount, stride);
+            return;
+        }
+    }
     static ONCE: AtomicBool = AtomicBool::new(false);
     log_once(
         &ONCE,
-        "[GLCompat] glMultiDrawArraysIndirect is not available on GLES 3.x (no indirect draw); \
+        "[GLCompat] glMultiDrawArraysIndirect is not available (no indirect draw support); \
          draw skipped",
     );
     errors().set(GL_INVALID_OPERATION);
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn glDispatchCompute(_x: u32, _y: u32, _z: u32) {
+pub unsafe extern "C" fn glDispatchCompute(x: u32, y: u32, z: u32) {
+    if crate::gles3::caps().has_compute_shader {
+        if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, u32, u32)>("glDispatchCompute") {
+            f(x, y, z);
+            return;
+        }
+    }
+    errors().set(GL_INVALID_OPERATION);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glDispatchComputeIndirect(indirect: isize) {
+    if crate::gles3::caps().has_compute_shader {
+        if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(isize)>("glDispatchComputeIndirect") {
+            f(indirect);
+            return;
+        }
+    }
+    errors().set(GL_INVALID_OPERATION);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glBindImageTextures(first: u32, count: i32, textures: *const u32) {
+    if crate::has_shader_image_load_store() {
+        if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, i32, *const u32)>("glBindImageTextures") {
+            f(first, count, textures);
+            return;
+        }
+    }
     errors().set(GL_INVALID_OPERATION);
 }
 
@@ -1186,10 +1593,20 @@ pub const EXPORTS: &[&str] = &[
     "glPopDebugGroup",
     "glDebugMessageCallback",
     "glDebugMessageCallbackARB",
+    "glDebugMessageControl",
+    "glDebugMessageControlARB",
+    "glDebugMessageInsert",
+    "glGetDebugMessageLog",
+    "glGetDebugMessageLogARB",
+    "glGetObjectLabel",
+    "glGetObjectPtrLabel",
+    "glGetPointerv",
     "glGetGraphicsResetStatus",
     "glMultiDrawArraysIndirect",
     "glMultiDrawElementsIndirect",
     "glDispatchCompute",
+    "glDispatchComputeIndirect",
+    "glBindImageTextures",
 ];
 
 #[cfg(test)]

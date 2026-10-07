@@ -198,12 +198,120 @@ pub unsafe extern "C" fn glDrawRangeElementsBaseVertex(
     err(GL_INVALID_OPERATION);
 }
 
-// GL 3.3's double-precision vertex attribute API has no GLES 3.0 equivalent.
-// Reject it explicitly rather than forwarding an incompatible ABI.
+// GL 3.3's double-precision vertex attribute API (GL 4.1 / ARB_vertex_attrib_64bit).
+// Forward to driver when the extension is supported; otherwise report GL_INVALID_OPERATION.
 #[no_mangle]
-pub unsafe extern "C" fn glVertexAttribLPointer(_index:u32,_size:i32,_ty:u32,_stride:i32,_ptr:*const c_void){err(GL_INVALID_OPERATION)}
+pub unsafe extern "C" fn glVertexAttribLPointer(index: u32, size: i32, ty: u32, stride: i32, ptr: *const c_void) {
+    if crate::has_vertex_attrib_64bit() {
+        if let Some(x) = f::<unsafe extern "C" fn(u32, i32, u32, i32, *const c_void)>("glVertexAttribLPointer") {
+            x(index, size, ty, stride, ptr);
+            return;
+        }
+    }
+    err(GL_INVALID_OPERATION);
+}
+
 #[no_mangle]
-pub unsafe extern "C" fn glGetVertexAttribLdv(_index:u32,_pname:u32,params:*mut f64){if !params.is_null(){*params=0.0;}err(GL_INVALID_OPERATION)}
+pub unsafe extern "C" fn glVertexAttribL1d(index: u32, x: f64) {
+    if crate::has_vertex_attrib_64bit() {
+        if let Some(x_fn) = f::<unsafe extern "C" fn(u32, f64)>("glVertexAttribL1d") {
+            x_fn(index, x);
+            return;
+        }
+    }
+    err(GL_INVALID_OPERATION);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glVertexAttribL2d(index: u32, x: f64, y: f64) {
+    if crate::has_vertex_attrib_64bit() {
+        if let Some(x_fn) = f::<unsafe extern "C" fn(u32, f64, f64)>("glVertexAttribL2d") {
+            x_fn(index, x, y);
+            return;
+        }
+    }
+    err(GL_INVALID_OPERATION);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glVertexAttribL3d(index: u32, x: f64, y: f64, z: f64) {
+    if crate::has_vertex_attrib_64bit() {
+        if let Some(x_fn) = f::<unsafe extern "C" fn(u32, f64, f64, f64)>("glVertexAttribL3d") {
+            x_fn(index, x, y, z);
+            return;
+        }
+    }
+    err(GL_INVALID_OPERATION);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glVertexAttribL4d(index: u32, x: f64, y: f64, z: f64, w: f64) {
+    if crate::has_vertex_attrib_64bit() {
+        if let Some(x_fn) = f::<unsafe extern "C" fn(u32, f64, f64, f64, f64)>("glVertexAttribL4d") {
+            x_fn(index, x, y, z, w);
+            return;
+        }
+    }
+    err(GL_INVALID_OPERATION);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glVertexAttribL1dv(index: u32, v: *const f64) {
+    if crate::has_vertex_attrib_64bit() {
+        if let Some(x_fn) = f::<unsafe extern "C" fn(u32, *const f64)>("glVertexAttribL1dv") {
+            x_fn(index, v);
+            return;
+        }
+    }
+    err(GL_INVALID_OPERATION);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glVertexAttribL2dv(index: u32, v: *const f64) {
+    if crate::has_vertex_attrib_64bit() {
+        if let Some(x_fn) = f::<unsafe extern "C" fn(u32, *const f64)>("glVertexAttribL2dv") {
+            x_fn(index, v);
+            return;
+        }
+    }
+    err(GL_INVALID_OPERATION);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glVertexAttribL3dv(index: u32, v: *const f64) {
+    if crate::has_vertex_attrib_64bit() {
+        if let Some(x_fn) = f::<unsafe extern "C" fn(u32, *const f64)>("glVertexAttribL3dv") {
+            x_fn(index, v);
+            return;
+        }
+    }
+    err(GL_INVALID_OPERATION);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glVertexAttribL4dv(index: u32, v: *const f64) {
+    if crate::has_vertex_attrib_64bit() {
+        if let Some(x_fn) = f::<unsafe extern "C" fn(u32, *const f64)>("glVertexAttribL4dv") {
+            x_fn(index, v);
+            return;
+        }
+    }
+    err(GL_INVALID_OPERATION);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glGetVertexAttribLdv(index: u32, pname: u32, params: *mut f64) {
+    if crate::has_vertex_attrib_64bit() {
+        if let Some(x) = f::<unsafe extern "C" fn(u32, u32, *mut f64)>("glGetVertexAttribLdv") {
+            x(index, pname, params);
+            return;
+        }
+    }
+    if !params.is_null() {
+        *params = 0.0;
+    }
+    err(GL_INVALID_OPERATION);
+}
 
 // Packed normalized attribute formats are GLES-compatible through the generic
 // vertexAttribPointer path for the common unsigned-byte/short forms.
@@ -354,10 +462,31 @@ pub unsafe extern "C" fn glMultiDrawElements(mode:u32,count:*const i32,ty:u32,in
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn glProvokingVertex(mode:u32){
-    // ES3 has a fixed provoking-vertex convention. Do not pretend that a
-    // requested LAST_VERTEX convention was applied.
-    if mode != 0x8E4E /* FIRST_VERTEX_CONVENTION */ { err(GL_INVALID_OPERATION); }
+pub unsafe extern "C" fn glProvokingVertex(mode: u32) {
+    const FIRST_VERTEX_CONVENTION: u32 = 0x8E4E;
+    const LAST_VERTEX_CONVENTION: u32 = 0x8E4F;
+
+    // Only accept valid modes
+    if mode != FIRST_VERTEX_CONVENTION && mode != LAST_VERTEX_CONVENTION {
+        err(GL_INVALID_OPERATION);
+        return;
+    }
+
+    // Check if provoking vertex is supported (GL_ARB_provoking_vertex)
+    if !crate::has_provoking_vertex() {
+        // ES3 only supports FIRST_VERTEX_CONVENTION
+        if mode != FIRST_VERTEX_CONVENTION {
+            err(GL_INVALID_OPERATION);
+        }
+        return;
+    }
+
+    // Forward to driver
+    if let Some(f) = f::<unsafe extern "C" fn(u32)>("glProvokingVertex") {
+        f(mode);
+    } else {
+        err(GL_INVALID_OPERATION);
+    }
 }
 #[no_mangle]
 pub unsafe extern "C" fn glClampColor(target:u32,clamp:u32){let _=(target,clamp);/* desktop-only; ES3 is always clamped according to format */}
@@ -694,12 +823,25 @@ pub unsafe extern "C" fn glTexSubImage1D(_t: u32, _l: i32, _x: i32, _w: i32, _f:
     err(GL_INVALID_ENUM);
 }
 #[no_mangle]
-pub unsafe extern "C" fn glTexBuffer(_t: u32, _r: u32, _b: u32) {
-    err(GL_INVALID_ENUM);
+pub unsafe extern "C" fn glTexBuffer(target: u32, internalformat: u32, buffer: u32) {
+    if crate::has_texture_buffer() {
+        if let Some(f) = crate::driver_fn_cached::<unsafe extern "C" fn(u32, u32, u32)>("glTexBuffer") {
+            f(target, internalformat, buffer);
+            return;
+        }
+    }
+    crate::errors().set(GL_INVALID_OPERATION);
 }
+
 #[no_mangle]
-pub unsafe extern "C" fn glTexBufferRange(_t: u32, _r: u32, _b: u32, _o: isize, _s: isize) {
-    err(GL_INVALID_ENUM);
+pub unsafe extern "C" fn glTexBufferRange(target: u32, internalformat: u32, buffer: u32, offset: isize, size: isize) {
+    if crate::has_texture_buffer() {
+        if let Some(f) = crate::driver_fn_cached::<unsafe extern "C" fn(u32, u32, u32, isize, isize)>("glTexBufferRange") {
+            f(target, internalformat, buffer, offset, size);
+            return;
+        }
+    }
+    crate::errors().set(GL_INVALID_OPERATION);
 }
 
 pub fn resolve(name: &[u8]) -> *const c_void {
@@ -721,6 +863,14 @@ pub fn resolve(name: &[u8]) -> *const c_void {
         b"glDrawElementsInstanced"=>glDrawElementsInstanced,
         b"glVertexAttribLPointer"=>glVertexAttribLPointer,
         b"glGetVertexAttribLdv"=>glGetVertexAttribLdv,
+        b"glVertexAttribL1d"=>glVertexAttribL1d,
+        b"glVertexAttribL2d"=>glVertexAttribL2d,
+        b"glVertexAttribL3d"=>glVertexAttribL3d,
+        b"glVertexAttribL4d"=>glVertexAttribL4d,
+        b"glVertexAttribL1dv"=>glVertexAttribL1dv,
+        b"glVertexAttribL2dv"=>glVertexAttribL2dv,
+        b"glVertexAttribL3dv"=>glVertexAttribL3dv,
+        b"glVertexAttribL4dv"=>glVertexAttribL4dv,
         b"glVertexAttribP1uiv"=>glVertexAttribP1uiv,
         b"glVertexAttribP2uiv"=>glVertexAttribP2uiv,
         b"glVertexAttribP3uiv"=>glVertexAttribP3uiv,

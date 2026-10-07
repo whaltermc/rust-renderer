@@ -1184,6 +1184,39 @@ pub unsafe extern "C" fn glTextureBuffer(_id: u32, _r: u32, _b: u32) {
     errors().set(0x0500);
 }
 
+/// Texture view (GL 4.4 / ARB_texture_view / ES 3.2+).
+/// Creates a view of an existing texture object with a different format, type, or subset of layers/mipmaps.
+#[no_mangle]
+pub unsafe extern "C" fn glTextureView(
+    texture: u32,
+    target: u32,
+    origtexture: u32,
+    internalformat: u32,
+    minlevel: u32,
+    numlevels: u32,
+    minlayer: u32,
+    numlayers: u32,
+) {
+    // Check if texture view is supported
+    if !has_texture_view() {
+        errors().set(0x0500); // GL_INVALID_ENUM
+        return;
+    }
+    // Bind the original texture to query its target, then create the view
+    let orig_target = named_objects::texture_target(origtexture);
+    match driver_fn_cached::<unsafe extern "C" fn(u32, u32, u32, u32, u32, u32, u32, u32)>(
+        "glTextureView",
+    ) {
+        Some(f) => f(texture, target, origtexture, internalformat, minlevel, numlevels, minlayer, numlayers),
+        None => {
+            mark_error_site("glTextureView");
+            errors().set(0x0502);
+        }
+    }
+    // Record the target for the new texture
+    record_texture(texture, target);
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn glNamedFramebufferTextureMultiviewOVR(
     _fbo: u32, _att: u32, _tex: u32, _level: i32, _base: i32, _count: i32,
@@ -1208,20 +1241,35 @@ pub unsafe extern "C" fn glGetProgramResourceLocationIndex(
     0xFFFF_FFFF
 }
 
-/// Names registered in the resolver, so the reachability test can check them.
-/// Debug-message filtering. There is no debug output to filter, but a trace of real
-/// Minecraft 1.17 shows this being called at start-up, and an unresolved name is a null
-/// function pointer for any client that resolves by dlsym.
+/// Atomic counter buffer query (GL 4.2+ / ARB_atomic_counter).
+/// Queries information about an active atomic counter buffer in a program.
 #[no_mangle]
-pub unsafe extern "C" fn glDebugMessageControl(
-    _source: u32, _type_: u32, _severity: u32, _count: i32, _ids: *const u32, _enabled: u8,
+pub unsafe extern "C" fn glGetActiveAtomicCounterBufferiv(
+    program: u32,
+    buffer_index: u32,
+    pname: u32,
+    params: *mut i32,
 ) {
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn glDebugMessageControlARB(
-    _source: u32, _type_: u32, _severity: u32, _count: i32, _ids: *const u32, _enabled: u8,
-) {
+    if params.is_null() {
+        errors().set(0x0501); // GL_INVALID_VALUE
+        return;
+    }
+    // Check if atomic counters are supported
+    if !crate::has_atomic_counter() {
+        errors().set(0x0500); // GL_INVALID_ENUM
+        *params = 0;
+        return;
+    }
+    match driver_fn_cached::<unsafe extern "C" fn(u32, u32, u32, *mut i32)>(
+        "glGetActiveAtomicCounterBufferiv",
+    ) {
+        Some(f) => f(program, buffer_index, pname, params),
+        None => {
+            mark_error_site("glGetActiveAtomicCounterBufferiv");
+            errors().set(0x0502);
+            *params = 0;
+        }
+    }
 }
 
 /// Image texture binding. Found missing from a real Minecraft 1.21.1 trace.
@@ -1311,9 +1359,11 @@ pub const EXPORTS: &[&str] = &[
     "glTextureStorage1D", "glTextureSubImage1D", "glCompressedTextureSubImage1D",
     "glCopyTextureSubImage1D", "glTextureBuffer", "glNamedFramebufferTextureMultiviewOVR",
     "glGetProgramResourceLocationIndex",
-    "glDebugMessageControl", "glDebugMessageControlARB", "glBindImageTexture",
+    "glBindImageTexture",
     "glMultiDrawElementsBaseVertex",
     "glTexStorage2DMultisample", "glTexStorage3DMultisample", "glTextureStorage2DMultisample",
+    "glTextureView",
+    "glGetActiveAtomicCounterBufferiv",
 ];
 
 #[cfg(test)]

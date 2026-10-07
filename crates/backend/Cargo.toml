@@ -18,5 +18,5 @@ spirv = ["dep:naga"]
 git = "https://github.com/gfx-rs/wgpu"
 rev = "14685942a11755e4581c40729dd44591d1d73680"
 package = "naga"
-features = ["glsl-in", "spv-out"]
+features = ["glsl-in", "spv-out", "glsl-out"]
 optional = true
