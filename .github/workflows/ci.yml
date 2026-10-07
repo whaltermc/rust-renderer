@@ -1,4 +1,4 @@
-name: Retrace Fixtures
+name: Renderer Tool
 
 on:
   push:
@@ -13,8 +13,8 @@ permissions:
   contents: read
 
 jobs:
-  retrace:
-    name: Retrace Fixtures
+  tool:
+    name: Renderer Tool
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
@@ -28,25 +28,8 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android
 
-      - name: Install Android SDK and NDK
-        run: |
-          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
-
-          yes | "$SDKMANAGER" --licenses || true
-
-          "$SDKMANAGER" \
-            "platform-tools" \
-            "platforms;android-34" \
-            "build-tools;34.0.0" \
-            "ndk;27.2.12479018"
-
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends jq
-
-      - name: Install GLES/EGL libraries for trace replay
+      - name: Install GLES/EGL libraries for renderer tool
         run: |
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends \
@@ -56,110 +39,37 @@ jobs:
             mesa-va-drivers mesa-vdpau-drivers \
             libglvnd0 libglx0 libegl-mesa0
 
-      - name: Configure Android environment
-        run: |
-          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
-
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk --locked
-
-      - name: Build Rust renderer for Android
-        run: |
-          cargo test -p renderer-core
-          cargo ndk -t arm64-v8a build --release -p gl-compat
-
-      - name: Build Rust renderer for host (for trace replay)
+      - name: Build Rust renderer for host (for tool)
         run: |
           cargo build --release -p gl-compat
 
-      - name: Install renderer library
+      - name: Build C++ renderer tool
         run: |
-          install -D \
-            target/aarch64-linux-android/release/librust_gl.so \
-            android/app/src/main/jniLibs/arm64-v8a/librust_gl.so
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends cmake libegl-dev libgles-dev libgl-dev
+          cmake -S tools/renderer-tool -B build/renderer-tool -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/renderer-tool --config Release -j
 
-          install -D \
-            target/aarch64-linux-android/release/librust_gl.so \
-            android/renderer/src/main/jniLibs/arm64-v8a/librust_gl.so
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v5
-        with:
-          gradle-version: "8.7"
-
-      - name: Cache replay fixtures
-        uses: actions/cache@v4
-        with:
-          path: target/trace-replay/downloads
-          key: trace-fixtures-${{ hashFiles('tools/trace_replay/run_fixture.sh') }}
-
-      - name: Make fixture script executable
-        run: chmod +x tools/trace_replay/run_fixture.sh
-
-      - name: Retrace Minecraft 1.21.4
+      - name: Run renderer tool (ES vs VK)
         run: |
-          set -o pipefail
           mkdir -p target/reports
-          tools/trace_replay/run_fixture.sh 1.21.4 \
-            2>&1 | tee target/reports/minecraft-1.21.4-retrace.log
-          if [ -f target/trace-replay/results/1.21.4/result.json ]; then
-            PASSED=$(jq -r '.passed' target/trace-replay/results/1.21.4/result.json)
+          ./build/renderer-tool/renderer-tool target/release/librust_gl.so --output-dir target/reports 2>&1 | tee target/reports/renderer-tool.log
+          if [ -f target/reports/report.json ]; then
+            PASSED=$(grep -o '"passed":[^,]*' target/reports/report.json | head -1 | grep -o '[^:]*$' | tr -d ' ')
             if [ "$PASSED" != "true" ]; then
-              echo "Retrace failed for 1.21.4"
+              echo "Renderer tool reported failure"
               exit 1
             fi
           else
-            echo "Result file not found"
+            echo "Report file not found"
             exit 1
           fi
 
-      - name: Retrace Minecraft 1.21.4 world
-        run: |
-          set -o pipefail
-          mkdir -p target/reports
-          RENDERER_TRACE_GL=1 tools/trace_replay/run_fixture.sh 1.21.4-world \
-            2>&1 | tee target/reports/minecraft-1.21.4-world-retrace.log
-          if [ -f target/trace-replay/results/1.21.4-world/result.json ]; then
-            PASSED=$(jq -r '.passed' target/trace-replay/results/1.21.4-world/result.json)
-            if [ "$PASSED" != "true" ]; then
-              echo "Retrace failed for 1.21.4-world"
-              exit 1
-            fi
-          else
-            echo "Result file not found"
-            exit 1
-          fi
-
-      - name: Retrace Minecraft 1.21.4 shaders (Iris/BSL)
-        run: |
-          set -o pipefail
-          mkdir -p target/reports
-          RENDERER_TRACE_GL=1 RENDERER_SHADER_TRANSLATION_TARGET=es tools/trace_replay/run_fixture.sh 1.21.4-shaders \
-            2>&1 | tee target/reports/minecraft-1.21.4-shaders-retrace.log
-          if [ -f target/trace-replay/results/1.21.4-shaders/result.json ]; then
-            PASSED=$(jq -r '.passed' target/trace-replay/results/1.21.4-shaders/result.json)
-            if [ "$PASSED" != "true" ]; then
-              echo "Retrace failed for 1.21.4-shaders"
-              exit 1
-            fi
-          else
-            echo "Result file not found"
-            exit 1
-          fi
-
-      - name: Generate HTML report
-        run: |
-          mkdir -p target/reports
-          python3 tools/generate_retrace_html.py target/trace-replay/results target/reports/retrace-report.html
-
-      - name: Upload retrace reports
+      - name: Upload tool reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: retrace-reports
+          name: renderer-tool-reports
           path: |
             target/reports/
-            target/trace-replay/results/
           if-no-files-found: warn

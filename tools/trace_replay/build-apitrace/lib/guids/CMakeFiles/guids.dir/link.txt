@@ -1,2 +1,0 @@
-"/usr/bin/gcc-ar-13" cr libguids.a CMakeFiles/guids.dir/guids.cpp.o
-"/usr/bin/gcc-ranlib-13" libguids.a

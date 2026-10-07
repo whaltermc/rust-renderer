@@ -1,2 +1,0 @@
-"/usr/bin/gcc-ar-13" cr libgltrace_common.a CMakeFiles/gltrace_common.dir/glcaps.cpp.o CMakeFiles/gltrace_common.dir/config.cpp.o CMakeFiles/gltrace_common.dir/gltrace_arrays.cpp.o CMakeFiles/gltrace_common.dir/gltrace_state.cpp.o CMakeFiles/gltrace_common.dir/glmemshadow.cpp.o CMakeFiles/gltrace_common.dir/gltrace_unpack_compressed.cpp.o
-"/usr/bin/gcc-ranlib-13" libgltrace_common.a

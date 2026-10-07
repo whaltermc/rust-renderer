@@ -124,6 +124,8 @@ gl_fns! {
     gen_renderbuffers: "glGenRenderbuffers" => fn(i32, *mut u32),
     bind_renderbuffer: "glBindRenderbuffer" => fn(u32, u32),
     framebuffer_renderbuffer: "glFramebufferRenderbuffer" => fn(u32, u32, u32, u32),
+    pixel_storei: "glPixelStorei" => fn(u32, i32),
+    read_pixels: "glReadPixels" => fn(i32, i32, i32, i32, u32, u32, *mut c_void),
 }
 
 pub struct DirectEsBackend {
@@ -467,6 +469,24 @@ impl Backend for DirectEsBackend {
         };
         cache.insert(name.to_string(), addr);
         addr as *const c_void
+    }
+
+    fn read_pixels(
+        &self,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        format: u32,
+        ty: u32,
+        pixels: &mut [u8],
+    ) -> Result<(), BackendError> {
+        // SAFETY: valid fn pointer; `pixels` outlives the call.
+        unsafe {
+            (self.fns.pixel_storei)(0x0CF5 /* GL_PACK_ALIGNMENT */, 1);
+            (self.fns.read_pixels)(x, y, width, height, format, ty, pixels.as_mut_ptr() as *mut c_void);
+        }
+        self.check("glReadPixels")
     }
 }
 

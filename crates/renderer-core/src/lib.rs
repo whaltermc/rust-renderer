@@ -294,6 +294,22 @@ pub trait Backend: Send + Sync {
     fn get_string(&self, name: u32) -> *const u8;
     /// Looks up a driver entry point by name (cached); null if the driver lacks it.
     fn proc_address(&self, name: &str) -> *const c_void;
+    /// Reads pixels from the current framebuffer. Only supported on GLES backends today.
+    fn read_pixels(
+        &self,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        format: u32,
+        ty: u32,
+        pixels: &mut [u8],
+    ) -> Result<(), BackendError> {
+        let _ = (x, y, width, height, format, ty, pixels);
+        Err(BackendError::Unsupported(
+            "read_pixels not supported on this backend".into(),
+        ))
+    }
 }
 
 /// OpenGL-style sticky error state (spec section 7). First error wins until read.

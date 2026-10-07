@@ -1,2 +1,0 @@
-"/usr/bin/gcc-ar-13" cr libos.a CMakeFiles/os.dir/os_backtrace.cpp.o CMakeFiles/os.dir/os_crtdbg.cpp.o CMakeFiles/os.dir/os_posix.cpp.o
-"/usr/bin/gcc-ranlib-13" libos.a

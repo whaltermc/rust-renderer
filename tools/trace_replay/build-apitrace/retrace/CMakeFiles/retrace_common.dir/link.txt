@@ -1,2 +1,0 @@
-"/usr/bin/gcc-ar-13" cr libretrace_common.a CMakeFiles/retrace_common.dir/json.cpp.o CMakeFiles/retrace_common.dir/process_name.cpp.o CMakeFiles/retrace_common.dir/retrace.cpp.o CMakeFiles/retrace_common.dir/retrace_main.cpp.o CMakeFiles/retrace_common.dir/retrace_stdc.cpp.o CMakeFiles/retrace_common.dir/retrace_swizzle.cpp.o CMakeFiles/retrace_common.dir/state_writer.cpp.o CMakeFiles/retrace_common.dir/state_writer_json.cpp.o CMakeFiles/retrace_common.dir/state_writer_ubjson.cpp.o CMakeFiles/retrace_common.dir/ws.cpp.o
-"/usr/bin/gcc-ranlib-13" libretrace_common.a

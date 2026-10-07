@@ -103,6 +103,8 @@ gl_fns! {
     check_framebuffer_status: "glCheckFramebufferStatus" => fn(u32) -> u32,
     draw_arrays: "glDrawArrays" => fn(u32, i32, i32),
     draw_elements: "glDrawElements" => fn(u32, i32, u32, *const c_void),
+    pixel_storei: "glPixelStorei" => fn(u32, i32),
+    read_pixels: "glReadPixels" => fn(i32, i32, i32, i32, u32, u32, *mut c_void),
 }
 
 pub struct GlesBackend {
@@ -503,5 +505,24 @@ impl Backend for GlesBackend {
         };
         cache.insert(name.to_string(), addr);
         addr as *const c_void
+    }
+
+    fn read_pixels(
+        &self,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        format: u32,
+        ty: u32,
+        pixels: &mut [u8],
+    ) -> Result<(), BackendError> {
+        // SAFETY: valid fn pointer; `pixels` outlives the call and is large enough for the requested
+        // region because the caller allocated it from `width * height * bytes_per_pixel`.
+        unsafe {
+            (self.fns.pixel_storei)(0x0CF5 /* GL_PACK_ALIGNMENT */, 1);
+            (self.fns.read_pixels)(x, y, width, height, format, ty, pixels.as_mut_ptr() as *mut c_void);
+        }
+        self.check("glReadPixels")
     }
 }

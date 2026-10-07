@@ -1,2 +1,0 @@
-"/usr/bin/gcc-ar-13" cr libsnappy.a "CMakeFiles/snappy.dir/snappy/snappy-c.cc.o" "CMakeFiles/snappy.dir/snappy/snappy-sinksource.cc.o" "CMakeFiles/snappy.dir/snappy/snappy-stubs-internal.cc.o" CMakeFiles/snappy.dir/snappy/snappy.cc.o
-"/usr/bin/gcc-ranlib-13" libsnappy.a
