@@ -1,0 +1,18 @@
+[package]
+name = "shader-manager"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+renderer-core = { path = "../renderer-core" }
+shader-translate = { path = "../shader-translate" }
+rayon = "1.8"
+dashmap = "5.5"
+parking_lot = "0.12"
+serde = { version = "1.0", features = ["derive"] }
+xxhash-rust = { version = "0.1", features = ["xxh3"] }
+tracing = "0.1"
+
+[features]
+default = ["parallel"]
+parallel = ["rayon"]

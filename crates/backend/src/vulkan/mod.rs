@@ -45,7 +45,7 @@ impl VulkanBackend {
         ))
     }
 
-    unsafe fn record_triangle(&self) {
+    pub(crate) unsafe fn record_triangle(&self) {
         let cb = self.command_buffer;
         let begin = raw::VkCommandBufferBeginInfo {
             s_type: raw::VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -298,7 +298,7 @@ pub fn probe() -> Result<Box<dyn Backend>, BackendError> {
     }
 }
 
-fn try_probe() -> Result<VulkanBackend, String> {
+pub(crate) fn try_probe() -> Result<VulkanBackend, String> {
     unsafe {
         let api = Api::new("rust-renderer", APP_VERSION).map_err(|e| format!("{e}"))?;
 

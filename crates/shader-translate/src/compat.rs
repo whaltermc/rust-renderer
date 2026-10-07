@@ -99,6 +99,89 @@ pub(crate) fn rewrite_extension_texture_names(line: &str) -> String {
     s
 }
 
+/// Rewrite 1.21.4+ PBR and 26.x modern shader tokens used by Complementary, Derivative, Bliss, BSL.
+pub(crate) fn rewrite_modern_shader_tokens(line: &str) -> String {
+    if !line.contains("roughness")
+        && !line.contains("metalness")
+        && !line.contains("volumetric")
+        && !line.contains("shadowtex")
+        && !line.contains("ssr")
+        && !line.contains("taa")
+        && !line.contains("cameraJitter")
+        && !line.contains("biome")
+    {
+        return line.to_string();
+    }
+    let mut s = line.to_string();
+    s = replace_ident(&s, "roughnessMetalness", "roughness");
+    s = replace_ident(&s, "materialPBR7", "PBRParams");
+    s = replace_ident(&s, "roughnessMap", "roughMap");
+    s = replace_ident(&s, "metalnessMap", "metalMap");
+    s = replace_ident(&s, "roughMap", "roughMap");
+    s = replace_ident(&s, "metalMap", "metalMap");
+    s = replace_ident(&s, "shadowtex0hard", "shadowHard");
+    s = replace_ident(&s, "shadowtex1hard", "shadowHard1");
+    s = replace_ident(&s, "shadowMapResolution", "SHADOW_RES");
+    s = replace_ident(&s, "shadowDistance", "SHADOW_DIST");
+    s = replace_ident(&s, "shadowInterval", "SHADOW_INTERVAL");
+    s = replace_ident(&s, "shadowHardness", "SHADOW_HARDNESS");
+    s = replace_ident(&s, "volumetricLight", "volLighting");
+    s = replace_ident(&s, "volumetricCloud", "volCloud");
+    s = replace_ident(&s, "atmosphereFog", "sceneFog");
+    s = replace_ident(&s, "heightFog", "hFog");
+    s = replace_ident(&s, "miePhase", "scatterMie");
+    s = replace_ident(&s, "rayleighPhase", "scatterRay");
+    s = replace_ident(&s, "fogColor", "sceneFogColor");
+    s = replace_ident(&s, "fogDensity", "sceneFogDensity");
+    s = replace_ident(&s, "cameraJitter", "taaOffset");
+    s = replace_ident(&s, "previousFrame", "prevFrame");
+    s = replace_ident(&s, "motionBlurFactor", "motionFactor");
+    s = replace_ident(&s, "ssrEnabled", "SSR_ENABLED");
+    s = replace_ident(&s, "ssrRayStep", "SSR_STEP");
+    s = replace_ident(&s, "ssrMaxDist", "SSR_MAX_DIST");
+    s = replace_ident(&s, "screenSpaceReflection", "SSR");
+    s = replace_ident(&s, "biomeBlendDist", "BIOME_BLEND");
+    s = replace_ident(&s, "temperatureColor", "tempColor");
+    s = replace_ident(&s, "wetnessColor", "wetColor");
+    s = replace_ident(&s, "waterNormal", "waterNorm");
+    s = replace_ident(&s, "waterDiffuse", "waterDiff");
+    s
+}
+
+/// Whether the source uses 1.21.4+ PBR features.
+pub(crate) fn uses_pbr(src: &str) -> bool {
+    src.contains("roughnessMetalness")
+        || src.contains("materialPBR")
+        || src.contains("roughnessMap")
+        || src.contains("metalnessMap")
+}
+
+/// Whether the source uses 26.x atmosphere/volumetric features.
+pub(crate) fn uses_volumetric(src: &str) -> bool {
+    src.contains("volumetricLight")
+        || src.contains("volumetricCloud")
+        || src.contains("atmosphereFog")
+        || src.contains("heightFog")
+}
+
+/// Whether the source uses multi-shadow (multiple shadow samplers).
+pub(crate) fn uses_multi_shadow(src: &str) -> bool {
+    let count = src.matches("shadowtex").count();
+    count >= 2 || src.contains("shadowtex0hard") || src.contains("shadowtex1hard")
+}
+
+/// Whether the source uses screen-space reflections.
+pub(crate) fn uses_ssr(src: &str) -> bool {
+    src.contains("ssrEnabled")
+        || src.contains("ssrRayStep")
+        || src.contains("screenSpaceReflection")
+}
+
+/// Whether the source uses TAA.
+pub(crate) fn uses_taa(src: &str) -> bool {
+    src.contains("cameraJitter") || src.contains("previousFrame") || src.contains("taaOffset")
+}
+
 /// Words reserved by GLSL ES 3.00 that desktop drivers (NVIDIA in particular) accept as
 /// ordinary identifiers. Shader packs name variables `input`, `filter`, `half`, `common`...
 /// and compile everywhere except on ES.

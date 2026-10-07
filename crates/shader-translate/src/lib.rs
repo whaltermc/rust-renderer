@@ -1015,6 +1015,9 @@ pub fn translate(src: &str) -> Result<String, String> {
 
         let mut rewritten = rewrite_line_body(line, use_300, is_frag, needs_frag_out, rewrite_ftransform);
         if use_300 {
+            rewritten = compat::rewrite_modern_shader_tokens(&rewritten);
+        }
+        if use_300 {
             rewritten = rewrite_es300_tokens(rewritten);
         }
         if needs_frag_out {

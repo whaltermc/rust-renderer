@@ -6,6 +6,7 @@ members = [
     "crates/shader-translate",
     "crates/format-translate",
     "crates/gl-compat",
+    "crates/shader-manager",
 ]
 
 [profile.release]
