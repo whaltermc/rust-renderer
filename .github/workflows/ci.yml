@@ -65,6 +65,36 @@ jobs:
             exit 1
           fi
 
+      - name: Build trace replay tool
+        run: |
+          git submodule update --init --depth 1 --recursive tools/trace_replay/vendor/apitrace
+          cmake -S tools/trace_replay -B build/trace-replay -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/trace-replay --config Release -j
+
+      - name: Run trace replay (Minecraft 1.17 main menu, benchmark mode)
+        env:
+          EGL_PLATFORM: surfaceless
+          LIBGL_ALWAYS_SOFTWARE: 1
+          MESA_GL_VERSION_OVERRIDE: 3.3
+          MESA_GLSL_VERSION_OVERRIDE: 330
+        run: |
+          mkdir -p target/trace-replay/fixtures/1.17 target/trace-replay/results/1.17
+          tar -xzf tools/trace_replay/fixtures/minecraft-1.17-main-menu-854.tgz -C target/trace-replay/fixtures/1.17
+          ./build/trace-replay/rust_renderer_trace_replay \
+            --trace target/trace-replay/fixtures/1.17/trace.trace \
+            --output target/trace-replay/results/1.17 \
+            --backend DirectGLES \
+            --renderer-library target/release/librust_gl.so \
+            --width 854 \
+            --height 480 \
+            --benchmark \
+            --benchmark-tail-frames 2 \
+            --benchmark-result target/trace-replay/results/1.17/benchmark.json 2>&1 | tee target/trace-replay/results/1.17/benchmark.log
+          if [ ! -f target/trace-replay/results/1.17/benchmark.json ]; then
+            echo "Trace replay benchmark result not found"
+            exit 1
+          fi
+
       - name: Upload tool reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -72,4 +102,5 @@ jobs:
           name: renderer-tool-reports
           path: |
             target/reports/
+            target/trace-replay/results/
           if-no-files-found: warn
