@@ -13,6 +13,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Any
+from datetime import datetime
 
 def parse_retrace_log(log_path: Path) -> Dict:
     """Parse retrace log file for errors and statistics."""
@@ -351,7 +352,6 @@ def generate_html_report(results_dir: Path, logs_dir: Path, output_path: Path):
 
 
 if __name__ == "__main__":
-    import datetime
     results_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("target/trace-replay/results")
     logs_dir = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("target/reports")
     output_path = Path(sys.argv[3]) if len(sys.argv) > 3 else Path("target/reports/retrace-report.html")
