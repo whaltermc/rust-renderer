@@ -10,7 +10,7 @@ rayon = { version = "1.8", optional = true }
 dashmap = "5.5"
 parking_lot = "0.12"
 serde = { version = "1.0", features = ["derive"] }
-xxhash-rust = { version = "0.1", features = ["xxh3"] }
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
 tracing = "0.1"
 
 [features]
