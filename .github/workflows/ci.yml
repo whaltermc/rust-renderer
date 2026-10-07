@@ -50,7 +50,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends \
-            libegl1-mesa libgles2-mesa libgles1-mesa \
+            libegl1 libgles2 libgles1 \
             libgl1-mesa-glx libglx-mesa0 \
             mesa-va-drivers mesa-vdpau-drivers \
             libglvnd0 libglx0 libegl-mesa0
