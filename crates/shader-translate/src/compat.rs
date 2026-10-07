@@ -6,7 +6,7 @@
 
 /// Replaces `old` with `new` wherever it appears as a complete identifier. Operates on
 /// characters, so non-ASCII text in comments survives unchanged.
-pub(crate) fn replace_ident(src: &str, old: &str, new: &str) -> String {
+pub fn replace_ident(src: &str, old: &str, new: &str) -> String {
     if old.is_empty() || !src.contains(old) {
         return src.to_string();
     }
@@ -121,7 +121,6 @@ pub(crate) fn rewrite_modern_shader_tokens(line: &str) -> String {
     s = replace_ident(&s, "metalMap", "metalMap");
     s = replace_ident(&s, "shadowtex0hard", "shadowHard");
     s = replace_ident(&s, "shadowtex1hard", "shadowHard1");
-    s = replace_ident(&s, "shadowMapResolution", "SHADOW_RES");
     s = replace_ident(&s, "shadowDistance", "SHADOW_DIST");
     s = replace_ident(&s, "shadowInterval", "SHADOW_INTERVAL");
     s = replace_ident(&s, "shadowHardness", "SHADOW_HARDNESS");

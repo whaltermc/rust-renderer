@@ -94,12 +94,16 @@ fn rewrite_atmosphere_tokens(src: &str) -> String {
 }
 
 /// Rewrite shadow map variations across packs.
+/// Note: We do NOT rewrite const declarations like shadowMapResolution=2048
+/// because they are valid GLSL ES constants. Only rewrite uniform/variable references.
 fn rewrite_shadow_tokens(src: &str) -> String {
     let mut out = src.to_string();
-    out = out.replace("shadowMapResolution", "SHADOW_RES");
-    out = out.replace("shadowDistance", "SHADOW_DIST");
-    out = out.replace("shadowInterval", "SHADOW_INTERVAL");
-    out = out.replace("shadowHardness", "SHADOW_HARDNESS");
+    // Only replace uniform/variable references that need mapping
+    // Do NOT replace const declarations like shadowMapResolution=2048
+    out = shader_translate::compat::replace_ident(&out, "shadowDistance", "SHADOW_DIST");
+    out = shader_translate::compat::replace_ident(&out, "shadowInterval", "SHADOW_INTERVAL");
+    out = shader_translate::compat::replace_ident(&out, "shadowHardness", "SHADOW_HARDNESS");
+    // Note: shadowMapResolution is left as-is since it's a valid GLSL ES const
     out
 }
 

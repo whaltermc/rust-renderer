@@ -136,7 +136,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p target/reports
-          RENDERER_TRACE_GL=1 tools/trace_replay/run_fixture.sh 1.21.4-shaders \
+          RENDERER_TRACE_GL=1 RENDERER_SHADER_TRANSLATION_TARGET=es tools/trace_replay/run_fixture.sh 1.21.4-shaders \
             2>&1 | tee target/reports/minecraft-1.21.4-shaders-retrace.log
           if [ -f target/trace-replay/results/1.21.4-shaders/result.json ]; then
             PASSED=$(jq -r '.passed' target/trace-replay/results/1.21.4-shaders/result.json)

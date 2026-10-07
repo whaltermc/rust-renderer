@@ -7,7 +7,7 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 
-mod compat;
+pub mod compat;
 mod numeric;
 
 const PRECISION_300: &str = "\
@@ -732,9 +732,35 @@ fn looks_like_fragment(src: &str) -> bool {
     src.contains("gl_FragColor")
         || src.contains("gl_FragData")
         || src.contains("gl_FragDepth")
-        || (src.contains("out ")
-            && !src.contains("gl_Position")
-            && !src.contains("gl_PointSize"))
+        || has_fragment_outputs(src)
+}
+
+/// Checks if the source has fragment-like output declarations.
+fn has_fragment_outputs(src: &str) -> bool {
+    // Look for `out` declarations that are not gl_Position/gl_PointSize
+    let bytes = src.as_bytes();
+    const OUT_TOKEN: &[u8] = b"out ";
+    let mut i = 0;
+    while i + 4 < bytes.len() {
+        if bytes[i..].starts_with(b"out ") {
+            // Check what follows "out "
+            let mut j = i + 4;
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            // Check if it's gl_Position or gl_PointSize
+            if j + 12 <= bytes.len() && &bytes[j..j+12] == b"gl_Position" {
+                // Skip this one
+            } else if j + 13 <= bytes.len() && &bytes[j..j+13] == b"gl_PointSize" {
+                // Skip this one
+            } else {
+                // Found a fragment-like output
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
 }
 
 fn looks_like_compute(src: &str) -> bool {
@@ -957,10 +983,17 @@ pub fn translate(src: &str) -> Result<String, String> {
     // float call and is left for ES's own overload; what is left taking integers is retargeted
     // to the helper, which is injected only when something actually needed it.
     let (mod_rewritten_source, needs_int_mod) = numeric::rewrite_int_mod(&widened_source);
+
+    // Save original source for fragment/vertex detection before macroization
+    let original_source = mod_rewritten_source.clone();
+
     let sanitized_source = macroize_nonconstant_globals(&mod_rewritten_source);
     let src = sanitized_source.as_str();
-    let is_frag = looks_like_fragment(src);
-    let layers = fragment_output_layers(src);
+
+    // Fragment/vertex detection must run on the ORIGINAL source before sanitization
+    // to preserve out/attribute declarations that might be folded by macroization.
+    let is_frag = looks_like_fragment(&original_source);
+    let layers = fragment_output_layers(&original_source);
     let needs_frag_out = use_300 && layers > 0;
     let rewrite_ftransform = !declares_ftransform(src);
     let uses_point_size = src.contains("gl_PointSize");
