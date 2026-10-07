@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 renderer-core = { path = "../renderer-core" }
 shader-translate = { path = "../shader-translate" }
-rayon = "1.8"
+rayon = { version = "1.8", optional = true }
 dashmap = "5.5"
 parking_lot = "0.12"
 serde = { version = "1.0", features = ["derive"] }
