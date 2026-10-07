@@ -1,0 +1,1533 @@
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CMakeDetermineSystem.cmake:233 (message)"
+      - "CMakeLists.txt:10 (project)"
+    message: |
+      The system is: Linux - 6.8.0-1064-azure - x86_64
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/usr/share/cmake-3.28/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/usr/share/cmake-3.28/Modules/CMakeDetermineCCompiler.cmake:123 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:10 (project)"
+    message: |
+      Compiling the C compiler identification source file "CMakeCCompilerId.c" succeeded.
+      Compiler: /usr/bin/cc 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      0
+      
+      
+      Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "a.out"
+      
+      The C compiler identification is GNU, found in:
+        /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/3.28.3/CompilerIdC/a.out
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/usr/share/cmake-3.28/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/usr/share/cmake-3.28/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:10 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler: /usr/bin/c++ 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      0
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "a.out"
+      
+      The CXX compiler identification is GNU, found in:
+        /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/3.28.3/CompilerIdCXX/a.out
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CMakeDetermineCompilerABI.cmake:57 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:10 (project)"
+    checks:
+      - "Detecting C compiler ABI info"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-UDRRQb"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-UDRRQb"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_C_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-UDRRQb'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_0e0ff/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_0e0ff.dir/build.make CMakeFiles/cmTC_0e0ff.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-UDRRQb'
+        Building C object CMakeFiles/cmTC_0e0ff.dir/CMakeCCompilerABI.c.o
+        /usr/bin/cc   -v -o CMakeFiles/cmTC_0e0ff.dir/CMakeCCompilerABI.c.o -c /usr/share/cmake-3.28/Modules/CMakeCCompilerABI.c
+        Using built-in specs.
+        COLLECT_GCC=/usr/bin/cc
+        OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa
+        OFFLOAD_TARGET_DEFAULT=1
+        Target: x86_64-linux-gnu
+        Configured with: ../src/configure -v --with-pkgversion='Ubuntu 13.3.0-6ubuntu2~24.04.1' --with-bugurl=file:///usr/share/doc/gcc-13/README.Bugs --enable-languages=c,ada,c++,go,d,fortran,objc,obj-c++,m2 --prefix=/usr --with-gcc-major-version-only --program-suffix=-13 --program-prefix=x86_64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-bootstrap --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-vtable-verify --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --enable-cet --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32,m64,mx32 --enable-multilib --with-tune=generic --enable-offload-targets=nvptx-none=/build/gcc-13-EldibY/gcc-13-13.3.0/debian/tmp-nvptx/usr,amdgcn-amdhsa=/build/gcc-13-EldibY/gcc-13-13.3.0/debian/tmp-gcn/usr --enable-offload-defaulted --without-cuda-driver --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2
+        Thread model: posix
+        Supported LTO compression algorithms: zlib zstd
+        gcc version 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_0e0ff.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_0e0ff.dir/'
+         /usr/libexec/gcc/x86_64-linux-gnu/13/cc1 -quiet -v -imultiarch x86_64-linux-gnu /usr/share/cmake-3.28/Modules/CMakeCCompilerABI.c -quiet -dumpdir CMakeFiles/cmTC_0e0ff.dir/ -dumpbase CMakeCCompilerABI.c.c -dumpbase-ext .c -mtune=generic -march=x86-64 -version -fasynchronous-unwind-tables -fstack-protector-strong -Wformat -Wformat-security -fstack-clash-protection -fcf-protection -o /tmp/ccE8W2EF.s
+        GNU C17 (Ubuntu 13.3.0-6ubuntu2~24.04.1) version 13.3.0 (x86_64-linux-gnu)
+        	compiled by GNU C version 13.3.0, GMP version 6.3.0, MPFR version 4.2.1, MPC version 1.3.1, isl version isl-0.26-GMP
+        
+        GGC heuristics: --param ggc-min-expand=100 --param ggc-min-heapsize=131072
+        ignoring nonexistent directory "/usr/local/include/x86_64-linux-gnu"
+        ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/13/include-fixed/x86_64-linux-gnu"
+        ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/13/include-fixed"
+        ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/13/../../../../x86_64-linux-gnu/include"
+        #include "..." search starts here:
+        #include <...> search starts here:
+         /usr/lib/gcc/x86_64-linux-gnu/13/include
+         /usr/local/include
+         /usr/include/x86_64-linux-gnu
+         /usr/include
+        End of search list.
+        Compiler executable checksum: b220a7f1a1f69970d969d254ad9ec166
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_0e0ff.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_0e0ff.dir/'
+         as -v --64 -o CMakeFiles/cmTC_0e0ff.dir/CMakeCCompilerABI.c.o /tmp/ccE8W2EF.s
+        GNU assembler version 2.42 (x86_64-linux-gnu) using BFD version (GNU Binutils for Ubuntu) 2.42
+        COMPILER_PATH=/usr/libexec/gcc/x86_64-linux-gnu/13/:/usr/libexec/gcc/x86_64-linux-gnu/13/:/usr/libexec/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/13/:/usr/lib/gcc/x86_64-linux-gnu/
+        LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/13/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../:/lib/:/usr/lib/
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_0e0ff.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_0e0ff.dir/CMakeCCompilerABI.c.'
+        Linking C executable cmTC_0e0ff
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_0e0ff.dir/link.txt --verbose=1
+        /usr/bin/cc  -v CMakeFiles/cmTC_0e0ff.dir/CMakeCCompilerABI.c.o -o cmTC_0e0ff 
+        Using built-in specs.
+        COLLECT_GCC=/usr/bin/cc
+        COLLECT_LTO_WRAPPER=/usr/libexec/gcc/x86_64-linux-gnu/13/lto-wrapper
+        OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa
+        OFFLOAD_TARGET_DEFAULT=1
+        Target: x86_64-linux-gnu
+        Configured with: ../src/configure -v --with-pkgversion='Ubuntu 13.3.0-6ubuntu2~24.04.1' --with-bugurl=file:///usr/share/doc/gcc-13/README.Bugs --enable-languages=c,ada,c++,go,d,fortran,objc,obj-c++,m2 --prefix=/usr --with-gcc-major-version-only --program-suffix=-13 --program-prefix=x86_64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-bootstrap --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-vtable-verify --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --enable-cet --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32,m64,mx32 --enable-multilib --with-tune=generic --enable-offload-targets=nvptx-none=/build/gcc-13-EldibY/gcc-13-13.3.0/debian/tmp-nvptx/usr,amdgcn-amdhsa=/build/gcc-13-EldibY/gcc-13-13.3.0/debian/tmp-gcn/usr --enable-offload-defaulted --without-cuda-driver --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2
+        Thread model: posix
+        Supported LTO compression algorithms: zlib zstd
+        gcc version 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 
+        COMPILER_PATH=/usr/libexec/gcc/x86_64-linux-gnu/13/:/usr/libexec/gcc/x86_64-linux-gnu/13/:/usr/libexec/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/13/:/usr/lib/gcc/x86_64-linux-gnu/
+        LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/13/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../:/lib/:/usr/lib/
+        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_0e0ff' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_0e0ff.'
+         /usr/libexec/gcc/x86_64-linux-gnu/13/collect2 -plugin /usr/libexec/gcc/x86_64-linux-gnu/13/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-linux-gnu/13/lto-wrapper -plugin-opt=-fresolution=/tmp/ccMa3qQ9.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -dynamic-linker /lib64/ld-linux-x86-64.so.2 -pie -z now -z relro -o cmTC_0e0ff /usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/Scrt1.o /usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/13/crtbeginS.o -L/usr/lib/gcc/x86_64-linux-gnu/13 -L/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/13/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/13/../../.. CMakeFiles/cmTC_0e0ff.dir/CMakeCCompilerABI.c.o -lgcc --push-state --as-needed -lgcc_s --pop-state -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/x86_64-linux-gnu/13/crtendS.o /usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crtn.o
+        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_0e0ff' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_0e0ff.'
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-UDRRQb'
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CMakeDetermineCompilerABI.cmake:127 (message)"
+      - "/usr/share/cmake-3.28/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:10 (project)"
+    message: |
+      Parsed C implicit include dir info: rv=done
+        found start of include info
+        found start of implicit include info
+          add: [/usr/lib/gcc/x86_64-linux-gnu/13/include]
+          add: [/usr/local/include]
+          add: [/usr/include/x86_64-linux-gnu]
+          add: [/usr/include]
+        end of search list found
+        collapse include dir [/usr/lib/gcc/x86_64-linux-gnu/13/include] ==> [/usr/lib/gcc/x86_64-linux-gnu/13/include]
+        collapse include dir [/usr/local/include] ==> [/usr/local/include]
+        collapse include dir [/usr/include/x86_64-linux-gnu] ==> [/usr/include/x86_64-linux-gnu]
+        collapse include dir [/usr/include] ==> [/usr/include]
+        implicit include dirs: [/usr/lib/gcc/x86_64-linux-gnu/13/include;/usr/local/include;/usr/include/x86_64-linux-gnu;/usr/include]
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CMakeDetermineCompilerABI.cmake:159 (message)"
+      - "/usr/share/cmake-3.28/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:10 (project)"
+    message: |
+      Parsed C implicit link information:
+        link line regex: [^( *|.*[/\\])(ld|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        ignore line: [Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-UDRRQb']
+        ignore line: []
+        ignore line: [Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_0e0ff/fast]
+        ignore line: [/usr/bin/gmake  -f CMakeFiles/cmTC_0e0ff.dir/build.make CMakeFiles/cmTC_0e0ff.dir/build]
+        ignore line: [gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-UDRRQb']
+        ignore line: [Building C object CMakeFiles/cmTC_0e0ff.dir/CMakeCCompilerABI.c.o]
+        ignore line: [/usr/bin/cc   -v -o CMakeFiles/cmTC_0e0ff.dir/CMakeCCompilerABI.c.o -c /usr/share/cmake-3.28/Modules/CMakeCCompilerABI.c]
+        ignore line: [Using built-in specs.]
+        ignore line: [COLLECT_GCC=/usr/bin/cc]
+        ignore line: [OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa]
+        ignore line: [OFFLOAD_TARGET_DEFAULT=1]
+        ignore line: [Target: x86_64-linux-gnu]
+        ignore line: [Configured with: ../src/configure -v --with-pkgversion='Ubuntu 13.3.0-6ubuntu2~24.04.1' --with-bugurl=file:///usr/share/doc/gcc-13/README.Bugs --enable-languages=c ada c++ go d fortran objc obj-c++ m2 --prefix=/usr --with-gcc-major-version-only --program-suffix=-13 --program-prefix=x86_64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-bootstrap --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-vtable-verify --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --enable-cet --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32 m64 mx32 --enable-multilib --with-tune=generic --enable-offload-targets=nvptx-none=/build/gcc-13-EldibY/gcc-13-13.3.0/debian/tmp-nvptx/usr amdgcn-amdhsa=/build/gcc-13-EldibY/gcc-13-13.3.0/debian/tmp-gcn/usr --enable-offload-defaulted --without-cuda-driver --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2]
+        ignore line: [Thread model: posix]
+        ignore line: [Supported LTO compression algorithms: zlib zstd]
+        ignore line: [gcc version 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1) ]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_0e0ff.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_0e0ff.dir/']
+        ignore line: [ /usr/libexec/gcc/x86_64-linux-gnu/13/cc1 -quiet -v -imultiarch x86_64-linux-gnu /usr/share/cmake-3.28/Modules/CMakeCCompilerABI.c -quiet -dumpdir CMakeFiles/cmTC_0e0ff.dir/ -dumpbase CMakeCCompilerABI.c.c -dumpbase-ext .c -mtune=generic -march=x86-64 -version -fasynchronous-unwind-tables -fstack-protector-strong -Wformat -Wformat-security -fstack-clash-protection -fcf-protection -o /tmp/ccE8W2EF.s]
+        ignore line: [GNU C17 (Ubuntu 13.3.0-6ubuntu2~24.04.1) version 13.3.0 (x86_64-linux-gnu)]
+        ignore line: [	compiled by GNU C version 13.3.0  GMP version 6.3.0  MPFR version 4.2.1  MPC version 1.3.1  isl version isl-0.26-GMP]
+        ignore line: []
+        ignore line: [GGC heuristics: --param ggc-min-expand=100 --param ggc-min-heapsize=131072]
+        ignore line: [ignoring nonexistent directory "/usr/local/include/x86_64-linux-gnu"]
+        ignore line: [ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/13/include-fixed/x86_64-linux-gnu"]
+        ignore line: [ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/13/include-fixed"]
+        ignore line: [ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/13/../../../../x86_64-linux-gnu/include"]
+        ignore line: [#include "..." search starts here:]
+        ignore line: [#include <...> search starts here:]
+        ignore line: [ /usr/lib/gcc/x86_64-linux-gnu/13/include]
+        ignore line: [ /usr/local/include]
+        ignore line: [ /usr/include/x86_64-linux-gnu]
+        ignore line: [ /usr/include]
+        ignore line: [End of search list.]
+        ignore line: [Compiler executable checksum: b220a7f1a1f69970d969d254ad9ec166]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_0e0ff.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_0e0ff.dir/']
+        ignore line: [ as -v --64 -o CMakeFiles/cmTC_0e0ff.dir/CMakeCCompilerABI.c.o /tmp/ccE8W2EF.s]
+        ignore line: [GNU assembler version 2.42 (x86_64-linux-gnu) using BFD version (GNU Binutils for Ubuntu) 2.42]
+        ignore line: [COMPILER_PATH=/usr/libexec/gcc/x86_64-linux-gnu/13/:/usr/libexec/gcc/x86_64-linux-gnu/13/:/usr/libexec/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/13/:/usr/lib/gcc/x86_64-linux-gnu/]
+        ignore line: [LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/13/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../:/lib/:/usr/lib/]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_0e0ff.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_0e0ff.dir/CMakeCCompilerABI.c.']
+        ignore line: [Linking C executable cmTC_0e0ff]
+        ignore line: [/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_0e0ff.dir/link.txt --verbose=1]
+        ignore line: [/usr/bin/cc  -v CMakeFiles/cmTC_0e0ff.dir/CMakeCCompilerABI.c.o -o cmTC_0e0ff ]
+        ignore line: [Using built-in specs.]
+        ignore line: [COLLECT_GCC=/usr/bin/cc]
+        ignore line: [COLLECT_LTO_WRAPPER=/usr/libexec/gcc/x86_64-linux-gnu/13/lto-wrapper]
+        ignore line: [OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa]
+        ignore line: [OFFLOAD_TARGET_DEFAULT=1]
+        ignore line: [Target: x86_64-linux-gnu]
+        ignore line: [Configured with: ../src/configure -v --with-pkgversion='Ubuntu 13.3.0-6ubuntu2~24.04.1' --with-bugurl=file:///usr/share/doc/gcc-13/README.Bugs --enable-languages=c ada c++ go d fortran objc obj-c++ m2 --prefix=/usr --with-gcc-major-version-only --program-suffix=-13 --program-prefix=x86_64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-bootstrap --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-vtable-verify --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --enable-cet --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32 m64 mx32 --enable-multilib --with-tune=generic --enable-offload-targets=nvptx-none=/build/gcc-13-EldibY/gcc-13-13.3.0/debian/tmp-nvptx/usr amdgcn-amdhsa=/build/gcc-13-EldibY/gcc-13-13.3.0/debian/tmp-gcn/usr --enable-offload-defaulted --without-cuda-driver --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2]
+        ignore line: [Thread model: posix]
+        ignore line: [Supported LTO compression algorithms: zlib zstd]
+        ignore line: [gcc version 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1) ]
+        ignore line: [COMPILER_PATH=/usr/libexec/gcc/x86_64-linux-gnu/13/:/usr/libexec/gcc/x86_64-linux-gnu/13/:/usr/libexec/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/13/:/usr/lib/gcc/x86_64-linux-gnu/]
+        ignore line: [LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/13/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../:/lib/:/usr/lib/]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_0e0ff' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_0e0ff.']
+        link line: [ /usr/libexec/gcc/x86_64-linux-gnu/13/collect2 -plugin /usr/libexec/gcc/x86_64-linux-gnu/13/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-linux-gnu/13/lto-wrapper -plugin-opt=-fresolution=/tmp/ccMa3qQ9.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -dynamic-linker /lib64/ld-linux-x86-64.so.2 -pie -z now -z relro -o cmTC_0e0ff /usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/Scrt1.o /usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/13/crtbeginS.o -L/usr/lib/gcc/x86_64-linux-gnu/13 -L/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/13/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/13/../../.. CMakeFiles/cmTC_0e0ff.dir/CMakeCCompilerABI.c.o -lgcc --push-state --as-needed -lgcc_s --pop-state -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/x86_64-linux-gnu/13/crtendS.o /usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crtn.o]
+          arg [/usr/libexec/gcc/x86_64-linux-gnu/13/collect2] ==> ignore
+          arg [-plugin] ==> ignore
+          arg [/usr/libexec/gcc/x86_64-linux-gnu/13/liblto_plugin.so] ==> ignore
+          arg [-plugin-opt=/usr/libexec/gcc/x86_64-linux-gnu/13/lto-wrapper] ==> ignore
+          arg [-plugin-opt=-fresolution=/tmp/ccMa3qQ9.res] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+          arg [-plugin-opt=-pass-through=-lc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+          arg [--build-id] ==> ignore
+          arg [--eh-frame-hdr] ==> ignore
+          arg [-m] ==> ignore
+          arg [elf_x86_64] ==> ignore
+          arg [--hash-style=gnu] ==> ignore
+          arg [--as-needed] ==> ignore
+          arg [-dynamic-linker] ==> ignore
+          arg [/lib64/ld-linux-x86-64.so.2] ==> ignore
+          arg [-pie] ==> ignore
+          arg [-znow] ==> ignore
+          arg [-zrelro] ==> ignore
+          arg [-o] ==> ignore
+          arg [cmTC_0e0ff] ==> ignore
+          arg [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/Scrt1.o] ==> obj [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/Scrt1.o]
+          arg [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crti.o] ==> obj [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crti.o]
+          arg [/usr/lib/gcc/x86_64-linux-gnu/13/crtbeginS.o] ==> obj [/usr/lib/gcc/x86_64-linux-gnu/13/crtbeginS.o]
+          arg [-L/usr/lib/gcc/x86_64-linux-gnu/13] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/13]
+          arg [-L/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu]
+          arg [-L/usr/lib/gcc/x86_64-linux-gnu/13/../../../../lib] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/13/../../../../lib]
+          arg [-L/lib/x86_64-linux-gnu] ==> dir [/lib/x86_64-linux-gnu]
+          arg [-L/lib/../lib] ==> dir [/lib/../lib]
+          arg [-L/usr/lib/x86_64-linux-gnu] ==> dir [/usr/lib/x86_64-linux-gnu]
+          arg [-L/usr/lib/../lib] ==> dir [/usr/lib/../lib]
+          arg [-L/usr/lib/gcc/x86_64-linux-gnu/13/../../..] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/13/../../..]
+          arg [CMakeFiles/cmTC_0e0ff.dir/CMakeCCompilerABI.c.o] ==> ignore
+          arg [-lgcc] ==> lib [gcc]
+          arg [--push-state] ==> ignore
+          arg [--as-needed] ==> ignore
+          arg [-lgcc_s] ==> lib [gcc_s]
+          arg [--pop-state] ==> ignore
+          arg [-lc] ==> lib [c]
+          arg [-lgcc] ==> lib [gcc]
+          arg [--push-state] ==> ignore
+          arg [--as-needed] ==> ignore
+          arg [-lgcc_s] ==> lib [gcc_s]
+          arg [--pop-state] ==> ignore
+          arg [/usr/lib/gcc/x86_64-linux-gnu/13/crtendS.o] ==> obj [/usr/lib/gcc/x86_64-linux-gnu/13/crtendS.o]
+          arg [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crtn.o] ==> obj [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crtn.o]
+        collapse obj [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/Scrt1.o] ==> [/usr/lib/x86_64-linux-gnu/Scrt1.o]
+        collapse obj [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crti.o] ==> [/usr/lib/x86_64-linux-gnu/crti.o]
+        collapse obj [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crtn.o] ==> [/usr/lib/x86_64-linux-gnu/crtn.o]
+        collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/13] ==> [/usr/lib/gcc/x86_64-linux-gnu/13]
+        collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu] ==> [/usr/lib/x86_64-linux-gnu]
+        collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/13/../../../../lib] ==> [/usr/lib]
+        collapse library dir [/lib/x86_64-linux-gnu] ==> [/lib/x86_64-linux-gnu]
+        collapse library dir [/lib/../lib] ==> [/lib]
+        collapse library dir [/usr/lib/x86_64-linux-gnu] ==> [/usr/lib/x86_64-linux-gnu]
+        collapse library dir [/usr/lib/../lib] ==> [/usr/lib]
+        collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/13/../../..] ==> [/usr/lib]
+        implicit libs: [gcc;gcc_s;c;gcc;gcc_s]
+        implicit objs: [/usr/lib/x86_64-linux-gnu/Scrt1.o;/usr/lib/x86_64-linux-gnu/crti.o;/usr/lib/gcc/x86_64-linux-gnu/13/crtbeginS.o;/usr/lib/gcc/x86_64-linux-gnu/13/crtendS.o;/usr/lib/x86_64-linux-gnu/crtn.o]
+        implicit dirs: [/usr/lib/gcc/x86_64-linux-gnu/13;/usr/lib/x86_64-linux-gnu;/usr/lib;/lib/x86_64-linux-gnu;/lib]
+        implicit fwks: []
+      
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CMakeDetermineCompilerABI.cmake:57 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:10 (project)"
+    checks:
+      - "Detecting CXX compiler ABI info"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-VhL38M"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-VhL38M"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_CXX_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-VhL38M'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_54988/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_54988.dir/build.make CMakeFiles/cmTC_54988.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-VhL38M'
+        Building CXX object CMakeFiles/cmTC_54988.dir/CMakeCXXCompilerABI.cpp.o
+        /usr/bin/c++   -v -o CMakeFiles/cmTC_54988.dir/CMakeCXXCompilerABI.cpp.o -c /usr/share/cmake-3.28/Modules/CMakeCXXCompilerABI.cpp
+        Using built-in specs.
+        COLLECT_GCC=/usr/bin/c++
+        OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa
+        OFFLOAD_TARGET_DEFAULT=1
+        Target: x86_64-linux-gnu
+        Configured with: ../src/configure -v --with-pkgversion='Ubuntu 13.3.0-6ubuntu2~24.04.1' --with-bugurl=file:///usr/share/doc/gcc-13/README.Bugs --enable-languages=c,ada,c++,go,d,fortran,objc,obj-c++,m2 --prefix=/usr --with-gcc-major-version-only --program-suffix=-13 --program-prefix=x86_64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-bootstrap --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-vtable-verify --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --enable-cet --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32,m64,mx32 --enable-multilib --with-tune=generic --enable-offload-targets=nvptx-none=/build/gcc-13-EldibY/gcc-13-13.3.0/debian/tmp-nvptx/usr,amdgcn-amdhsa=/build/gcc-13-EldibY/gcc-13-13.3.0/debian/tmp-gcn/usr --enable-offload-defaulted --without-cuda-driver --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2
+        Thread model: posix
+        Supported LTO compression algorithms: zlib zstd
+        gcc version 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_54988.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_54988.dir/'
+         /usr/libexec/gcc/x86_64-linux-gnu/13/cc1plus -quiet -v -imultiarch x86_64-linux-gnu -D_GNU_SOURCE /usr/share/cmake-3.28/Modules/CMakeCXXCompilerABI.cpp -quiet -dumpdir CMakeFiles/cmTC_54988.dir/ -dumpbase CMakeCXXCompilerABI.cpp.cpp -dumpbase-ext .cpp -mtune=generic -march=x86-64 -version -fasynchronous-unwind-tables -fstack-protector-strong -Wformat -Wformat-security -fstack-clash-protection -fcf-protection -o /tmp/ccgThxT6.s
+        GNU C++17 (Ubuntu 13.3.0-6ubuntu2~24.04.1) version 13.3.0 (x86_64-linux-gnu)
+        	compiled by GNU C version 13.3.0, GMP version 6.3.0, MPFR version 4.2.1, MPC version 1.3.1, isl version isl-0.26-GMP
+        
+        GGC heuristics: --param ggc-min-expand=100 --param ggc-min-heapsize=131072
+        ignoring duplicate directory "/usr/include/x86_64-linux-gnu/c++/13"
+        ignoring nonexistent directory "/usr/local/include/x86_64-linux-gnu"
+        ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/13/include-fixed/x86_64-linux-gnu"
+        ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/13/include-fixed"
+        ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/13/../../../../x86_64-linux-gnu/include"
+        #include "..." search starts here:
+        #include <...> search starts here:
+         /usr/include/c++/13
+         /usr/include/x86_64-linux-gnu/c++/13
+         /usr/include/c++/13/backward
+         /usr/lib/gcc/x86_64-linux-gnu/13/include
+         /usr/local/include
+         /usr/include/x86_64-linux-gnu
+         /usr/include
+        End of search list.
+        Compiler executable checksum: 7896445e4990772fdae9dc0659a99266
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_54988.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_54988.dir/'
+         as -v --64 -o CMakeFiles/cmTC_54988.dir/CMakeCXXCompilerABI.cpp.o /tmp/ccgThxT6.s
+        GNU assembler version 2.42 (x86_64-linux-gnu) using BFD version (GNU Binutils for Ubuntu) 2.42
+        COMPILER_PATH=/usr/libexec/gcc/x86_64-linux-gnu/13/:/usr/libexec/gcc/x86_64-linux-gnu/13/:/usr/libexec/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/13/:/usr/lib/gcc/x86_64-linux-gnu/
+        LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/13/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../:/lib/:/usr/lib/
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_54988.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_54988.dir/CMakeCXXCompilerABI.cpp.'
+        Linking CXX executable cmTC_54988
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_54988.dir/link.txt --verbose=1
+        /usr/bin/c++  -v CMakeFiles/cmTC_54988.dir/CMakeCXXCompilerABI.cpp.o -o cmTC_54988 
+        Using built-in specs.
+        COLLECT_GCC=/usr/bin/c++
+        COLLECT_LTO_WRAPPER=/usr/libexec/gcc/x86_64-linux-gnu/13/lto-wrapper
+        OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa
+        OFFLOAD_TARGET_DEFAULT=1
+        Target: x86_64-linux-gnu
+        Configured with: ../src/configure -v --with-pkgversion='Ubuntu 13.3.0-6ubuntu2~24.04.1' --with-bugurl=file:///usr/share/doc/gcc-13/README.Bugs --enable-languages=c,ada,c++,go,d,fortran,objc,obj-c++,m2 --prefix=/usr --with-gcc-major-version-only --program-suffix=-13 --program-prefix=x86_64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-bootstrap --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-vtable-verify --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --enable-cet --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32,m64,mx32 --enable-multilib --with-tune=generic --enable-offload-targets=nvptx-none=/build/gcc-13-EldibY/gcc-13-13.3.0/debian/tmp-nvptx/usr,amdgcn-amdhsa=/build/gcc-13-EldibY/gcc-13-13.3.0/debian/tmp-gcn/usr --enable-offload-defaulted --without-cuda-driver --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2
+        Thread model: posix
+        Supported LTO compression algorithms: zlib zstd
+        gcc version 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 
+        COMPILER_PATH=/usr/libexec/gcc/x86_64-linux-gnu/13/:/usr/libexec/gcc/x86_64-linux-gnu/13/:/usr/libexec/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/13/:/usr/lib/gcc/x86_64-linux-gnu/
+        LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/13/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../:/lib/:/usr/lib/
+        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_54988' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_54988.'
+         /usr/libexec/gcc/x86_64-linux-gnu/13/collect2 -plugin /usr/libexec/gcc/x86_64-linux-gnu/13/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-linux-gnu/13/lto-wrapper -plugin-opt=-fresolution=/tmp/ccEx8AP3.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -dynamic-linker /lib64/ld-linux-x86-64.so.2 -pie -z now -z relro -o cmTC_54988 /usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/Scrt1.o /usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/13/crtbeginS.o -L/usr/lib/gcc/x86_64-linux-gnu/13 -L/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/13/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/13/../../.. CMakeFiles/cmTC_54988.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-linux-gnu/13/crtendS.o /usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crtn.o
+        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_54988' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_54988.'
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-VhL38M'
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CMakeDetermineCompilerABI.cmake:127 (message)"
+      - "/usr/share/cmake-3.28/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:10 (project)"
+    message: |
+      Parsed CXX implicit include dir info: rv=done
+        found start of include info
+        found start of implicit include info
+          add: [/usr/include/c++/13]
+          add: [/usr/include/x86_64-linux-gnu/c++/13]
+          add: [/usr/include/c++/13/backward]
+          add: [/usr/lib/gcc/x86_64-linux-gnu/13/include]
+          add: [/usr/local/include]
+          add: [/usr/include/x86_64-linux-gnu]
+          add: [/usr/include]
+        end of search list found
+        collapse include dir [/usr/include/c++/13] ==> [/usr/include/c++/13]
+        collapse include dir [/usr/include/x86_64-linux-gnu/c++/13] ==> [/usr/include/x86_64-linux-gnu/c++/13]
+        collapse include dir [/usr/include/c++/13/backward] ==> [/usr/include/c++/13/backward]
+        collapse include dir [/usr/lib/gcc/x86_64-linux-gnu/13/include] ==> [/usr/lib/gcc/x86_64-linux-gnu/13/include]
+        collapse include dir [/usr/local/include] ==> [/usr/local/include]
+        collapse include dir [/usr/include/x86_64-linux-gnu] ==> [/usr/include/x86_64-linux-gnu]
+        collapse include dir [/usr/include] ==> [/usr/include]
+        implicit include dirs: [/usr/include/c++/13;/usr/include/x86_64-linux-gnu/c++/13;/usr/include/c++/13/backward;/usr/lib/gcc/x86_64-linux-gnu/13/include;/usr/local/include;/usr/include/x86_64-linux-gnu;/usr/include]
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CMakeDetermineCompilerABI.cmake:159 (message)"
+      - "/usr/share/cmake-3.28/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:10 (project)"
+    message: |
+      Parsed CXX implicit link information:
+        link line regex: [^( *|.*[/\\])(ld|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        ignore line: [Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-VhL38M']
+        ignore line: []
+        ignore line: [Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_54988/fast]
+        ignore line: [/usr/bin/gmake  -f CMakeFiles/cmTC_54988.dir/build.make CMakeFiles/cmTC_54988.dir/build]
+        ignore line: [gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-VhL38M']
+        ignore line: [Building CXX object CMakeFiles/cmTC_54988.dir/CMakeCXXCompilerABI.cpp.o]
+        ignore line: [/usr/bin/c++   -v -o CMakeFiles/cmTC_54988.dir/CMakeCXXCompilerABI.cpp.o -c /usr/share/cmake-3.28/Modules/CMakeCXXCompilerABI.cpp]
+        ignore line: [Using built-in specs.]
+        ignore line: [COLLECT_GCC=/usr/bin/c++]
+        ignore line: [OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa]
+        ignore line: [OFFLOAD_TARGET_DEFAULT=1]
+        ignore line: [Target: x86_64-linux-gnu]
+        ignore line: [Configured with: ../src/configure -v --with-pkgversion='Ubuntu 13.3.0-6ubuntu2~24.04.1' --with-bugurl=file:///usr/share/doc/gcc-13/README.Bugs --enable-languages=c ada c++ go d fortran objc obj-c++ m2 --prefix=/usr --with-gcc-major-version-only --program-suffix=-13 --program-prefix=x86_64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-bootstrap --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-vtable-verify --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --enable-cet --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32 m64 mx32 --enable-multilib --with-tune=generic --enable-offload-targets=nvptx-none=/build/gcc-13-EldibY/gcc-13-13.3.0/debian/tmp-nvptx/usr amdgcn-amdhsa=/build/gcc-13-EldibY/gcc-13-13.3.0/debian/tmp-gcn/usr --enable-offload-defaulted --without-cuda-driver --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2]
+        ignore line: [Thread model: posix]
+        ignore line: [Supported LTO compression algorithms: zlib zstd]
+        ignore line: [gcc version 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1) ]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_54988.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_54988.dir/']
+        ignore line: [ /usr/libexec/gcc/x86_64-linux-gnu/13/cc1plus -quiet -v -imultiarch x86_64-linux-gnu -D_GNU_SOURCE /usr/share/cmake-3.28/Modules/CMakeCXXCompilerABI.cpp -quiet -dumpdir CMakeFiles/cmTC_54988.dir/ -dumpbase CMakeCXXCompilerABI.cpp.cpp -dumpbase-ext .cpp -mtune=generic -march=x86-64 -version -fasynchronous-unwind-tables -fstack-protector-strong -Wformat -Wformat-security -fstack-clash-protection -fcf-protection -o /tmp/ccgThxT6.s]
+        ignore line: [GNU C++17 (Ubuntu 13.3.0-6ubuntu2~24.04.1) version 13.3.0 (x86_64-linux-gnu)]
+        ignore line: [	compiled by GNU C version 13.3.0  GMP version 6.3.0  MPFR version 4.2.1  MPC version 1.3.1  isl version isl-0.26-GMP]
+        ignore line: []
+        ignore line: [GGC heuristics: --param ggc-min-expand=100 --param ggc-min-heapsize=131072]
+        ignore line: [ignoring duplicate directory "/usr/include/x86_64-linux-gnu/c++/13"]
+        ignore line: [ignoring nonexistent directory "/usr/local/include/x86_64-linux-gnu"]
+        ignore line: [ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/13/include-fixed/x86_64-linux-gnu"]
+        ignore line: [ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/13/include-fixed"]
+        ignore line: [ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/13/../../../../x86_64-linux-gnu/include"]
+        ignore line: [#include "..." search starts here:]
+        ignore line: [#include <...> search starts here:]
+        ignore line: [ /usr/include/c++/13]
+        ignore line: [ /usr/include/x86_64-linux-gnu/c++/13]
+        ignore line: [ /usr/include/c++/13/backward]
+        ignore line: [ /usr/lib/gcc/x86_64-linux-gnu/13/include]
+        ignore line: [ /usr/local/include]
+        ignore line: [ /usr/include/x86_64-linux-gnu]
+        ignore line: [ /usr/include]
+        ignore line: [End of search list.]
+        ignore line: [Compiler executable checksum: 7896445e4990772fdae9dc0659a99266]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_54988.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_54988.dir/']
+        ignore line: [ as -v --64 -o CMakeFiles/cmTC_54988.dir/CMakeCXXCompilerABI.cpp.o /tmp/ccgThxT6.s]
+        ignore line: [GNU assembler version 2.42 (x86_64-linux-gnu) using BFD version (GNU Binutils for Ubuntu) 2.42]
+        ignore line: [COMPILER_PATH=/usr/libexec/gcc/x86_64-linux-gnu/13/:/usr/libexec/gcc/x86_64-linux-gnu/13/:/usr/libexec/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/13/:/usr/lib/gcc/x86_64-linux-gnu/]
+        ignore line: [LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/13/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../:/lib/:/usr/lib/]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_54988.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_54988.dir/CMakeCXXCompilerABI.cpp.']
+        ignore line: [Linking CXX executable cmTC_54988]
+        ignore line: [/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_54988.dir/link.txt --verbose=1]
+        ignore line: [/usr/bin/c++  -v CMakeFiles/cmTC_54988.dir/CMakeCXXCompilerABI.cpp.o -o cmTC_54988 ]
+        ignore line: [Using built-in specs.]
+        ignore line: [COLLECT_GCC=/usr/bin/c++]
+        ignore line: [COLLECT_LTO_WRAPPER=/usr/libexec/gcc/x86_64-linux-gnu/13/lto-wrapper]
+        ignore line: [OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa]
+        ignore line: [OFFLOAD_TARGET_DEFAULT=1]
+        ignore line: [Target: x86_64-linux-gnu]
+        ignore line: [Configured with: ../src/configure -v --with-pkgversion='Ubuntu 13.3.0-6ubuntu2~24.04.1' --with-bugurl=file:///usr/share/doc/gcc-13/README.Bugs --enable-languages=c ada c++ go d fortran objc obj-c++ m2 --prefix=/usr --with-gcc-major-version-only --program-suffix=-13 --program-prefix=x86_64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-bootstrap --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-vtable-verify --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --enable-cet --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32 m64 mx32 --enable-multilib --with-tune=generic --enable-offload-targets=nvptx-none=/build/gcc-13-EldibY/gcc-13-13.3.0/debian/tmp-nvptx/usr amdgcn-amdhsa=/build/gcc-13-EldibY/gcc-13-13.3.0/debian/tmp-gcn/usr --enable-offload-defaulted --without-cuda-driver --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2]
+        ignore line: [Thread model: posix]
+        ignore line: [Supported LTO compression algorithms: zlib zstd]
+        ignore line: [gcc version 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1) ]
+        ignore line: [COMPILER_PATH=/usr/libexec/gcc/x86_64-linux-gnu/13/:/usr/libexec/gcc/x86_64-linux-gnu/13/:/usr/libexec/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/13/:/usr/lib/gcc/x86_64-linux-gnu/]
+        ignore line: [LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/13/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../:/lib/:/usr/lib/]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_54988' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_54988.']
+        link line: [ /usr/libexec/gcc/x86_64-linux-gnu/13/collect2 -plugin /usr/libexec/gcc/x86_64-linux-gnu/13/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-linux-gnu/13/lto-wrapper -plugin-opt=-fresolution=/tmp/ccEx8AP3.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -dynamic-linker /lib64/ld-linux-x86-64.so.2 -pie -z now -z relro -o cmTC_54988 /usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/Scrt1.o /usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/13/crtbeginS.o -L/usr/lib/gcc/x86_64-linux-gnu/13 -L/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/13/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/13/../../.. CMakeFiles/cmTC_54988.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-linux-gnu/13/crtendS.o /usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crtn.o]
+          arg [/usr/libexec/gcc/x86_64-linux-gnu/13/collect2] ==> ignore
+          arg [-plugin] ==> ignore
+          arg [/usr/libexec/gcc/x86_64-linux-gnu/13/liblto_plugin.so] ==> ignore
+          arg [-plugin-opt=/usr/libexec/gcc/x86_64-linux-gnu/13/lto-wrapper] ==> ignore
+          arg [-plugin-opt=-fresolution=/tmp/ccEx8AP3.res] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+          arg [--build-id] ==> ignore
+          arg [--eh-frame-hdr] ==> ignore
+          arg [-m] ==> ignore
+          arg [elf_x86_64] ==> ignore
+          arg [--hash-style=gnu] ==> ignore
+          arg [--as-needed] ==> ignore
+          arg [-dynamic-linker] ==> ignore
+          arg [/lib64/ld-linux-x86-64.so.2] ==> ignore
+          arg [-pie] ==> ignore
+          arg [-znow] ==> ignore
+          arg [-zrelro] ==> ignore
+          arg [-o] ==> ignore
+          arg [cmTC_54988] ==> ignore
+          arg [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/Scrt1.o] ==> obj [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/Scrt1.o]
+          arg [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crti.o] ==> obj [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crti.o]
+          arg [/usr/lib/gcc/x86_64-linux-gnu/13/crtbeginS.o] ==> obj [/usr/lib/gcc/x86_64-linux-gnu/13/crtbeginS.o]
+          arg [-L/usr/lib/gcc/x86_64-linux-gnu/13] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/13]
+          arg [-L/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu]
+          arg [-L/usr/lib/gcc/x86_64-linux-gnu/13/../../../../lib] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/13/../../../../lib]
+          arg [-L/lib/x86_64-linux-gnu] ==> dir [/lib/x86_64-linux-gnu]
+          arg [-L/lib/../lib] ==> dir [/lib/../lib]
+          arg [-L/usr/lib/x86_64-linux-gnu] ==> dir [/usr/lib/x86_64-linux-gnu]
+          arg [-L/usr/lib/../lib] ==> dir [/usr/lib/../lib]
+          arg [-L/usr/lib/gcc/x86_64-linux-gnu/13/../../..] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/13/../../..]
+          arg [CMakeFiles/cmTC_54988.dir/CMakeCXXCompilerABI.cpp.o] ==> ignore
+          arg [-lstdc++] ==> lib [stdc++]
+          arg [-lm] ==> lib [m]
+          arg [-lgcc_s] ==> lib [gcc_s]
+          arg [-lgcc] ==> lib [gcc]
+          arg [-lc] ==> lib [c]
+          arg [-lgcc_s] ==> lib [gcc_s]
+          arg [-lgcc] ==> lib [gcc]
+          arg [/usr/lib/gcc/x86_64-linux-gnu/13/crtendS.o] ==> obj [/usr/lib/gcc/x86_64-linux-gnu/13/crtendS.o]
+          arg [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crtn.o] ==> obj [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crtn.o]
+        collapse obj [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/Scrt1.o] ==> [/usr/lib/x86_64-linux-gnu/Scrt1.o]
+        collapse obj [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crti.o] ==> [/usr/lib/x86_64-linux-gnu/crti.o]
+        collapse obj [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crtn.o] ==> [/usr/lib/x86_64-linux-gnu/crtn.o]
+        collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/13] ==> [/usr/lib/gcc/x86_64-linux-gnu/13]
+        collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu] ==> [/usr/lib/x86_64-linux-gnu]
+        collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/13/../../../../lib] ==> [/usr/lib]
+        collapse library dir [/lib/x86_64-linux-gnu] ==> [/lib/x86_64-linux-gnu]
+        collapse library dir [/lib/../lib] ==> [/lib]
+        collapse library dir [/usr/lib/x86_64-linux-gnu] ==> [/usr/lib/x86_64-linux-gnu]
+        collapse library dir [/usr/lib/../lib] ==> [/usr/lib]
+        collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/13/../../..] ==> [/usr/lib]
+        implicit libs: [stdc++;m;gcc_s;gcc;c;gcc_s;gcc]
+        implicit objs: [/usr/lib/x86_64-linux-gnu/Scrt1.o;/usr/lib/x86_64-linux-gnu/crti.o;/usr/lib/gcc/x86_64-linux-gnu/13/crtbeginS.o;/usr/lib/gcc/x86_64-linux-gnu/13/crtendS.o;/usr/lib/x86_64-linux-gnu/crtn.o]
+        implicit dirs: [/usr/lib/gcc/x86_64-linux-gnu/13;/usr/lib/x86_64-linux-gnu;/usr/lib;/lib/x86_64-linux-gnu;/lib]
+        implicit fwks: []
+      
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/Internal/CheckSourceCompiles.cmake:101 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/CheckCXXSourceCompiles.cmake:52 (cmake_check_source_compiles)"
+      - "CMakeLists.txt:142 (check_cxx_source_compiles)"
+    checks:
+      - "Performing Test HAVE_COMPILER_TLS"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-jxtWWQ"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-jxtWWQ"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "HAVE_COMPILER_TLS"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-jxtWWQ'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_fbeff/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_fbeff.dir/build.make CMakeFiles/cmTC_fbeff.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-jxtWWQ'
+        Building CXX object CMakeFiles/cmTC_fbeff.dir/src.cxx.o
+        /usr/bin/c++ -DHAVE_COMPILER_TLS   -o CMakeFiles/cmTC_fbeff.dir/src.cxx.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-jxtWWQ/src.cxx
+        Linking CXX executable cmTC_fbeff
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_fbeff.dir/link.txt --verbose=1
+        /usr/bin/c++ CMakeFiles/cmTC_fbeff.dir/src.cxx.o -o cmTC_fbeff 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-jxtWWQ'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/Internal/CheckSourceCompiles.cmake:101 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/CheckCXXSourceCompiles.cmake:52 (cmake_check_source_compiles)"
+      - "CMakeLists.txt:149 (check_cxx_source_compiles)"
+    checks:
+      - "Performing Test HAVE_X86"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-SaKh9y"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-SaKh9y"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "HAVE_X86"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-SaKh9y'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_b5742/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_b5742.dir/build.make CMakeFiles/cmTC_b5742.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-SaKh9y'
+        Building CXX object CMakeFiles/cmTC_b5742.dir/src.cxx.o
+        /usr/bin/c++ -DHAVE_X86   -o CMakeFiles/cmTC_b5742.dir/src.cxx.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-SaKh9y/src.cxx
+        Linking CXX executable cmTC_b5742
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_b5742.dir/link.txt --verbose=1
+        /usr/bin/c++ CMakeFiles/cmTC_b5742.dir/src.cxx.o -o cmTC_b5742 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-SaKh9y'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/Internal/CheckSourceCompiles.cmake:101 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/CheckCSourceCompiles.cmake:52 (cmake_check_source_compiles)"
+      - "/usr/share/cmake-3.28/Modules/FindThreads.cmake:97 (CHECK_C_SOURCE_COMPILES)"
+      - "/usr/share/cmake-3.28/Modules/FindThreads.cmake:163 (_threads_check_libc)"
+      - "CMakeLists.txt:162 (find_package)"
+    checks:
+      - "Performing Test CMAKE_HAVE_LIBC_PTHREAD"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-OKtqaV"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-OKtqaV"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "CMAKE_HAVE_LIBC_PTHREAD"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-OKtqaV'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_a25ab/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_a25ab.dir/build.make CMakeFiles/cmTC_a25ab.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-OKtqaV'
+        Building C object CMakeFiles/cmTC_a25ab.dir/src.c.o
+        /usr/bin/cc -DCMAKE_HAVE_LIBC_PTHREAD   -o CMakeFiles/cmTC_a25ab.dir/src.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-OKtqaV/src.c
+        Linking C executable cmTC_a25ab
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_a25ab.dir/link.txt --verbose=1
+        /usr/bin/cc CMakeFiles/cmTC_a25ab.dir/src.c.o -o cmTC_a25ab 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-OKtqaV'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CheckLibraryExists.cmake:69 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/FindX11.cmake:682 (check_library_exists)"
+      - "CMakeLists.txt:223 (find_package)"
+    checks:
+      - "Looking for XOpenDisplay in /usr/lib/x86_64-linux-gnu/libX11.so;/usr/lib/x86_64-linux-gnu/libXext.so"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-KcaNrQ"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-KcaNrQ"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "X11_LIB_X11_SOLO"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-KcaNrQ'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_08e15/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_08e15.dir/build.make CMakeFiles/cmTC_08e15.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-KcaNrQ'
+        Building C object CMakeFiles/cmTC_08e15.dir/CheckFunctionExists.c.o
+        /usr/bin/cc   -DCHECK_FUNCTION_EXISTS=XOpenDisplay -o CMakeFiles/cmTC_08e15.dir/CheckFunctionExists.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-KcaNrQ/CheckFunctionExists.c
+        Linking C executable cmTC_08e15
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_08e15.dir/link.txt --verbose=1
+        /usr/bin/cc  -DCHECK_FUNCTION_EXISTS=XOpenDisplay CMakeFiles/cmTC_08e15.dir/CheckFunctionExists.c.o -o cmTC_08e15  /usr/lib/x86_64-linux-gnu/libX11.so /usr/lib/x86_64-linux-gnu/libXext.so 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-KcaNrQ'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CheckFunctionExists.cmake:86 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/FindX11.cmake:697 (check_function_exists)"
+      - "CMakeLists.txt:223 (find_package)"
+    checks:
+      - "Looking for gethostbyname"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-NxZS6b"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-NxZS6b"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "CMAKE_HAVE_GETHOSTBYNAME"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-NxZS6b'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_4183a/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_4183a.dir/build.make CMakeFiles/cmTC_4183a.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-NxZS6b'
+        Building C object CMakeFiles/cmTC_4183a.dir/CheckFunctionExists.c.o
+        /usr/bin/cc   -DCHECK_FUNCTION_EXISTS=gethostbyname -o CMakeFiles/cmTC_4183a.dir/CheckFunctionExists.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-NxZS6b/CheckFunctionExists.c
+        Linking C executable cmTC_4183a
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_4183a.dir/link.txt --verbose=1
+        /usr/bin/cc  -DCHECK_FUNCTION_EXISTS=gethostbyname CMakeFiles/cmTC_4183a.dir/CheckFunctionExists.c.o -o cmTC_4183a 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-NxZS6b'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CheckFunctionExists.cmake:86 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/FindX11.cmake:711 (check_function_exists)"
+      - "CMakeLists.txt:223 (find_package)"
+    checks:
+      - "Looking for connect"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-b4pA67"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-b4pA67"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "CMAKE_HAVE_CONNECT"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-b4pA67'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_5f3c3/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_5f3c3.dir/build.make CMakeFiles/cmTC_5f3c3.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-b4pA67'
+        Building C object CMakeFiles/cmTC_5f3c3.dir/CheckFunctionExists.c.o
+        /usr/bin/cc   -DCHECK_FUNCTION_EXISTS=connect -o CMakeFiles/cmTC_5f3c3.dir/CheckFunctionExists.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-b4pA67/CheckFunctionExists.c
+        Linking C executable cmTC_5f3c3
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_5f3c3.dir/link.txt --verbose=1
+        /usr/bin/cc  -DCHECK_FUNCTION_EXISTS=connect CMakeFiles/cmTC_5f3c3.dir/CheckFunctionExists.c.o -o cmTC_5f3c3 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-b4pA67'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CheckFunctionExists.cmake:86 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/FindX11.cmake:720 (check_function_exists)"
+      - "CMakeLists.txt:223 (find_package)"
+    checks:
+      - "Looking for remove"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-dqAN9I"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-dqAN9I"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "CMAKE_HAVE_REMOVE"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-dqAN9I'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_ba68b/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_ba68b.dir/build.make CMakeFiles/cmTC_ba68b.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-dqAN9I'
+        Building C object CMakeFiles/cmTC_ba68b.dir/CheckFunctionExists.c.o
+        /usr/bin/cc   -DCHECK_FUNCTION_EXISTS=remove -o CMakeFiles/cmTC_ba68b.dir/CheckFunctionExists.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-dqAN9I/CheckFunctionExists.c
+        Linking C executable cmTC_ba68b
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_ba68b.dir/link.txt --verbose=1
+        /usr/bin/cc  -DCHECK_FUNCTION_EXISTS=remove CMakeFiles/cmTC_ba68b.dir/CheckFunctionExists.c.o -o cmTC_ba68b 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-dqAN9I'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CheckFunctionExists.cmake:86 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/FindX11.cmake:729 (check_function_exists)"
+      - "CMakeLists.txt:223 (find_package)"
+    checks:
+      - "Looking for shmat"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-ZFlbWy"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-ZFlbWy"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "CMAKE_HAVE_SHMAT"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-ZFlbWy'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_99387/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_99387.dir/build.make CMakeFiles/cmTC_99387.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-ZFlbWy'
+        Building C object CMakeFiles/cmTC_99387.dir/CheckFunctionExists.c.o
+        /usr/bin/cc   -DCHECK_FUNCTION_EXISTS=shmat -o CMakeFiles/cmTC_99387.dir/CheckFunctionExists.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-ZFlbWy/CheckFunctionExists.c
+        Linking C executable cmTC_99387
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_99387.dir/link.txt --verbose=1
+        /usr/bin/cc  -DCHECK_FUNCTION_EXISTS=shmat CMakeFiles/cmTC_99387.dir/CheckFunctionExists.c.o -o cmTC_99387 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-ZFlbWy'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/Internal/CheckSourceCompiles.cmake:101 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/Internal/CheckCompilerFlag.cmake:18 (cmake_check_source_compiles)"
+      - "/usr/share/cmake-3.28/Modules/CheckCXXCompilerFlag.cmake:34 (cmake_check_compiler_flag)"
+      - "CMakeLists.txt:263 (CHECK_CXX_COMPILER_FLAG)"
+    checks:
+      - "Performing Test CXX_COMPILER_FLAG_VISIBILITY"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-rOwJ0R"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-rOwJ0R"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "CXX_COMPILER_FLAG_VISIBILITY"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-rOwJ0R'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_e854e/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_e854e.dir/build.make CMakeFiles/cmTC_e854e.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-rOwJ0R'
+        Building CXX object CMakeFiles/cmTC_e854e.dir/src.cxx.o
+        /usr/bin/c++ -DCXX_COMPILER_FLAG_VISIBILITY  -fvisibility=hidden -o CMakeFiles/cmTC_e854e.dir/src.cxx.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-rOwJ0R/src.cxx
+        Linking CXX executable cmTC_e854e
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_e854e.dir/link.txt --verbose=1
+        /usr/bin/c++ CMakeFiles/cmTC_e854e.dir/src.cxx.o -o cmTC_e854e 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-rOwJ0R'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CheckIncludeFile.cmake:90 (try_compile)"
+      - "thirdparty/snappy.cmake:5 (check_include_file)"
+      - "thirdparty/CMakeLists.txt:16 (include)"
+      - "thirdparty/CMakeLists.txt:41 (include_with_scope)"
+    checks:
+      - "Looking for sys/uio.h"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Cb7Y4S"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Cb7Y4S"
+    cmakeVariables:
+      CMAKE_C_FLAGS: " -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "HAVE_SYS_UIO_H"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Cb7Y4S'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_3392e/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_3392e.dir/build.make CMakeFiles/cmTC_3392e.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Cb7Y4S'
+        Building C object CMakeFiles/cmTC_3392e.dir/CheckIncludeFile.c.o
+        /usr/bin/cc   -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  -std=gnu99 -o CMakeFiles/cmTC_3392e.dir/CheckIncludeFile.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Cb7Y4S/CheckIncludeFile.c
+        Linking C executable cmTC_3392e
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_3392e.dir/link.txt --verbose=1
+        /usr/bin/cc  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  CMakeFiles/cmTC_3392e.dir/CheckIncludeFile.c.o -o cmTC_3392e 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Cb7Y4S'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CheckSymbolExists.cmake:140 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/CheckSymbolExists.cmake:66 (__CHECK_SYMBOL_EXISTS_IMPL)"
+      - "thirdparty/libbacktrace.cmake:40 (check_symbol_exists)"
+      - "thirdparty/CMakeLists.txt:16 (include)"
+      - "thirdparty/CMakeLists.txt:87 (include_with_scope)"
+    checks:
+      - "Looking for _Unwind_Backtrace"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-eENEGM"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-eENEGM"
+    cmakeVariables:
+      CMAKE_C_FLAGS: " -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "HAVE_BACKTRACE"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-eENEGM'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_aba72/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_aba72.dir/build.make CMakeFiles/cmTC_aba72.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-eENEGM'
+        Building C object CMakeFiles/cmTC_aba72.dir/CheckSymbolExists.c.o
+        /usr/bin/cc   -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  -std=gnu99 -o CMakeFiles/cmTC_aba72.dir/CheckSymbolExists.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-eENEGM/CheckSymbolExists.c
+        Linking C executable cmTC_aba72
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_aba72.dir/link.txt --verbose=1
+        /usr/bin/cc  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  CMakeFiles/cmTC_aba72.dir/CheckSymbolExists.c.o -o cmTC_aba72 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-eENEGM'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CheckSymbolExists.cmake:140 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/CheckSymbolExists.cmake:66 (__CHECK_SYMBOL_EXISTS_IMPL)"
+      - "thirdparty/libbacktrace.cmake:41 (check_symbol_exists)"
+      - "thirdparty/CMakeLists.txt:16 (include)"
+      - "thirdparty/CMakeLists.txt:87 (include_with_scope)"
+    checks:
+      - "Looking for _Unwind_GetIPInfo"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-rT8QMS"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-rT8QMS"
+    cmakeVariables:
+      CMAKE_C_FLAGS: " -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "HAVE_GETIPINFO"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-rT8QMS'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_50c7d/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_50c7d.dir/build.make CMakeFiles/cmTC_50c7d.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-rT8QMS'
+        Building C object CMakeFiles/cmTC_50c7d.dir/CheckSymbolExists.c.o
+        /usr/bin/cc   -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  -std=gnu99 -o CMakeFiles/cmTC_50c7d.dir/CheckSymbolExists.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-rT8QMS/CheckSymbolExists.c
+        Linking C executable cmTC_50c7d
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_50c7d.dir/link.txt --verbose=1
+        /usr/bin/cc  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  CMakeFiles/cmTC_50c7d.dir/CheckSymbolExists.c.o -o cmTC_50c7d 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-rT8QMS'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/Internal/CheckSourceCompiles.cmake:101 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/Internal/CheckCompilerFlag.cmake:18 (cmake_check_source_compiles)"
+      - "/usr/share/cmake-3.28/Modules/CheckCCompilerFlag.cmake:51 (cmake_check_compiler_flag)"
+      - "thirdparty/libbacktrace.cmake:52 (check_c_compiler_flag)"
+      - "thirdparty/CMakeLists.txt:16 (include)"
+      - "thirdparty/CMakeLists.txt:87 (include_with_scope)"
+    checks:
+      - "Performing Test FLAG_UNWIND_TABLES"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-uudAzZ"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-uudAzZ"
+    cmakeVariables:
+      CMAKE_C_FLAGS: " -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "FLAG_UNWIND_TABLES"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-uudAzZ'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_efa50/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_efa50.dir/build.make CMakeFiles/cmTC_efa50.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-uudAzZ'
+        Building C object CMakeFiles/cmTC_efa50.dir/src.c.o
+        /usr/bin/cc -DFLAG_UNWIND_TABLES  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  -std=gnu99   -funwind-tables -o CMakeFiles/cmTC_efa50.dir/src.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-uudAzZ/src.c
+        Linking C executable cmTC_efa50
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_efa50.dir/link.txt --verbose=1
+        /usr/bin/cc  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  CMakeFiles/cmTC_efa50.dir/src.c.o -o cmTC_efa50 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-uudAzZ'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/Internal/CheckSourceCompiles.cmake:101 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/CheckCSourceCompiles.cmake:52 (cmake_check_source_compiles)"
+      - "thirdparty/libbacktrace.cmake:62 (check_c_source_compiles)"
+      - "thirdparty/CMakeLists.txt:16 (include)"
+      - "thirdparty/CMakeLists.txt:87 (include_with_scope)"
+    checks:
+      - "Performing Test HAVE_SYNC_FUNCTIONS"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-eEkkGR"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-eEkkGR"
+    cmakeVariables:
+      CMAKE_C_FLAGS: " -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "HAVE_SYNC_FUNCTIONS"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-eEkkGR'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_35780/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_35780.dir/build.make CMakeFiles/cmTC_35780.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-eEkkGR'
+        Building C object CMakeFiles/cmTC_35780.dir/src.c.o
+        /usr/bin/cc -DHAVE_SYNC_FUNCTIONS  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  -std=gnu99 -o CMakeFiles/cmTC_35780.dir/src.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-eEkkGR/src.c
+        Linking C executable cmTC_35780
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_35780.dir/link.txt --verbose=1
+        /usr/bin/cc  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  CMakeFiles/cmTC_35780.dir/src.c.o -o cmTC_35780 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-eEkkGR'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/Internal/CheckSourceCompiles.cmake:101 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/CheckCSourceCompiles.cmake:52 (cmake_check_source_compiles)"
+      - "thirdparty/libbacktrace.cmake:70 (check_c_source_compiles)"
+      - "thirdparty/CMakeLists.txt:16 (include)"
+      - "thirdparty/CMakeLists.txt:87 (include_with_scope)"
+    checks:
+      - "Performing Test HAVE_ATOMIC_FUNCTIONS"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Amjnom"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Amjnom"
+    cmakeVariables:
+      CMAKE_C_FLAGS: " -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "HAVE_ATOMIC_FUNCTIONS"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Amjnom'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_e9627/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_e9627.dir/build.make CMakeFiles/cmTC_e9627.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Amjnom'
+        Building C object CMakeFiles/cmTC_e9627.dir/src.c.o
+        /usr/bin/cc -DHAVE_ATOMIC_FUNCTIONS  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  -std=gnu99 -o CMakeFiles/cmTC_e9627.dir/src.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Amjnom/src.c
+        Linking C executable cmTC_e9627
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_e9627.dir/link.txt --verbose=1
+        /usr/bin/cc  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  CMakeFiles/cmTC_e9627.dir/src.c.o -o cmTC_e9627 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Amjnom'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CheckSymbolExists.cmake:140 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/CheckSymbolExists.cmake:66 (__CHECK_SYMBOL_EXISTS_IMPL)"
+      - "thirdparty/libbacktrace.cmake:94 (check_symbol_exists)"
+      - "thirdparty/CMakeLists.txt:16 (include)"
+      - "thirdparty/CMakeLists.txt:87 (include_with_scope)"
+    checks:
+      - "Looking for mmap"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-tllME2"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-tllME2"
+    cmakeVariables:
+      CMAKE_C_FLAGS: " -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "HAVE_MMAP"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-tllME2'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_acf4b/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_acf4b.dir/build.make CMakeFiles/cmTC_acf4b.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-tllME2'
+        Building C object CMakeFiles/cmTC_acf4b.dir/CheckSymbolExists.c.o
+        /usr/bin/cc   -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  -std=gnu99 -o CMakeFiles/cmTC_acf4b.dir/CheckSymbolExists.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-tllME2/CheckSymbolExists.c
+        Linking C executable cmTC_acf4b
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_acf4b.dir/link.txt --verbose=1
+        /usr/bin/cc  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  CMakeFiles/cmTC_acf4b.dir/CheckSymbolExists.c.o -o cmTC_acf4b 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-tllME2'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CheckSymbolExists.cmake:140 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/CheckSymbolExists.cmake:66 (__CHECK_SYMBOL_EXISTS_IMPL)"
+      - "thirdparty/libbacktrace.cmake:98 (check_symbol_exists)"
+      - "thirdparty/CMakeLists.txt:16 (include)"
+      - "thirdparty/CMakeLists.txt:87 (include_with_scope)"
+    checks:
+      - "Looking for MAP_ANONYMOUS"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Xh3MEL"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Xh3MEL"
+    cmakeVariables:
+      CMAKE_C_FLAGS: " -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "HAVE_MMAP_ANONYMOUS"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Xh3MEL'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_9f49c/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_9f49c.dir/build.make CMakeFiles/cmTC_9f49c.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Xh3MEL'
+        Building C object CMakeFiles/cmTC_9f49c.dir/CheckSymbolExists.c.o
+        /usr/bin/cc   -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  -std=gnu99 -o CMakeFiles/cmTC_9f49c.dir/CheckSymbolExists.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Xh3MEL/CheckSymbolExists.c
+        Linking C executable cmTC_9f49c
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_9f49c.dir/link.txt --verbose=1
+        /usr/bin/cc  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  CMakeFiles/cmTC_9f49c.dir/CheckSymbolExists.c.o -o cmTC_9f49c 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Xh3MEL'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CheckSymbolExists.cmake:140 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/CheckSymbolExists.cmake:66 (__CHECK_SYMBOL_EXISTS_IMPL)"
+      - "thirdparty/libbacktrace.cmake:99 (check_symbol_exists)"
+      - "thirdparty/CMakeLists.txt:16 (include)"
+      - "thirdparty/CMakeLists.txt:87 (include_with_scope)"
+    checks:
+      - "Looking for MAP_ANON"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-C8trGo"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-C8trGo"
+    cmakeVariables:
+      CMAKE_C_FLAGS: " -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "HAVE_MMAP_ANON"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-C8trGo'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_93c4b/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_93c4b.dir/build.make CMakeFiles/cmTC_93c4b.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-C8trGo'
+        Building C object CMakeFiles/cmTC_93c4b.dir/CheckSymbolExists.c.o
+        /usr/bin/cc   -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  -std=gnu99 -o CMakeFiles/cmTC_93c4b.dir/CheckSymbolExists.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-C8trGo/CheckSymbolExists.c
+        Linking C executable cmTC_93c4b
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_93c4b.dir/link.txt --verbose=1
+        /usr/bin/cc  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  CMakeFiles/cmTC_93c4b.dir/CheckSymbolExists.c.o -o cmTC_93c4b 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-C8trGo'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CheckSymbolExists.cmake:140 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/CheckSymbolExists.cmake:66 (__CHECK_SYMBOL_EXISTS_IMPL)"
+      - "thirdparty/libbacktrace.cmake:118 (check_symbol_exists)"
+      - "thirdparty/CMakeLists.txt:16 (include)"
+      - "thirdparty/CMakeLists.txt:87 (include_with_scope)"
+    checks:
+      - "Looking for dl_iterate_phdr"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-FgPDTC"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-FgPDTC"
+    cmakeVariables:
+      CMAKE_C_FLAGS: " -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "HAVE_DL_ITERATE_PHDR"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-FgPDTC'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_e3cc0/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_e3cc0.dir/build.make CMakeFiles/cmTC_e3cc0.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-FgPDTC'
+        Building C object CMakeFiles/cmTC_e3cc0.dir/CheckSymbolExists.c.o
+        /usr/bin/cc -D_GNU_SOURCE  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  -std=gnu99 -o CMakeFiles/cmTC_e3cc0.dir/CheckSymbolExists.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-FgPDTC/CheckSymbolExists.c
+        Linking C executable cmTC_e3cc0
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_e3cc0.dir/link.txt --verbose=1
+        /usr/bin/cc  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  CMakeFiles/cmTC_e3cc0.dir/CheckSymbolExists.c.o -o cmTC_e3cc0 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-FgPDTC'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CheckFunctionExists.cmake:86 (try_compile)"
+      - "thirdparty/libbacktrace.cmake:121 (check_function_exists)"
+      - "thirdparty/CMakeLists.txt:16 (include)"
+      - "thirdparty/CMakeLists.txt:87 (include_with_scope)"
+    checks:
+      - "Looking for fcntl"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-BNHXsJ"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-BNHXsJ"
+    cmakeVariables:
+      CMAKE_C_FLAGS: " -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "HAVE_FCNTL"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-BNHXsJ'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_ed7ca/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_ed7ca.dir/build.make CMakeFiles/cmTC_ed7ca.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-BNHXsJ'
+        Building C object CMakeFiles/cmTC_ed7ca.dir/CheckFunctionExists.c.o
+        /usr/bin/cc -D_GNU_SOURCE  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer -DCHECK_FUNCTION_EXISTS=fcntl -std=gnu99 -o CMakeFiles/cmTC_ed7ca.dir/CheckFunctionExists.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-BNHXsJ/CheckFunctionExists.c
+        Linking C executable cmTC_ed7ca
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_ed7ca.dir/link.txt --verbose=1
+        /usr/bin/cc  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer -DCHECK_FUNCTION_EXISTS=fcntl CMakeFiles/cmTC_ed7ca.dir/CheckFunctionExists.c.o -o cmTC_ed7ca 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-BNHXsJ'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CheckFunctionExists.cmake:86 (try_compile)"
+      - "thirdparty/libbacktrace.cmake:123 (check_function_exists)"
+      - "thirdparty/CMakeLists.txt:16 (include)"
+      - "thirdparty/CMakeLists.txt:87 (include_with_scope)"
+    checks:
+      - "Looking for strnlen"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Xu0btK"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Xu0btK"
+    cmakeVariables:
+      CMAKE_C_FLAGS: " -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "HAVE_DECL_STRNLEN"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Xu0btK'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_aad8a/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_aad8a.dir/build.make CMakeFiles/cmTC_aad8a.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Xu0btK'
+        Building C object CMakeFiles/cmTC_aad8a.dir/CheckFunctionExists.c.o
+        /usr/bin/cc -D_GNU_SOURCE  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer -DCHECK_FUNCTION_EXISTS=strnlen -std=gnu99 -o CMakeFiles/cmTC_aad8a.dir/CheckFunctionExists.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Xu0btK/CheckFunctionExists.c
+        <command-line>: warning: conflicting types for built-in function ‘strnlen’; expected ‘long unsigned int(const char *, long unsigned int)’ [-Wbuiltin-declaration-mismatch]
+        /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Xu0btK/CheckFunctionExists.c:7:3: note: in expansion of macro ‘CHECK_FUNCTION_EXISTS’
+            7 |   CHECK_FUNCTION_EXISTS(void);
+              |   ^~~~~~~~~~~~~~~~~~~~~
+        Linking C executable cmTC_aad8a
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_aad8a.dir/link.txt --verbose=1
+        /usr/bin/cc  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer -DCHECK_FUNCTION_EXISTS=strnlen CMakeFiles/cmTC_aad8a.dir/CheckFunctionExists.c.o -o cmTC_aad8a 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-Xu0btK'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CheckFunctionExists.cmake:86 (try_compile)"
+      - "thirdparty/libbacktrace.cmake:125 (check_function_exists)"
+      - "thirdparty/CMakeLists.txt:16 (include)"
+      - "thirdparty/CMakeLists.txt:87 (include_with_scope)"
+    checks:
+      - "Looking for getexecname"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-cWPAI2"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-cWPAI2"
+    cmakeVariables:
+      CMAKE_C_FLAGS: " -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "HAVE_GETEXECNAME"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-cWPAI2'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_71cb5/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_71cb5.dir/build.make CMakeFiles/cmTC_71cb5.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-cWPAI2'
+        Building C object CMakeFiles/cmTC_71cb5.dir/CheckFunctionExists.c.o
+        /usr/bin/cc -D_GNU_SOURCE  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer -DCHECK_FUNCTION_EXISTS=getexecname -std=gnu99 -o CMakeFiles/cmTC_71cb5.dir/CheckFunctionExists.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-cWPAI2/CheckFunctionExists.c
+        Linking C executable cmTC_71cb5
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_71cb5.dir/link.txt --verbose=1
+        /usr/bin/cc  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer -DCHECK_FUNCTION_EXISTS=getexecname CMakeFiles/cmTC_71cb5.dir/CheckFunctionExists.c.o -o cmTC_71cb5 
+        /usr/bin/ld: CMakeFiles/cmTC_71cb5.dir/CheckFunctionExists.c.o: in function `main':
+        CheckFunctionExists.c:(.text+0x14): undefined reference to `getexecname'
+        collect2: error: ld returned 1 exit status
+        gmake[1]: *** [CMakeFiles/cmTC_71cb5.dir/build.make:99: cmTC_71cb5] Error 1
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-cWPAI2'
+        gmake: *** [Makefile:127: cmTC_71cb5/fast] Error 2
+        
+      exitCode: 2
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CheckIncludeFile.cmake:90 (try_compile)"
+      - "thirdparty/libbacktrace.cmake:128 (check_include_file)"
+      - "thirdparty/CMakeLists.txt:16 (include)"
+      - "thirdparty/CMakeLists.txt:87 (include_with_scope)"
+    checks:
+      - "Looking for link.h"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-RNqhf0"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-RNqhf0"
+    cmakeVariables:
+      CMAKE_C_FLAGS: " -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "HAVE_LINK_H"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-RNqhf0'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_69366/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_69366.dir/build.make CMakeFiles/cmTC_69366.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-RNqhf0'
+        Building C object CMakeFiles/cmTC_69366.dir/CheckIncludeFile.c.o
+        /usr/bin/cc -D_GNU_SOURCE  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  -std=gnu99 -o CMakeFiles/cmTC_69366.dir/CheckIncludeFile.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-RNqhf0/CheckIncludeFile.c
+        Linking C executable cmTC_69366
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_69366.dir/link.txt --verbose=1
+        /usr/bin/cc  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  CMakeFiles/cmTC_69366.dir/CheckIncludeFile.c.o -o cmTC_69366 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-RNqhf0'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CheckIncludeFile.cmake:90 (try_compile)"
+      - "thirdparty/libbacktrace.cmake:129 (check_include_file)"
+      - "thirdparty/CMakeLists.txt:16 (include)"
+      - "thirdparty/CMakeLists.txt:87 (include_with_scope)"
+    checks:
+      - "Looking for stdint.h"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-NxTjkX"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-NxTjkX"
+    cmakeVariables:
+      CMAKE_C_FLAGS: " -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "HAVE_STDINT_H"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-NxTjkX'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_2eabd/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_2eabd.dir/build.make CMakeFiles/cmTC_2eabd.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-NxTjkX'
+        Building C object CMakeFiles/cmTC_2eabd.dir/CheckIncludeFile.c.o
+        /usr/bin/cc -D_GNU_SOURCE  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  -std=gnu99 -o CMakeFiles/cmTC_2eabd.dir/CheckIncludeFile.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-NxTjkX/CheckIncludeFile.c
+        Linking C executable cmTC_2eabd
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_2eabd.dir/link.txt --verbose=1
+        /usr/bin/cc  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  CMakeFiles/cmTC_2eabd.dir/CheckIncludeFile.c.o -o cmTC_2eabd 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-NxTjkX'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CheckIncludeFile.cmake:90 (try_compile)"
+      - "thirdparty/libbacktrace.cmake:130 (check_include_file)"
+      - "thirdparty/CMakeLists.txt:16 (include)"
+      - "thirdparty/CMakeLists.txt:87 (include_with_scope)"
+    checks:
+      - "Looking for sys/ldr.h"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-xXWLic"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-xXWLic"
+    cmakeVariables:
+      CMAKE_C_FLAGS: " -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "HAVE_SYS_LDR_H"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-xXWLic'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_c0f6a/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_c0f6a.dir/build.make CMakeFiles/cmTC_c0f6a.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-xXWLic'
+        Building C object CMakeFiles/cmTC_c0f6a.dir/CheckIncludeFile.c.o
+        /usr/bin/cc -D_GNU_SOURCE  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  -std=gnu99 -o CMakeFiles/cmTC_c0f6a.dir/CheckIncludeFile.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-xXWLic/CheckIncludeFile.c
+        /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-xXWLic/CheckIncludeFile.c:1:10: fatal error: sys/ldr.h: No such file or directory
+            1 | #include <sys/ldr.h>
+              |          ^~~~~~~~~~~
+        compilation terminated.
+        gmake[1]: *** [CMakeFiles/cmTC_c0f6a.dir/build.make:78: CMakeFiles/cmTC_c0f6a.dir/CheckIncludeFile.c.o] Error 1
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-xXWLic'
+        gmake: *** [Makefile:127: cmTC_c0f6a/fast] Error 2
+        
+      exitCode: 2
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CheckIncludeFile.cmake:90 (try_compile)"
+      - "thirdparty/libbacktrace.cmake:131 (check_include_file)"
+      - "thirdparty/CMakeLists.txt:16 (include)"
+      - "thirdparty/CMakeLists.txt:87 (include_with_scope)"
+    checks:
+      - "Looking for sys/link.h"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-yCSTKq"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-yCSTKq"
+    cmakeVariables:
+      CMAKE_C_FLAGS: " -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "HAVE_SYS_LINK_H"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-yCSTKq'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_06705/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_06705.dir/build.make CMakeFiles/cmTC_06705.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-yCSTKq'
+        Building C object CMakeFiles/cmTC_06705.dir/CheckIncludeFile.c.o
+        /usr/bin/cc -D_GNU_SOURCE  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  -std=gnu99 -o CMakeFiles/cmTC_06705.dir/CheckIncludeFile.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-yCSTKq/CheckIncludeFile.c
+        /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-yCSTKq/CheckIncludeFile.c:1:10: fatal error: sys/link.h: No such file or directory
+            1 | #include <sys/link.h>
+              |          ^~~~~~~~~~~~
+        compilation terminated.
+        gmake[1]: *** [CMakeFiles/cmTC_06705.dir/build.make:78: CMakeFiles/cmTC_06705.dir/CheckIncludeFile.c.o] Error 1
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-yCSTKq'
+        gmake: *** [Makefile:127: cmTC_06705/fast] Error 2
+        
+      exitCode: 2
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CheckIncludeFile.cmake:90 (try_compile)"
+      - "thirdparty/libbacktrace.cmake:132 (check_include_file)"
+      - "thirdparty/CMakeLists.txt:16 (include)"
+      - "thirdparty/CMakeLists.txt:87 (include_with_scope)"
+    checks:
+      - "Looking for sys/mman.h"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-AOPz4c"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-AOPz4c"
+    cmakeVariables:
+      CMAKE_C_FLAGS: " -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "HAVE_SYS_MMAN_H"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-AOPz4c'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_778bb/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_778bb.dir/build.make CMakeFiles/cmTC_778bb.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-AOPz4c'
+        Building C object CMakeFiles/cmTC_778bb.dir/CheckIncludeFile.c.o
+        /usr/bin/cc -D_GNU_SOURCE  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  -std=gnu99 -o CMakeFiles/cmTC_778bb.dir/CheckIncludeFile.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-AOPz4c/CheckIncludeFile.c
+        Linking C executable cmTC_778bb
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_778bb.dir/link.txt --verbose=1
+        /usr/bin/cc  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  CMakeFiles/cmTC_778bb.dir/CheckIncludeFile.c.o -o cmTC_778bb 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-AOPz4c'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CheckIncludeFile.cmake:90 (try_compile)"
+      - "thirdparty/libbacktrace.cmake:133 (check_include_file)"
+      - "thirdparty/CMakeLists.txt:16 (include)"
+      - "thirdparty/CMakeLists.txt:87 (include_with_scope)"
+    checks:
+      - "Looking for sys/types.h"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-AVfSYs"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-AVfSYs"
+    cmakeVariables:
+      CMAKE_C_FLAGS: " -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "HAVE_SYS_TYPES_H"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-AVfSYs'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_a4a2f/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_a4a2f.dir/build.make CMakeFiles/cmTC_a4a2f.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-AVfSYs'
+        Building C object CMakeFiles/cmTC_a4a2f.dir/CheckIncludeFile.c.o
+        /usr/bin/cc -D_GNU_SOURCE  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  -std=gnu99 -o CMakeFiles/cmTC_a4a2f.dir/CheckIncludeFile.c.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-AVfSYs/CheckIncludeFile.c
+        Linking C executable cmTC_a4a2f
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_a4a2f.dir/link.txt --verbose=1
+        /usr/bin/cc  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer  CMakeFiles/cmTC_a4a2f.dir/CheckIncludeFile.c.o -o cmTC_a4a2f 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-AVfSYs'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/Internal/CheckSourceCompiles.cmake:101 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/CheckCXXSourceCompiles.cmake:52 (cmake_check_source_compiles)"
+      - "wrappers/CMakeLists.txt:14 (check_cxx_source_compiles)"
+    checks:
+      - "Performing Test STATIC_LIBSTDCXX_PIC"
+    directories:
+      source: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-ej7hxV"
+      binary: "/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-ej7hxV"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: " -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fno-rtti -fno-exceptions -fmessage-length=0 -fno-omit-frame-pointer"
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: " -static-libgcc"
+      CMAKE_MODULE_PATH: "/workspaces/rust-renderer/tools/trace_replay/vendor/apitrace/cmake"
+    buildResult:
+      variable: "STATIC_LIBSTDCXX_PIC"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-ej7hxV'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_4d998/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_4d998.dir/build.make CMakeFiles/cmTC_4d998.dir/build
+        gmake[1]: Entering directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-ej7hxV'
+        Building CXX object CMakeFiles/cmTC_4d998.dir/src.cxx.o
+        /usr/bin/c++ -DSTATIC_LIBSTDCXX_PIC  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fno-rtti -fno-exceptions -fmessage-length=0 -fno-omit-frame-pointer -fPIC -o CMakeFiles/cmTC_4d998.dir/src.cxx.o -c /workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-ej7hxV/src.cxx
+        Linking CXX executable cmTC_4d998
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_4d998.dir/link.txt --verbose=1
+        /usr/bin/c++  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fno-rtti -fno-exceptions -fmessage-length=0 -fno-omit-frame-pointer -fPIC  -static-libgcc  CMakeFiles/cmTC_4d998.dir/src.cxx.o -o cmTC_4d998  -shared -static-libgcc -static-libstdc++ 
+        gmake[1]: Leaving directory '/workspaces/rust-renderer/tools/trace_replay/build-apitrace/CMakeFiles/CMakeScratch/TryCompile-ej7hxV'
+        
+      exitCode: 0
+...

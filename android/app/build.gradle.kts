@@ -68,7 +68,7 @@ val pluginRendererConfig = buildJsonValue {
             // Override Zalith defaults that otherwise inject Mesa 4.6 + zink for
             // non-GL4ES renderers. Those contradict GLES passthrough and confuse
             // LWJGL / shader path selection.
-            normal("MESA_GL_VERSION_OVERRIDE", "3.3")
+            normal("MESA_GL_VERSION_OVERRIDE", "4.4")
             normal("MESA_GLSL_VERSION_OVERRIDE", "330")
             // Empty disables the zink loader override when the env is applied last.
             normal("MESA_LOADER_DRIVER_OVERRIDE", "")
@@ -78,7 +78,7 @@ val pluginRendererConfig = buildJsonValue {
             // GLES is the only backend that currently draws Minecraft frames. Vulkan is
             // device discovery only, so don't expose non-rendering choices in the launcher.
             normal("RENDERER_BACKEND", "gles")
-// Always enabled so Iris/Minecraft sees OpenGL 3.3 Core Profile.
+// Always enabled so Iris/Minecraft sees OpenGL 4.4 Core Profile.
             // Not toggleable since it must be on for version checks to pass.
             selectable(
                 key = "RENDERER_SPOOF_GL",

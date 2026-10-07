@@ -10,9 +10,9 @@
 //! that `can_render()` needs to return `true`.
 
 use renderer_core::{Backend, BackendError, BackendKind, Capabilities, DeviceInfo};
-use std::ffi::{c_char, c_void};
+use std::ffi::c_void;
 use std::ptr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
 use crate::vulkan::VulkanBackend;
 
@@ -26,7 +26,7 @@ pub struct DirectVkBackend {
 
 impl DirectVkBackend {
     pub fn new() -> Result<Self, BackendError> {
-        let mut inner = VulkanBackend::try_probe()
+        let mut inner = crate::vulkan::try_probe()
             .map_err(|e| BackendError::InitFailed(format!("DirectVK probe failed: {e}")))?;
 
         inner.render_ready = true;

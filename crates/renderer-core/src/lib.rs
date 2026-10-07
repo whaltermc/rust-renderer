@@ -4,7 +4,7 @@ use std::ffi::c_void;
 use std::fmt;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BackendKind {
     /// Try each backend in order and use the first that initializes.
     Auto,

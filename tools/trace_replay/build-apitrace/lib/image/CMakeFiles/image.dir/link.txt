@@ -1,0 +1,2 @@
+"/usr/bin/gcc-ar-13" cr libimage.a CMakeFiles/image.dir/image_bmp.cpp.o CMakeFiles/image.dir/image_png.cpp.o CMakeFiles/image.dir/image_pnm.cpp.o CMakeFiles/image.dir/image_raw.cpp.o CMakeFiles/image.dir/image_md5.cpp.o
+"/usr/bin/gcc-ranlib-13" libimage.a

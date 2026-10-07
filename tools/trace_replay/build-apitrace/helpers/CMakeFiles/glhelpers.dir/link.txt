@@ -1,0 +1,2 @@
+"/usr/bin/gcc-ar-13" cr libglhelpers.a CMakeFiles/glhelpers.dir/glfeatures.cpp.o CMakeFiles/glhelpers.dir/eglsize.cpp.o
+"/usr/bin/gcc-ranlib-13" libglhelpers.a

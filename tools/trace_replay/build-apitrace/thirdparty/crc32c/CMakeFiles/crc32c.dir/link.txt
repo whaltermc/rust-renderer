@@ -1,0 +1,2 @@
+"/usr/bin/gcc-ar-13" cr libcrc32c.a CMakeFiles/crc32c.dir/crc32c.c.o
+"/usr/bin/gcc-ranlib-13" libcrc32c.a

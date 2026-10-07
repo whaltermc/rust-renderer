@@ -30,10 +30,10 @@ pub fn apply_modern_rewrites(
     let mut src = source.to_string();
 
     // 1.21.4+ PBR material tokens
-    src = rewrite_pbr_tokens(&src)?;
+    src = rewrite_pbr_tokens(&src);
 
     // 26.x atmosphere/volumetric tokens
-    src = rewrite_atmosphere_tokens(&src)?;
+    src = rewrite_atmosphere_tokens(&src);
 
     // Shadow map variations
     src = rewrite_shadow_tokens(&src);
@@ -49,24 +49,24 @@ pub fn apply_modern_rewrites(
 
     // Complementary-specific rewrites
     if matches!(pack_type, PackType::Complementary) {
-        src = rewrite_complementary(&src, stage)?;
+        src = rewrite_complementary(&src, stage);
     }
 
     // Derivative-specific rewrites
     if matches!(pack_type, PackType::Derivative) {
-        src = rewrite_derivative(&src, stage)?;
+        src = rewrite_derivative(&src, stage);
     }
 
     // Bliss-specific rewrites
     if matches!(pack_type, PackType::Bliss) {
-        src = rewrite_bliss(&src, stage)?;
+        src = rewrite_bliss(&src, stage);
     }
 
     Ok(src)
 }
 
 /// Rewrite 1.21.4+ PBR material tokens.
-fn rewrite_pbr_tokens(src: &str) -> Result<String, String> {
+fn rewrite_pbr_tokens(src: &str) -> String {
     let mut out = src.to_string();
     // roughnessMetalness -> roughness + metalness split (best effort)
     out = out.replace("roughnessMetalness", "roughness");
@@ -75,7 +75,7 @@ fn rewrite_pbr_tokens(src: &str) -> Result<String, String> {
     // 1.21.4 shadow tex
     out = out.replace("shadowtex0", "shadowMap");
     out = out.replace("shadowtex1", "shadowMap1");
-    Ok(out)
+    out
 }
 
 /// Rewrite 26.x atmosphere/volumetric tokens.
@@ -90,7 +90,7 @@ fn rewrite_atmosphere_tokens(src: &str) -> String {
     // Atmospheric scattering
     out = out.replace("miePhase", "scatterMie");
     out = out.replace("rayleighPhase", "scatterRay");
-    Ok(out)
+    out
 }
 
 /// Rewrite shadow map variations across packs.
@@ -131,7 +131,7 @@ fn rewrite_biome_tokens(src: &str) -> String {
 }
 
 /// Complementary Reimagined / Complementary specific rewrites.
-fn rewrite_complementary(src: &str, _stage: ShaderStage) -> Result<String, String> {
+fn rewrite_complementary(src: &str, _stage: ShaderStage) -> String {
     let mut out = src.to_string();
     // Complementary uses `rgbaN` for MRT; ES 3.00 needs explicit layout locations
     out = out.replace("rgba8", "color8");
@@ -139,22 +139,22 @@ fn rewrite_complementary(src: &str, _stage: ShaderStage) -> Result<String, Strin
     // Complementary shadow variant names
     out = out.replace("shadowtex0hard", "shadowHard");
     out = out.replace("shadowtex1hard", "shadowHard1");
-    Ok(out)
+    out
 }
 
 /// Derivative (Chocapic/Sildurs derivative) specific rewrites.
-fn rewrite_derivative(src: &str, _stage: ShaderStage) -> Result<String, String> {
+fn rewrite_derivative(src: &str, _stage: ShaderStage) -> String {
     let mut out = src.to_string();
     // Old-style water normals
     out = out.replace("waterNormal", "waterNorm");
     out = out.replace("waterDiffuse", "waterDiff");
     // Legacy shadow sampler
     out = out.replace("shadow", "shadowMap");
-    Ok(out)
+    out
 }
 
 /// Bliss specific rewrites.
-fn rewrite_bliss(src: &str, _stage: ShaderStage) -> Result<String, String> {
+fn rewrite_bliss(src: &str, _stage: ShaderStage) -> String {
     let mut out = src.to_string();
     // Bliss PBR names
     out = out.replace("roughnessMap", "roughMap");
@@ -162,7 +162,7 @@ fn rewrite_bliss(src: &str, _stage: ShaderStage) -> Result<String, String> {
     // Bliss fog
     out = out.replace("fogColor", "sceneFogColor");
     out = out.replace("fogDensity", "sceneFogDensity");
-    Ok(out)
+    out
 }
 
 /// Extension trait for detecting modern shader features.

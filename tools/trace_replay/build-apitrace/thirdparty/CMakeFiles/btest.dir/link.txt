@@ -1,0 +1,1 @@
+/usr/bin/cc  -fvisibility=hidden -Wall -Wno-sign-compare -fno-strict-aliasing -fmessage-length=0 -fno-omit-frame-pointer -O3 -DNDEBUG CMakeFiles/btest.dir/libbacktrace/btest.c.o -o ../btest  libbacktrace.a /usr/lib/x86_64-linux-gnu/libz.so -ldl 

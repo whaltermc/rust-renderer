@@ -9,7 +9,7 @@
 //! choose Vulkan when it is available. The triangle shader is hardcoded SPIR-V so no
 //! runtime compiler is needed.
 
-mod raw;
+pub mod raw;
 
 use renderer_core::{Backend, BackendError, BackendKind, Capabilities, DeviceInfo};
 use std::ffi::{c_char, c_void};
@@ -23,17 +23,17 @@ const APP_VERSION: u32 = 1;
 const MAX_DEVICES: usize = 16;
 
 pub struct VulkanBackend {
-    api: Api,
-    device: *mut c_void,
-    queue: *mut c_void,
-    info: DeviceInfo,
-    caps: Capabilities,
-    render_ready: bool,
-    render_pass: *mut c_void,
-    pipeline: *mut c_void,
-    pipeline_layout: *mut c_void,
-    command_pool: *mut c_void,
-    command_buffer: *mut c_void,
+    pub(crate) api: Api,
+    pub(crate) device: *mut c_void,
+    pub(crate) queue: *mut c_void,
+    pub(crate) info: DeviceInfo,
+    pub(crate) caps: Capabilities,
+    pub(crate) render_ready: bool,
+    pub(crate) render_pass: *mut c_void,
+    pub(crate) pipeline: *mut c_void,
+    pub(crate) pipeline_layout: *mut c_void,
+    pub(crate) command_pool: *mut c_void,
+    pub(crate) command_buffer: *mut c_void,
 }
 
 impl VulkanBackend {

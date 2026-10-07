@@ -1,0 +1,2 @@
+"/usr/bin/gcc-ar-13" cr libzstd_seekable.a CMakeFiles/zstd_seekable.dir/zstd/contrib/seekable_format/zstdseek_compress.c.o CMakeFiles/zstd_seekable.dir/zstd/contrib/seekable_format/zstdseek_decompress.c.o CMakeFiles/zstd_seekable.dir/zstd/lib/common/xxhash.c.o
+"/usr/bin/gcc-ranlib-13" libzstd_seekable.a

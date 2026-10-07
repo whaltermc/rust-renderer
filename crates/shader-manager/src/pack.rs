@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use dashmap::DashMap;
 
-use super::{PackType, ShaderSource, ShaderStage, ShaderVariant};
+use super::{PackType, ShaderSource};
 
 /// A single shader file within a pack.
 #[derive(Debug, Clone)]

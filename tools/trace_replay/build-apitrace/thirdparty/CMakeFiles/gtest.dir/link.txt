@@ -1,0 +1,2 @@
+"/usr/bin/gcc-ar-13" cr libgtest.a "CMakeFiles/gtest.dir/gtest/googletest/src/gtest-all.cc.o"
+"/usr/bin/gcc-ranlib-13" libgtest.a

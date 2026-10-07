@@ -1,0 +1,43 @@
+file(REMOVE_RECURSE
+  "../apitrace"
+  "../apitrace.pdb"
+  "CMakeFiles/apitrace.dir/cli_diff.cpp.o"
+  "CMakeFiles/apitrace.dir/cli_diff.cpp.o.d"
+  "CMakeFiles/apitrace.dir/cli_diff_images.cpp.o"
+  "CMakeFiles/apitrace.dir/cli_diff_images.cpp.o.d"
+  "CMakeFiles/apitrace.dir/cli_diff_state.cpp.o"
+  "CMakeFiles/apitrace.dir/cli_diff_state.cpp.o.d"
+  "CMakeFiles/apitrace.dir/cli_dump.cpp.o"
+  "CMakeFiles/apitrace.dir/cli_dump.cpp.o.d"
+  "CMakeFiles/apitrace.dir/cli_dump_images.cpp.o"
+  "CMakeFiles/apitrace.dir/cli_dump_images.cpp.o.d"
+  "CMakeFiles/apitrace.dir/cli_gltrim.cpp.o"
+  "CMakeFiles/apitrace.dir/cli_gltrim.cpp.o.d"
+  "CMakeFiles/apitrace.dir/cli_info.cpp.o"
+  "CMakeFiles/apitrace.dir/cli_info.cpp.o.d"
+  "CMakeFiles/apitrace.dir/cli_leaks.cpp.o"
+  "CMakeFiles/apitrace.dir/cli_leaks.cpp.o.d"
+  "CMakeFiles/apitrace.dir/cli_main.cpp.o"
+  "CMakeFiles/apitrace.dir/cli_main.cpp.o.d"
+  "CMakeFiles/apitrace.dir/cli_pager.cpp.o"
+  "CMakeFiles/apitrace.dir/cli_pager.cpp.o.d"
+  "CMakeFiles/apitrace.dir/cli_pickle.cpp.o"
+  "CMakeFiles/apitrace.dir/cli_pickle.cpp.o.d"
+  "CMakeFiles/apitrace.dir/cli_repack.cpp.o"
+  "CMakeFiles/apitrace.dir/cli_repack.cpp.o.d"
+  "CMakeFiles/apitrace.dir/cli_resources.cpp.o"
+  "CMakeFiles/apitrace.dir/cli_resources.cpp.o.d"
+  "CMakeFiles/apitrace.dir/cli_retrace.cpp.o"
+  "CMakeFiles/apitrace.dir/cli_retrace.cpp.o.d"
+  "CMakeFiles/apitrace.dir/cli_sed.cpp.o"
+  "CMakeFiles/apitrace.dir/cli_sed.cpp.o.d"
+  "CMakeFiles/apitrace.dir/cli_trace.cpp.o"
+  "CMakeFiles/apitrace.dir/cli_trace.cpp.o.d"
+  "CMakeFiles/apitrace.dir/cli_trim.cpp.o"
+  "CMakeFiles/apitrace.dir/cli_trim.cpp.o.d"
+)
+
+# Per-language clean rules from dependency scanning.
+foreach(lang CXX)
+  include(CMakeFiles/apitrace.dir/cmake_clean_${lang}.cmake OPTIONAL)
+endforeach()

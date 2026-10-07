@@ -10,7 +10,7 @@
 //! - `error`   — Shader compile error classification and recovery
 
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -156,6 +156,7 @@ pub struct ShaderManager {
 
 impl ShaderManager {
     pub fn new(config: ShaderManagerConfig) -> Self {
+        let max_cache_bytes = config.max_cache_bytes;
         let pack_manager = Arc::new(pack::ShaderPackManager::new(config.pack_roots.clone()));
         let num_threads = if config.threads == 0 {
             std::thread::available_parallelism()
@@ -174,7 +175,7 @@ impl ShaderManager {
         Self {
             config,
             pack_manager,
-            cache: Arc::new(RwLock::new(ShaderCache::new(config.max_cache_bytes))),
+            cache: Arc::new(RwLock::new(ShaderCache::new(max_cache_bytes))),
             backends: HashMap::new(),
         }
     }

@@ -11,7 +11,6 @@
 
 use std::ffi::{c_char, c_void, CStr};
 use std::path::PathBuf;
-use std::ptr;
 use std::sync::OnceLock;
 
 use renderer_core::{Backend, BackendError, BackendKind, Capabilities, DeviceInfo};

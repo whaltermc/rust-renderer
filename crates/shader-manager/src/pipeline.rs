@@ -94,7 +94,7 @@ impl ShaderPipeline {
     }
 
     /// Translate a single shader source.
-    pub fn translate(&self, source: &str, stage: ShaderStage) -> Result<String, ShaderError> {
+    pub fn translate(&self, source: &str, _stage: ShaderStage) -> Result<String, ShaderError> {
         use shader_translate::translate;
         translate(source).map_err(|e| ShaderError::Translate(e))
     }
