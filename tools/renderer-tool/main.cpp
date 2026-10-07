@@ -547,8 +547,8 @@ int main(int argc, char** argv) {
         json << "    \"backend\": \"" << f.backend << "\",\n";
         json << "    \"renderer\": \"" << f.renderer << "\",\n";
         json << "    \"gl_version\": \"" << f.gl_version << "\",\n";
-        json << "    \"can_render\": " << f.can_render << ",\n";
-        json << "    \"passed\": " << f.passed << ",\n";
+        json << "    \"can_render\": " << (f.can_render ? "true" : "false") << ",\n";
+        json << "    \"passed\": " << (f.passed ? "true" : "false") << ",\n";
         json << "    \"compile_log\": [\n";
         for (size_t j = 0; j < f.compile_log.size(); j++) {
             if (j) json << ",\n";
