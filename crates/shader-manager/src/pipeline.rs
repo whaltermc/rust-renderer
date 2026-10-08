@@ -4,6 +4,7 @@
 //! Supports batching, timeouts, and fallback.
 
 use std::sync::Arc;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
@@ -93,10 +94,31 @@ impl ShaderPipeline {
         }
     }
 
+
     /// Translate a single shader source.
-    pub fn translate(&self, source: &str, _stage: ShaderStage) -> Result<String, ShaderError> {
-        use shader_translate::translate;
-        translate(source).map_err(|e| ShaderError::Translate(e))
+    pub fn translate(&self, source: &str, stage: ShaderStage) -> Result<String, ShaderError> {
+        use shader_translate::naga_translate::{translate_glsl_to_essl, ShaderStageType, TranslateError};
+        use std::collections::HashMap;
+        
+        let naga_stage = match stage {
+            ShaderStage::Vertex => ShaderStageType::Vertex,
+            ShaderStage::Fragment => ShaderStageType::Fragment,
+            ShaderStage::Compute => ShaderStageType::Compute,
+            ShaderStage::Geometry => return Err(ShaderError::Translate("Geometry shaders not supported on GLES".into())),
+            ShaderStage::TessControl => return Err(ShaderError::Translate("Tessellation shaders not supported on GLES".into())),
+            ShaderStage::TessEval => return Err(ShaderError::Translate("Tessellation shaders not supported on GLES".into())),
+        };
+        
+        let defines = HashMap::new();
+        translate_glsl_to_essl(source, naga_stage, &defines)
+            .map_err(|e| ShaderError::Translate(match e {
+                shader_translate::naga_translate::TranslateError::ParseError(msg) => format!("Parse error: {}", msg),
+                shader_translate::naga_translate::TranslateError::ValidationError(msg) => format!("Validation error: {}", msg),
+                shader_translate::naga_translate::TranslateError::EmitError(msg) => format!("Emit error: {}", msg),
+                shader_translate::naga_translate::TranslateError::UnsupportedFeature(msg) => format!("Unsupported feature: {}", msg),
+                shader_translate::naga_translate::TranslateError::ComputeVersionError => format!("Compute version error: Compute shader requires GLSL ES 3.10+"),
+                shader_translate::naga_translate::TranslateError::MissingEntryPoint(msg) => format!("Missing entry point: {}", msg),
+            }))
     }
 
     /// Translate and compile a shader for a given backend.

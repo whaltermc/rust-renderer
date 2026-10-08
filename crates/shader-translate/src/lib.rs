@@ -6,9 +6,12 @@
 
 use std::borrow::Cow;
 use std::collections::HashSet;
+use std::collections::HashMap;
 
 pub mod compat;
+pub mod naga_translate;
 mod numeric;
+pub use naga_translate::{translate_glsl_to_essl, ShaderStageType, TranslateError};
 
 const PRECISION_300: &str = "\
 precision highp float;\n\
@@ -1083,8 +1086,45 @@ pub fn translate(src: &str) -> Result<String, String> {
 /// legacy shader from hard-failing while remaining a best-effort rewrite: geometry,
 /// tessellation and compute shaders are supported by GL 4.4 core and are therefore passed
 /// through rather than rejected. It does not translate desktop GLSL into GLSL ES.
+/// Desktop GLSL → desktop GLSL targeting the GL 4.4 core profile (GLSL 3.30 core language).
+///
+/// GL 4.4 core exposes only the GLSL 3.30 language: desktop GLSL 4.x versions were removed
+/// from the desktop core profile, so any shader declaring GLSL 4.00 or later is rewritten to
+/// `#version 330 core`. Shaders declaring GLSL 1.10-3.30 pass through unchanged because GL
+/// 4.4 core supports those natively.
+///
+/// The only rewrites beyond version normalization are fixes for legacy desktop fixed-function
+/// builtins (`gl_ModelView*`, `ftransform`) which GLSL 3.30 core does not provide, and
+/// non-GLSL lines the game injects (`#moj_*`, `#import`, `#include`) plus the GLSL ES-only
+/// `shared` qualifier; `#error` messages are sanitized so they lex. This keeps a broken
+/// legacy shader from hard-failing while remaining a best-effort rewrite: geometry,
+/// tessellation and compute shaders are supported by GL 4.4 core and are therefore passed
+/// through rather than rejected. It does not translate desktop GLSL into GLSL ES.
 pub fn translate_desktop_440(src: &str) -> Result<String, String> {
+    // Pre-scan for missing intrinsics that need to be injected
+    let mut needs_fma = false;
+    let mut needs_exp2 = false;
+    let mut needs_log2 = false;
+    let mut needs_frexp = false;
+    let mut needs_ldexp = false;
+    for line in src.lines() {
+        if line.contains("fma(") { needs_fma = true; }
+        if line.contains("exp2(") { needs_exp2 = true; }
+        if line.contains("log2(") { needs_log2 = true; }
+        if line.contains("frexp(") { needs_frexp = true; }
+        if line.contains("ldexp(") { needs_ldexp = true; }
+    }
+    let mut intrinsic_lines = Vec::new();
+    if needs_fma { intrinsic_lines.push("#define fma(a, b, c) ((a) * (b) + (c))"); }
+    if needs_exp2 { intrinsic_lines.push("#define exp2(x) exp((x) * 0.6931471805599453)"); }
+    if needs_log2 { intrinsic_lines.push("#define log2(x) (log(x) * 1.4426950408889634)"); }
+    if needs_frexp { intrinsic_lines.push("#define frexp(x, exp) /* frexp not available in desktop */"); }
+    if needs_ldexp { intrinsic_lines.push("#define ldexp(x, exp) ((x) * exp2(float(exp)))"); }
+    let intrinsic_block = if intrinsic_lines.is_empty() { String::new() } else { intrinsic_lines.join("\n") + "\n" };
+
     let mut out = String::with_capacity(src.len() + 64);
+    let mut version_written = false;
+    let mut intrinsic_injected = false;
     for line in src.lines() {
         let trimmed = line.trim_start();
 
@@ -1098,6 +1138,11 @@ pub fn translate_desktop_440(src: &str) -> Result<String, String> {
                 let major = num.map_or(1, |v| v / 100); // 440/450 → 4, 330 → 3, 150 → 1, 100 → 1
                 if major >= 4 {
                     out.push_str("#version 330 core\n");
+                    version_written = true;
+                    if !intrinsic_block.is_empty() && !intrinsic_injected {
+                        out.push_str(&intrinsic_block);
+                        intrinsic_injected = true;
+                    }
                     continue;
                 }
             }
@@ -1105,6 +1150,11 @@ pub fn translate_desktop_440(src: &str) -> Result<String, String> {
             // desktop 4.4 compilers accept ES shaders, and desktop needs no precision decls.
             out.push_str(line);
             out.push('\n');
+            version_written = true;
+            if !intrinsic_block.is_empty() && !intrinsic_injected {
+                out.push_str(&intrinsic_block);
+                intrinsic_injected = true;
+            }
             continue;
         }
 
@@ -1150,11 +1200,26 @@ pub fn translate_desktop_440(src: &str) -> Result<String, String> {
         }) {
             s = replace_glsl_call(&s, "ftransform()", "(mat4(1.0f) * gl_Vertex)");
         }
+        // Fix parameter qualifier ordering (in const -> const in, etc.)
+        s = s
+            .replace("in const ", "const in ")
+            .replace("out const ", "const out ")
+            .replace("inout const ", "const inout ")
+            .replace("in precise ", "precise in ")
+            .replace("out precise ", "precise out ")
+            .replace("inout precise ", "precise inout ")
+            .replace("in const precise ", "const precise in ")
+            .replace("out const precise ", "const precise out ")
+            .replace("inout const precise ", "const precise inout ");
         match sanitize_error_directive(&s) {
             Cow::Borrowed(l) => out.push_str(l),
             Cow::Owned(o) => out.push_str(&o),
         }
         out.push('\n');
+    }
+    // If no version line was found, inject intrinsics at the beginning
+    if !version_written && !intrinsic_block.is_empty() && !intrinsic_injected {
+        out = intrinsic_block + &out;
     }
     Ok(out)
 }

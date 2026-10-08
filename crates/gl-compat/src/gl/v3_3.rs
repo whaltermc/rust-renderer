@@ -143,6 +143,13 @@ pub unsafe extern "C" fn glVertexAttribIFormat(
     crate::vertex_state::glVertexArrayAttribIFormat(vao as u32, index, size, ty, relativeoffset);
 }
 
+// DSA Vertex Array - remaining functions for GL 4.5 / ARB_direct_state_access
+#[no_mangle]
+#[no_mangle]
+#[no_mangle]
+#[no_mangle]
+
+
 #[no_mangle]
 pub unsafe extern "C" fn glVertexAttribDivisor(index: u32, divisor: u32) {
     if let Some(x)=f::<unsafe extern "C" fn(u32,u32)>("glVertexAttribDivisor") { x(index,divisor); } else { err(GL_INVALID_OPERATION); }
@@ -414,6 +421,100 @@ pub unsafe extern "C" fn glGetQueryObjecti64v(_id:u32,_pname:u32,params:*mut i64
 #[no_mangle]
 pub unsafe extern "C" fn glGetQueryObjectui64v(_id:u32,_pname:u32,params:*mut u64){if !params.is_null(){*params=0;}err(GL_INVALID_OPERATION)}
 
+
+// Transform Feedback (GL 3.0 / ARB_transform_feedback2, ARB_transform_feedback3)
+const GL_TRANSFORM_FEEDBACK: u32 = 0x8E22;
+const GL_TRANSFORM_FEEDBACK_BUFFER_PAUSED: u32 = 0x8E23;
+const GL_TRANSFORM_FEEDBACK_BUFFER_ACTIVE: u32 = 0x8E24;
+
+#[no_mangle]
+pub unsafe extern "C" fn glBeginTransformFeedback(primitive_mode: u32) {
+    if let Some(x) = f::<unsafe extern "C" fn(u32)>("glBeginTransformFeedback") {
+        x(primitive_mode);
+    } else {
+        err(GL_INVALID_OPERATION);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glEndTransformFeedback() {
+    if let Some(x) = f::<unsafe extern "C" fn()>("glEndTransformFeedback") {
+        x();
+    } else {
+        err(GL_INVALID_OPERATION);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glPauseTransformFeedback() {
+    if let Some(x) = f::<unsafe extern "C" fn()>("glPauseTransformFeedback") {
+        x();
+    } else {
+        err(GL_INVALID_OPERATION);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glResumeTransformFeedback() {
+    if let Some(x) = f::<unsafe extern "C" fn()>("glResumeTransformFeedback") {
+        x();
+    } else {
+        err(GL_INVALID_OPERATION);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glDrawTransformFeedback(mode: u32, id: u32) {
+    if let Some(x) = f::<unsafe extern "C" fn(u32, u32)>("glDrawTransformFeedback") {
+        x(mode, id);
+    } else {
+        err(GL_INVALID_OPERATION);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glDrawTransformFeedbackStream(mode: u32, id: u32, stream: u32) {
+    if let Some(x) = f::<unsafe extern "C" fn(u32, u32, u32)>("glDrawTransformFeedbackStream") {
+        x(mode, id, stream);
+    } else {
+        err(GL_INVALID_OPERATION);
+    }
+}
+
+// Query Indexed functions (GL 3.3 / ARB_occlusion_query2, ARB_query_buffer_object)
+#[no_mangle]
+pub unsafe extern "C" fn glGetQueryIndexediv(target: u32, index: u32, pname: u32, params: *mut i32) {
+    if let Some(x) = f::<unsafe extern "C" fn(u32, u32, u32, *mut i32)>("glGetQueryIndexediv") {
+        x(target, index, pname, params);
+    } else if !params.is_null() {
+        *params = 0;
+        err(GL_INVALID_OPERATION);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glGetQueryObjecti64v_v2(id: u32, pname: u32, params: *mut i64) {
+    if let Some(x) = f::<unsafe extern "C" fn(u32, u32, *mut i64)>("glGetQueryObjecti64v") {
+        x(id, pname, params);
+    } else if !params.is_null() {
+        *params = 0;
+        err(GL_INVALID_OPERATION);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glGetQueryObjectui64v_v2(id: u32, pname: u32, params: *mut u64) {
+    if let Some(x) = f::<unsafe extern "C" fn(u32, u32, *mut u64)>("glGetQueryObjectui64v") {
+        x(id, pname, params);
+    } else if !params.is_null() {
+        *params = 0;
+        err(GL_INVALID_OPERATION);
+    }
+}
+
+// Buffer Storage (GL 4.4 / ARB_buffer_storage)
+// These are desktop-only; GLES 3.x has no equivalent.
+#[no_mangle]
 // Sync objects are present in GLES 3.0 with the same ABI.
 #[no_mangle]
 pub unsafe extern "C" fn glFenceSync(condition:u32,flags:u32)->*const c_void{if condition!=GL_SYNC_GPU_COMMANDS_COMPLETE||flags!=0{err(GL_INVALID_VALUE);return ptr::null()}if let Some(x)=f::<unsafe extern "C" fn(u32,u32)->*const c_void>("glFenceSync"){x(condition,flags)}else{err(GL_INVALID_OPERATION);ptr::null()}}
@@ -530,6 +631,71 @@ pub unsafe extern "C" fn glGetActiveUniformBlockName(program:u32,uniformBlockInd
 pub unsafe extern "C" fn glUniformBlockBinding(program:u32,uniformBlockIndex:u32,uniformBlockBinding:u32){
     if let Some(x)=f::<unsafe extern "C" fn(u32,u32,u32)>("glUniformBlockBinding"){x(program,uniformBlockIndex,uniformBlockBinding)}else{err(GL_INVALID_OPERATION)}
 }
+// Program Uniform (GL 4.1 / ARB_program_interface_query) - GLES 3.1+
+// These forward to driver when available, otherwise set error.
+macro_rules! prog_uniform {
+    ($name:ident, $glname:literal, $(($arg_name:ident, $arg_ty:ty)),+) => {
+        #[no_mangle]
+        pub unsafe extern "C" fn $name(program: u32, location: i32, $($arg_name: $arg_ty),+) {
+            if let Some(f) = f::<unsafe extern "C" fn(u32, i32, $($arg_ty),+)>($glname) {
+                f(program, location, $($arg_name),+);
+            } else {
+                err(GL_INVALID_OPERATION);
+            }
+        }
+    };
+}
+
+prog_uniform!(glProgramUniform1i, "glProgramUniform1i", (v0, i32));
+prog_uniform!(glProgramUniform2i, "glProgramUniform2i", (v0, i32), (v1, i32));
+prog_uniform!(glProgramUniform3i, "glProgramUniform3i", (v0, i32), (v1, i32), (v2, i32));
+prog_uniform!(glProgramUniform4i, "glProgramUniform4i", (v0, i32), (v1, i32), (v2, i32), (v3, i32));
+
+prog_uniform!(glProgramUniform1ui, "glProgramUniform1ui", (v0, u32));
+prog_uniform!(glProgramUniform2ui, "glProgramUniform2ui", (v0, u32), (v1, u32));
+prog_uniform!(glProgramUniform3ui, "glProgramUniform3ui", (v0, u32), (v1, u32), (v2, u32));
+prog_uniform!(glProgramUniform4ui, "glProgramUniform4ui", (v0, u32), (v1, u32), (v2, u32), (v3, u32));
+
+prog_uniform!(glProgramUniform1f, "glProgramUniform1f", (v0, f32));
+prog_uniform!(glProgramUniform2f, "glProgramUniform2f", (v0, f32), (v1, f32));
+prog_uniform!(glProgramUniform3f, "glProgramUniform3f", (v0, f32), (v1, f32), (v2, f32));
+prog_uniform!(glProgramUniform4f, "glProgramUniform4f", (v0, f32), (v1, f32), (v2, f32), (v3, f32));
+
+prog_uniform!(glProgramUniform1d, "glProgramUniform1d", (v0, f64));
+prog_uniform!(glProgramUniform2d, "glProgramUniform2d", (v0, f64), (v1, f64));
+prog_uniform!(glProgramUniform3d, "glProgramUniform3d", (v0, f64), (v1, f64), (v2, f64));
+prog_uniform!(glProgramUniform4d, "glProgramUniform4d", (v0, f64), (v1, f64), (v2, f64), (v3, f64));
+
+prog_uniform!(glProgramUniform1iv, "glProgramUniform1iv", (count, i32), (value, *const i32));
+prog_uniform!(glProgramUniform2iv, "glProgramUniform2iv", (count, i32), (value, *const i32));
+prog_uniform!(glProgramUniform3iv, "glProgramUniform3iv", (count, i32), (value, *const i32));
+prog_uniform!(glProgramUniform4iv, "glProgramUniform4iv", (count, i32), (value, *const i32));
+
+prog_uniform!(glProgramUniform1uiv, "glProgramUniform1uiv", (count, i32), (value, *const u32));
+prog_uniform!(glProgramUniform2uiv, "glProgramUniform2uiv", (count, i32), (value, *const u32));
+prog_uniform!(glProgramUniform3uiv, "glProgramUniform3uiv", (count, i32), (value, *const u32));
+prog_uniform!(glProgramUniform4uiv, "glProgramUniform4uiv", (count, i32), (value, *const u32));
+
+prog_uniform!(glProgramUniform1fv, "glProgramUniform1fv", (count, i32), (value, *const f32));
+prog_uniform!(glProgramUniform2fv, "glProgramUniform2fv", (count, i32), (value, *const f32));
+prog_uniform!(glProgramUniform3fv, "glProgramUniform3fv", (count, i32), (value, *const f32));
+prog_uniform!(glProgramUniform4fv, "glProgramUniform4fv", (count, i32), (value, *const f32));
+
+prog_uniform!(glProgramUniform1dv, "glProgramUniform1dv", (count, i32), (value, *const f64));
+prog_uniform!(glProgramUniform2dv, "glProgramUniform2dv", (count, i32), (value, *const f64));
+prog_uniform!(glProgramUniform3dv, "glProgramUniform3dv", (count, i32), (value, *const f64));
+prog_uniform!(glProgramUniform4dv, "glProgramUniform4dv", (count, i32), (value, *const f64));
+
+// Matrix uniforms
+prog_uniform!(glProgramUniformMatrix2fv, "glProgramUniformMatrix2fv", (count, i32), (transpose, i32), (u8_arg, u8), (value, *const f32));
+prog_uniform!(glProgramUniformMatrix3fv, "glProgramUniformMatrix3fv", (count, i32), (transpose, i32), (u8_arg, u8), (value, *const f32));
+prog_uniform!(glProgramUniformMatrix4fv, "glProgramUniformMatrix4fv", (count, i32), (transpose, i32), (u8_arg, u8), (value, *const f32));
+prog_uniform!(glProgramUniformMatrix2x3fv, "glProgramUniformMatrix2x3fv", (count, i32), (transpose, i32), (u8_arg, u8), (value, *const f32));
+prog_uniform!(glProgramUniformMatrix3x2fv, "glProgramUniformMatrix3x2fv", (count, i32), (transpose, i32), (u8_arg, u8), (value, *const f32));
+prog_uniform!(glProgramUniformMatrix2x4fv, "glProgramUniformMatrix2x4fv", (count, i32), (transpose, i32), (u8_arg, u8), (value, *const f32));
+prog_uniform!(glProgramUniformMatrix4x2fv, "glProgramUniformMatrix4x2fv", (count, i32), (transpose, i32), (u8_arg, u8), (value, *const f32));
+prog_uniform!(glProgramUniformMatrix3x4fv, "glProgramUniformMatrix3x4fv", (count, i32), (transpose, i32), (u8_arg, u8), (value, *const f32));
+prog_uniform!(glProgramUniformMatrix4x3fv, "glProgramUniformMatrix4x3fv", (count, i32), (transpose, i32), (u8_arg, u8), (value, *const f32));
 
 // ---- Multi-bind (GL 3.1 / ARB_multi_bind) ----------------------------------------------------
 //
@@ -684,7 +850,12 @@ pub unsafe extern "C" fn glGetTextureParameterfv(texture: u32, pname: u32, param
     }
     guard.restore();
 }
-
+// Texture DSA - remaining functions for GL 4.5 / ARB_direct_state_access
+#[no_mangle]
+#[no_mangle]
+#[no_mangle]
+#[no_mangle]
+#[no_mangle]
 /// 2D level read-back. BGRA/BGR are read through RGBA/RGB and swizzled on the way out,
 /// because GLES 3.x cannot read those formats directly. Targets with more than one layer
 /// (3D, cube, 2D array) are forwarded unchanged so the driver's own error surfaces.
@@ -899,6 +1070,15 @@ pub fn resolve(name: &[u8]) -> *const c_void {
         b"glGetQueryObjectuiv"=>glGetQueryObjectuiv,
         b"glGetQueryObjecti64v"=>glGetQueryObjecti64v,
         b"glGetQueryObjectui64v"=>glGetQueryObjectui64v,
+        b"glBeginTransformFeedback"=>glBeginTransformFeedback,
+        b"glEndTransformFeedback"=>glEndTransformFeedback,
+        b"glPauseTransformFeedback"=>glPauseTransformFeedback,
+        b"glResumeTransformFeedback"=>glResumeTransformFeedback,
+        b"glDrawTransformFeedback"=>glDrawTransformFeedback,
+        b"glDrawTransformFeedbackStream"=>glDrawTransformFeedbackStream,
+        b"glGetQueryIndexediv"=>glGetQueryIndexediv,
+        b"glGetQueryObjecti64v_v2"=>glGetQueryObjecti64v_v2,
+        b"glGetQueryObjectui64v_v2"=>glGetQueryObjectui64v_v2,
         b"glFenceSync"=>glFenceSync,
         b"glDeleteSync"=>glDeleteSync,
         b"glIsSync"=>glIsSync,

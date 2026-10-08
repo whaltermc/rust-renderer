@@ -1,16 +1,25 @@
 #!/usr/bin/env bash
-# Requires: rustup target aarch64-linux-android, cargo-ndk, Android NDK, Gradle (or wrapper).
+# Requires: rustup targets for Android, cargo-ndk, Android NDK, Gradle (or wrapper).
 set -euo pipefail
 cd "$(dirname "$0")"
 
 cargo test -p renderer-core
-cargo ndk -t arm64-v8a build --release -p gl-compat
 
-install -D target/aarch64-linux-android/release/librust_gl.so \
-    android/app/src/main/jniLibs/arm64-v8a/librust_gl.so
+# Build for all Android ABIs
+ABIS=("arm64-v8a" "armeabi-v7a" "x86" "x86_64")
+RUST_TARGETS=("aarch64-linux-android" "armv7-linux-androideabi" "i686-linux-android" "x86_64-linux-android")
 
-install -D target/aarch64-linux-android/release/librust_gl.so \
-    android/renderer/src/main/jniLibs/arm64-v8a/librust_gl.so
+for i in "${!ABIS[@]}"; do
+    ABI="${ABIS[$i]}"
+    RUST_TARGET="${RUST_TARGETS[$i]}"
+    echo "Building for $ABI ($RUST_TARGET)..."
+    cargo ndk -t "$ABI" build --release -p gl-compat
+
+    install -D "target/$RUST_TARGET/release/librust_gl.so" \
+        "android/app/src/main/jniLibs/$ABI/librust_gl.so"
+    install -D "target/$RUST_TARGET/release/librust_gl.so" \
+        "android/renderer/src/main/jniLibs/$ABI/librust_gl.so"
+done
 
 cd android
 # Prefer the pinned wrapper: AGP 8.5.2 targets Gradle 8.x, so a machine with Gradle 9

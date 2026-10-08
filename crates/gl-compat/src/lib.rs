@@ -29,6 +29,7 @@ use renderer_core::{Backend, BackendKind, Config, GlErrorState};
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
+use std::collections::HashMap;
 
 
 const GL_INVALID_VALUE: u32 = 0x0501;
@@ -1019,9 +1020,18 @@ pub unsafe extern "C" fn glShaderSource(
     }
     let is_es = shader_translation_is_es();
     let translated = if is_es {
-        shader_translate::translate(&src)
+        // Determine shader stage from source
+        let stage = if src.contains("gl_Position") || src.contains("gl_Vertex") || src.contains("attribute ") {
+            // Vertex shader
+            shader_translate::naga_translate::ShaderStageType::Vertex
+        } else {
+            // Fragment shader
+            shader_translate::naga_translate::ShaderStageType::Fragment
+        };
+        let defines: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        shader_translate::naga_translate::translate_glsl_to_essl(&src, stage, &std::collections::HashMap::new())
     } else {
-        shader_translate::translate_desktop_440(&src)
+        shader_translate::translate_desktop_440(&src).map_err(|e| shader_translate::naga_translate::TranslateError::UnsupportedFeature(e))
     };
     let translated = match translated {
         Ok(t) => t,
@@ -1867,14 +1877,10 @@ forward_all! {
     glGetUniformfv(p: u32, loc: i32, v: *mut f32);
     glGetUniformiv(p: u32, loc: i32, v: *mut i32);
     glTransformFeedbackVaryings(p: u32, count: i32, varyings: *const *const c_char, buffer_mode: u32);
-    glBeginTransformFeedback(mode: u32);
-    glEndTransformFeedback();
     glBindTransformFeedback(t: u32, id: u32);
     glGenTransformFeedbacks(n: i32, ids: *mut u32);
     glDeleteTransformFeedbacks(n: i32, ids: *const u32);
     glIsTransformFeedback(id: u32) -> u8;
-    glPauseTransformFeedback();
-    glResumeTransformFeedback();
     glVertexAttribI4i(i: u32, x: i32, y: i32, z: i32, w: i32);
     glVertexAttribI4ui(i: u32, x: u32, y: u32, z: u32, w: u32);
     glUniform1uiv(l: i32, n: i32, v: *const u32);
