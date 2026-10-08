@@ -185,7 +185,7 @@ android {
     // Ensure all ABIs are built for test APK
     splits {
         abi {
-            enable = false
+            isEnable = false
         }
     }
 }
