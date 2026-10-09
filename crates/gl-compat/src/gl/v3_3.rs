@@ -385,7 +385,7 @@ pub unsafe extern "C" fn glTexStorage3D(target:u32,levels:i32,internalformat:u32
 
 #[no_mangle]
 pub unsafe extern "C" fn glGetInteger64v(pname:u32,data:*mut i64){
-    if let Some(x)=f::<unsafe extern "C" fn(u32,*mut i64)>("glGetInteger64v"){x(pname,data)}else if !data.is_null(){*data=0;err(GL_INVALID_OPERATION)}
+    if let Some(x)=f::<unsafe extern "C" fn(u32,*mut i64)>("glGetInteger64v"){x(crate::remap_draw_buffer_query_pname(pname),data)}else if !data.is_null(){*data=0;err(GL_INVALID_OPERATION)}
 }
 #[no_mangle]
 pub unsafe extern "C" fn glGetIntegeri_v(pname:u32,index:u32,data:*mut i32){

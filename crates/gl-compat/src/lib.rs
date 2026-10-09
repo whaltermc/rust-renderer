@@ -34,6 +34,15 @@ use std::collections::HashMap;
 
 const GL_INVALID_VALUE: u32 = 0x0501;
 const GL_INVALID_OPERATION: u32 = 0x0502;
+const GL_DRAW_BUFFER: u32 = 0x0C01;
+const GL_DRAW_BUFFER0: u32 = 0x8825;
+const GL_DRAW_FRAMEBUFFER_BINDING: u32 = 0x8CA6;
+const GL_READ_FRAMEBUFFER_BINDING: u32 = 0x8CAA;
+const GL_FRONT_LEFT: u32 = 0x0400;
+const GL_BACK_LEFT: u32 = 0x0402;
+const GL_BACK: u32 = 0x0405;
+const GL_FRONT: u32 = 0x0404;
+const GL_FRONT_AND_BACK: u32 = 0x0408;
 static SHADER_SOURCE_CACHE: Mutex<Vec<(u32, String)>> = Mutex::new(Vec::new());
 
 fn remember_shader_source(shader: u32, source: String) {
@@ -580,6 +589,47 @@ pub(crate) fn shader_translation_is_es() -> bool {
     *SHADER_TRANSLATION_IS_ES.get_or_init(probe_shader_target_is_es)
 }
 
+fn map_draw_buffer_query_pname(pname: u32, is_es: bool) -> u32 {
+    if is_es && pname == GL_DRAW_BUFFER {
+        GL_DRAW_BUFFER0
+    } else {
+        pname
+    }
+}
+
+pub(crate) fn remap_draw_buffer_query_pname(pname: u32) -> u32 {
+    map_draw_buffer_query_pname(pname, shader_translation_is_es())
+}
+
+fn needs_default_framebuffer_buffer_remap(mode: u32) -> bool {
+    matches!(mode, GL_FRONT | GL_FRONT_LEFT | GL_BACK_LEFT | GL_FRONT_AND_BACK)
+}
+
+fn map_default_framebuffer_buffer(mode: u32, is_es: bool, framebuffer: u32) -> u32 {
+    if is_es && framebuffer == 0 && needs_default_framebuffer_buffer_remap(mode) {
+        GL_BACK
+    } else {
+        mode
+    }
+}
+
+unsafe fn current_framebuffer_binding(pname: u32) -> Option<u32> {
+    let get = driver_fn_cached::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv")?;
+    let mut binding = 0;
+    get(pname, &mut binding);
+    Some(binding as u32)
+}
+
+unsafe fn remap_default_framebuffer_buffer(mode: u32, binding_pname: u32) -> u32 {
+    if !shader_translation_is_es() || !needs_default_framebuffer_buffer_remap(mode) {
+        return mode;
+    }
+    let Some(binding) = current_framebuffer_binding(binding_pname) else {
+        return mode;
+    };
+    map_default_framebuffer_buffer(mode, true, binding)
+}
+
 fn probe_shader_target_is_es() -> bool {
     // Query the real driver, not the spoof: with `RENDERER_SPOOF_GL=1` GL_VERSION is
     // always the desktop 4.5 string. A context must be current for `glGetString` to return
@@ -818,7 +868,7 @@ pub unsafe extern "C" fn glGetIntegerv(pname: u32, data: *mut i32) {
         }
     }
     if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
-        f(pname, data);
+        f(remap_draw_buffer_query_pname(pname), data);
         return;
     }
     // Safe zeros rather than leaving uninitialized memory for the caller
@@ -1663,16 +1713,44 @@ pub unsafe extern "C" fn glDrawBuffers(n: i32, b: *const u32) {
         }
         n = max;
     }
+    let mapped_modes = if shader_translation_is_es() && n > 0 {
+        let needs_mapping = (0..n as usize)
+            .any(|i| needs_default_framebuffer_buffer_remap(*b.add(i)));
+        if needs_mapping {
+            current_framebuffer_binding(GL_DRAW_FRAMEBUFFER_BINDING)
+                .filter(|binding| *binding == 0)
+                .map(|_| {
+                    (0..n as usize)
+                        .map(|i| map_default_framebuffer_buffer(*b.add(i), true, 0))
+                        .collect::<Vec<_>>()
+                })
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     match driver_fn_cached::<unsafe extern "C" fn(i32, *const u32)>("glDrawBuffers") {
-        Some(g) => g(n, b),
+        Some(g) => g(n, mapped_modes.as_ref().map_or(b, |modes| modes.as_ptr())),
         None => errors().set(GL_INVALID_OPERATION),
     }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn glDrawBuffer(mode: u32) {
+    let mode = remap_default_framebuffer_buffer(mode, GL_DRAW_FRAMEBUFFER_BINDING);
     match driver_fn_cached::<unsafe extern "C" fn(i32, *const u32)>("glDrawBuffers") {
         Some(g) => g(1, &mode),
+        None => errors().set(GL_INVALID_OPERATION),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glReadBuffer(mode: u32) {
+    trace_call("glReadBuffer");
+    let mode = remap_default_framebuffer_buffer(mode, GL_READ_FRAMEBUFFER_BINDING);
+    match driver_fn_cached::<unsafe extern "C" fn(u32)>("glReadBuffer") {
+        Some(f) => f(mode),
         None => errors().set(GL_INVALID_OPERATION),
     }
 }
@@ -1780,8 +1858,6 @@ forward_all! {
     glGenVertexArrays(n: i32, a: *mut u32);
     glGenerateMipmap(t: u32);
     glGetAttribLocation(p: u32, n: *const c_char) -> i32;
-    glGetBooleanv(p: u32, d: *mut u8);
-
     glGetProgramInfoLog(p: u32, b: i32, l: *mut i32, log: *mut c_char);
     glGetProgramiv(p: u32, n: u32, v: *mut i32);
     glGetShaderInfoLog(s: u32, b: i32, l: *mut i32, log: *mut c_char);
@@ -1790,7 +1866,6 @@ forward_all! {
     glIsEnabled(c: u32) -> u8;
     glLinkProgram(p: u32);
     glPolygonOffset(f: f32, u: f32);
-    glReadBuffer(m: u32);
     glReadPixels(x: i32, y: i32, w: i32, h: i32, f: u32, t: u32, d: *mut c_void);
     glScissor(x: i32, y: i32, w: i32, h: i32);
     glStencilFunc(f: u32, r: i32, m: u32);
@@ -2089,7 +2164,22 @@ pub unsafe extern "C" fn glGetFloatv(p: u32, d: *mut f32) {
         *d = v;
         return;
     }
+    let p = remap_draw_buffer_query_pname(p);
     match driver_fn_cached::<unsafe extern "C" fn(u32, *mut f32)>("glGetFloatv") {
+        Some(f) => f(p, d),
+        None => errors().set(GL_INVALID_OPERATION),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glGetBooleanv(p: u32, d: *mut u8) {
+    trace_call("glGetBooleanv");
+    if d.is_null() {
+        errors().set(GL_INVALID_VALUE);
+        return;
+    }
+    let p = remap_draw_buffer_query_pname(p);
+    match driver_fn_cached::<unsafe extern "C" fn(u32, *mut u8)>("glGetBooleanv") {
         Some(f) => f(p, d),
         None => errors().set(GL_INVALID_OPERATION),
     }
@@ -2115,6 +2205,7 @@ pub unsafe extern "C" fn glGetDoublev(pname: u32, data: *mut f64) {
         0x0C22 | 0x0B13 | 0x0B03 | 0x0BA2 | 0x0C23 => 4, // CLEAR_COLOR, VIEWPORT, ...
         _ => 1,
     };
+    let pname = remap_draw_buffer_query_pname(pname);
     let mut tmp = [0f32; 16];
     if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, *mut f32)>("glGetFloatv") {
         f(pname, tmp.as_mut_ptr());
@@ -2367,6 +2458,7 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glDisable" => glDisable as *const c_void,
         b"glGetString" => glGetString as *const c_void,
         b"glGetIntegerv" => glGetIntegerv as *const c_void,
+        b"glGetBooleanv" => glGetBooleanv as *const c_void,
         b"glGetStringi" => glGetStringi as *const c_void,
         b"glClearDepth" => glClearDepth as *const c_void,
         b"glDepthRange" => glDepthRange as *const c_void,
@@ -2376,6 +2468,7 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
         b"glTexSubImage2D" => glTexSubImage2D as *const c_void,
         b"glTexParameteri" => glTexParameteri as *const c_void,
         b"glDrawBuffer" => glDrawBuffer as *const c_void,
+        b"glReadBuffer" => glReadBuffer as *const c_void,
         b"glMapBuffer" => glMapBuffer as *const c_void,
         b"glBufferStorage" => glBufferStorage as *const c_void,
         b"glBufferData" => glBufferData as *const c_void,
@@ -3218,7 +3311,8 @@ mod tests {
         // wrappers converted out of `forward_all!` are exactly how that happens: the macro
         // generates the resolver entry, and a replacement must add its own.
         const HAND_WRITTEN: &[&str] = &[
-            "glGetError", "glGetString", "glGetStringi", "glGetIntegerv", "glClearColor",
+            "glGetError", "glGetString", "glGetStringi", "glGetIntegerv", "glGetBooleanv",
+            "glReadBuffer", "glClearColor",
             "glClear", "glViewport", "glEnable", "glDisable", "glDepthRange", "glClearDepth",
             "glTexParameteri", "glTexParameterf", "glTexParameteriv", "glTexParameterfv",
             "glPixelStorei", "glBindBuffer", "glRenderbufferStorage", "glBufferStorage",
@@ -3303,6 +3397,25 @@ mod tests {
         assert!(!super::probe_shader_target_is_es_for_test("4.6 (Core Profile) Mesa 24.3"));
         assert!(!super::probe_shader_target_is_es_for_test("4.5 (Core Profile) NVIDIA Corp"));
         assert!(!super::probe_shader_target_is_es_for_test("4.5 (Core Profile) RustGL"));
+    }
+
+    #[test]
+    fn draw_buffer_query_pname_maps_only_for_es() {
+        assert_eq!(map_draw_buffer_query_pname(GL_DRAW_BUFFER, true), GL_DRAW_BUFFER0);
+        assert_eq!(map_draw_buffer_query_pname(GL_DRAW_BUFFER, false), GL_DRAW_BUFFER);
+        assert_eq!(map_draw_buffer_query_pname(GL_DRAW_BUFFER0, true), GL_DRAW_BUFFER0);
+    }
+
+    #[test]
+    fn desktop_buffer_enums_map_only_for_es_default_framebuffer() {
+        for mode in [GL_FRONT, GL_FRONT_LEFT, GL_BACK_LEFT, GL_FRONT_AND_BACK] {
+            assert_eq!(map_default_framebuffer_buffer(mode, true, 0), GL_BACK);
+            assert_eq!(map_default_framebuffer_buffer(mode, false, 0), mode);
+            assert_eq!(map_default_framebuffer_buffer(mode, true, 1), mode);
+        }
+        assert_eq!(map_default_framebuffer_buffer(0, true, 0), 0); // GL_NONE
+        assert_eq!(map_default_framebuffer_buffer(GL_BACK, true, 0), GL_BACK);
+        assert_eq!(map_default_framebuffer_buffer(0x8CE0, true, 0), 0x8CE0); // GL_COLOR_ATTACHMENT0
     }
 
     #[test]
