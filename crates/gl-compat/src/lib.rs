@@ -44,6 +44,26 @@ const GL_BACK: u32 = 0x0405;
 const GL_FRONT: u32 = 0x0404;
 const GL_FRONT_AND_BACK: u32 = 0x0408;
 static SHADER_SOURCE_CACHE: Mutex<Vec<(u32, String)>> = Mutex::new(Vec::new());
+static COMPILE_FAILURES_LOGGED: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+static LINK_FAILURES_LOGGED: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+fn shader_diagnostics_enabled() -> bool {
+    std::env::var("RENDERER_DEBUG").as_deref() == Ok("1")
+}
+
+fn log_failure_once(seen: &Mutex<Vec<u32>>, object: u32) -> bool {
+    let mut seen = seen.lock().unwrap_or_else(|e| e.into_inner());
+    if seen.contains(&object) {
+        false
+    } else {
+        seen.push(object);
+        true
+    }
+}
+
+fn clear_logged_failure(seen: &Mutex<Vec<u32>>, object: u32) {
+    seen.lock().unwrap_or_else(|e| e.into_inner()).retain(|id| *id != object);
+}
 
 fn remember_shader_source(shader: u32, source: String) {
     let mut cache = SHADER_SOURCE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
@@ -1158,15 +1178,19 @@ pub unsafe extern "C" fn glCompileShader(shader: u32) {
         take_shader_source(shader);
         return;
     }
+    if !shader_diagnostics_enabled() || !log_failure_once(&COMPILE_FAILURES_LOGGED, shader) {
+        take_shader_source(shader);
+        return;
+    }
 
     let mut length = 0;
     get_shader_iv(shader, GL_INFO_LOG_LENGTH, &mut length);
     if length <= 1 {
-        log(&format!("[Shader] shader {shader} failed to compile (driver returned no info log)"));
+        log(&format!("[GLCompat] compile failed shader={shader}: driver returned no info log"));
         return;
     }
     let Some(get_shader_log) = driver_fn_cached::<unsafe extern "C" fn(u32, i32, *mut i32, *mut c_char)>("glGetShaderInfoLog") else {
-        log(&format!("[Shader] shader {shader} failed to compile; glGetShaderInfoLog unavailable"));
+        log(&format!("[GLCompat] compile failed shader={shader}: glGetShaderInfoLog unavailable"));
         return;
     };
     let mut bytes = vec![0u8; length as usize];
@@ -1174,7 +1198,7 @@ pub unsafe extern "C" fn glCompileShader(shader: u32) {
     get_shader_log(shader, length, &mut written, bytes.as_mut_ptr() as *mut c_char);
     let written = written.max(0) as usize;
     let message = String::from_utf8_lossy(&bytes[..written.min(bytes.len())]);
-    log(&format!("[Shader] shader {shader} failed to compile: {message}"));
+    log(&format!("[GLCompat] compile failed shader={shader}: {message}"));
     if let (Some(source), Some(line)) = (take_shader_source(shader), shader_error_line(&message)) {
         // Prefer the `#line`-aware physical line; fall back to the raw number if the
         // directives do not account for it.
@@ -1204,6 +1228,77 @@ pub unsafe extern "C" fn glCompileShader(shader: u32) {
             log(&format!("[Shader] shader {shader} preprocessor lines:\n{directives}"));
         }
     }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glLinkProgram(program: u32) {
+    trace_call("glLinkProgram");
+    let Some(link) = driver_fn_cached::<unsafe extern "C" fn(u32)>("glLinkProgram") else {
+        errors().set(GL_INVALID_OPERATION);
+        return;
+    };
+    link(program);
+    if !shader_diagnostics_enabled() {
+        return;
+    }
+
+    const GL_LINK_STATUS: u32 = 0x8B82;
+    const GL_INFO_LOG_LENGTH: u32 = 0x8B84;
+    let Some(get_program_iv) =
+        driver_fn_cached::<unsafe extern "C" fn(u32, u32, *mut i32)>("glGetProgramiv")
+    else {
+        return;
+    };
+    let mut status = 0;
+    get_program_iv(program, GL_LINK_STATUS, &mut status);
+    if status != 0 || !log_failure_once(&LINK_FAILURES_LOGGED, program) {
+        return;
+    }
+
+    let mut length = 0;
+    get_program_iv(program, GL_INFO_LOG_LENGTH, &mut length);
+    if length <= 1 {
+        log(&format!("[GLCompat] link failed program={program}: driver returned no info log"));
+        return;
+    }
+    let Some(get_program_log) =
+        driver_fn_cached::<unsafe extern "C" fn(u32, i32, *mut i32, *mut c_char)>(
+            "glGetProgramInfoLog",
+        )
+    else {
+        log(&format!("[GLCompat] link failed program={program}: glGetProgramInfoLog unavailable"));
+        return;
+    };
+    let mut bytes = vec![0u8; length as usize];
+    let mut written = 0;
+    get_program_log(program, length, &mut written, bytes.as_mut_ptr() as *mut c_char);
+    let written = written.max(0) as usize;
+    let message = String::from_utf8_lossy(&bytes[..written.min(bytes.len())]);
+    log(&format!("[GLCompat] link failed program={program}: {message}"));
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glCreateProgram() -> u32 {
+    trace_call("glCreateProgram");
+    let Some(create) = driver_fn_cached::<unsafe extern "C" fn() -> u32>("glCreateProgram") else {
+        errors().set(GL_INVALID_OPERATION);
+        return 0;
+    };
+    let program = create();
+    clear_logged_failure(&LINK_FAILURES_LOGGED, program);
+    program
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glCreateShader(shader_type: u32) -> u32 {
+    trace_call("glCreateShader");
+    let Some(create) = driver_fn_cached::<unsafe extern "C" fn(u32) -> u32>("glCreateShader") else {
+        errors().set(GL_INVALID_OPERATION);
+        return 0;
+    };
+    let shader = create(shader_type);
+    clear_logged_failure(&COMPILE_FAILURES_LOGGED, shader);
+    shader
 }
 
 // ---- translated entry points (desktop semantics -> GLES) -------------------------------
@@ -1832,8 +1927,6 @@ forward_all! {
     glBlendFuncSeparate(a: u32, b: u32, c: u32, d: u32);
     glClearStencil(s: i32);
     glColorMask(r: u8, g: u8, b: u8, a: u8);
-    glCreateProgram() -> u32;
-    glCreateShader(t: u32) -> u32;
     glCullFace(m: u32);
     glDeleteFramebuffers(n: i32, f: *const u32);
     glDeleteProgram(p: u32);
@@ -1864,7 +1957,6 @@ forward_all! {
     glGetShaderiv(s: u32, n: u32, v: *mut i32);
     glGetUniformLocation(p: u32, n: *const c_char) -> i32;
     glIsEnabled(c: u32) -> u8;
-    glLinkProgram(p: u32);
     glPolygonOffset(f: f32, u: f32);
     glReadPixels(x: i32, y: i32, w: i32, h: i32, f: u32, t: u32, d: *mut c_void);
     glScissor(x: i32, y: i32, w: i32, h: i32);
@@ -3067,6 +3159,15 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn shader_diagnostic_failure_is_logged_once_until_object_reuse() {
+        let seen = Mutex::new(Vec::new());
+        assert!(log_failure_once(&seen, 17));
+        assert!(!log_failure_once(&seen, 17));
+        clear_logged_failure(&seen, 17);
+        assert!(log_failure_once(&seen, 17));
+    }
 
     /// Serialises tests that touch process-global state -- the driver entry-point cache and
     /// the merged extension list. They raced once a new test began resolving names, which made
