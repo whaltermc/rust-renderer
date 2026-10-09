@@ -886,19 +886,20 @@ pub unsafe extern "C" fn glVertexArrayAttribStride(vao: u32, index: u32, stride:
         errors().set(GL_INVALID_OPERATION);
         return;
     }
-    let vao = with_formats(|v| v.iter().find(|(_, a, ..)| *a == index).map(|(w, ..)| *w));
-    if let Some(w) = vao {
-        with_formats(|v| {
-            if let Some(e) = v.iter_mut().find(|(x, a, ..)| *x == w && *a == index) {
-                e.6 = stride;
-            }
+    // Only touch the format recorded for *this* VAO (the old code searched every VAO by attrib
+    // index alone) and keep the buffer the VAO has bound instead of binding buffer 0, which made
+    // the attribute read from client memory.
+    let found = with_formats(|v| {
+        v.iter_mut().find(|(x, a, ..)| *x == vao && *a == index).map(|e| {
+            e.6 = stride;
+            (e.2, e.3, e.4, e.5)
+        })
+    });
+    if let Some((size, ty, norm, rel)) = found {
+        let bound = with_buffers_vao(|v| {
+            v.iter().find(|(w, ..)| *w == vao).map(|(_, b, o, _)| (*b, *o))
         });
-        let entry = with_formats(|v| {
-            v.iter()
-                .find(|(x, a, ..)| *x == w && *a == index)
-                .map(|(_, _, size, ty, norm, rel, st)| (*size, *ty, *norm, *rel, *st))
-        });
-        if let Some((size, ty, norm, rel, st)) = entry {
+        if let Some((buffer, offset)) = bound {
             if let Some(set_ptr) = driver_fn_cached::<
                 unsafe extern "C" fn(u32, i32, u32, bool, i32, *const c_void),
             >("glVertexAttribPointer")
@@ -906,9 +907,10 @@ pub unsafe extern "C" fn glVertexArrayAttribStride(vao: u32, index: u32, stride:
                 if let Some(bind) =
                     driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindBuffer")
                 {
-                    bind(GL_ARRAY_BUFFER, 0);
+                    bind(GL_ARRAY_BUFFER, buffer);
                 }
-                set_ptr(index, size, ty, norm, st as i32, rel as usize as *const c_void);
+                set_ptr(index, size, ty, norm, stride as i32,
+                        (offset as u32).wrapping_add(rel) as usize as *const c_void);
             }
         }
     }
