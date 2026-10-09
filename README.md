@@ -65,7 +65,7 @@ Logs: `adb logcat -s RustRenderer RendererV2Plugin`
 | Vanilla 1.21.4 | GUI + world retrace pass; device launch unverified |
 | Vanilla 1.21.5–26.2 | Translation path in place; device launch unverified |
 | 26.3 improved transparency | Partial — SSIM 0.869875, translation gaps remain |
-| Sodium | **Out of scope** — requires GL 4.5+ |
+| Sodium | Untested — GL 4.5 entry points now exposed; not verified |
 | Iris / shader packs | ✅ 1.21.4 Iris/BSL passes; 26.3 needs more translation work |
 
 ## Completed Tasks

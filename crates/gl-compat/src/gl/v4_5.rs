@@ -305,6 +305,14 @@ fn buffer_pattern(internalformat: u32, format: u32, ty: u32, data: *const c_void
     Some(pattern)
 }
 
+fn buffer_range_matches_pattern(offset: isize, size: isize, pattern_size: usize) -> bool {
+    pattern_size != 0
+        && offset >= 0
+        && size >= 0
+        && (offset as usize) % pattern_size == 0
+        && (size as usize) % pattern_size == 0
+}
+
 unsafe fn clear_buffer(
     buffer: u32, offset: isize, size: isize, internalformat: u32, format: u32, ty: u32,
     data: *const c_void,
@@ -317,6 +325,10 @@ unsafe fn clear_buffer(
         crate::errors().set(INVALID_ENUM);
         return;
     };
+    if !buffer_range_matches_pattern(offset, size, pattern.len()) {
+        crate::errors().set(INVALID_VALUE);
+        return;
+    }
     let Some(_binding) = bind_buffer(COPY_WRITE_BUFFER) else {
         fail("glClearNamedBufferData");
         return;
@@ -845,6 +857,23 @@ mod tests {
         assert_eq!(pixel_bytes(0x1908, 0x1401, 2, 3), Some(24));
         assert_eq!(pixel_bytes(0x1903, 0x1406, 2, 3), Some(24));
         assert_eq!(pixel_bytes(0xDEAD, 0x1401, 2, 3), None);
+    }
+
+    #[test]
+    fn buffer_pattern_and_clear_range_alignment_are_validated() {
+        let values = [1u8, 2, 3, 4];
+        let pattern = buffer_pattern(
+            0x8058,
+            0x1908,
+            0x1401,
+            values.as_ptr().cast(),
+        )
+        .unwrap();
+        assert_eq!(pattern, values);
+        assert!(buffer_range_matches_pattern(8, 12, pattern.len()));
+        assert!(!buffer_range_matches_pattern(1, 12, pattern.len()));
+        assert!(!buffer_range_matches_pattern(8, 10, pattern.len()));
+        assert!(!buffer_range_matches_pattern(0, 0, 0));
     }
 
     #[test]

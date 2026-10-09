@@ -316,7 +316,10 @@ pub fn supported_aliases(c: &GlesCapabilities) -> Vec<&'static [u8]> {
     if c.has(ext!("GL_EXT_clip_control")) {
         out.push(ext!("GL_ARB_clip_control"));
     }
-    if c.es_at_least(3, 1) || c.has(ext!("GL_NV_texture_barrier")) {
+    if texture_barrier_supported(
+        c,
+        unsafe { driver_fn_cached::<unsafe extern "C" fn()>("glTextureBarrier").is_some() },
+    ) {
         out.push(ext!("GL_ARB_texture_barrier"));
     }
     // Only claim what the driver actually reports and can actually do.
@@ -381,6 +384,10 @@ pub fn supported_aliases(c: &GlesCapabilities) -> Vec<&'static [u8]> {
     out
 }
 
+fn texture_barrier_supported(c: &GlesCapabilities, has_entry_point: bool) -> bool {
+    has_entry_point || c.has(ext!("GL_NV_texture_barrier"))
+}
+
 use std::sync::atomic::Ordering;
 
 #[cfg(test)]
@@ -430,6 +437,22 @@ mod tests {
         ] {
             assert!(a.contains(&expected.to_string()), "{expected} missing on ES 3.1");
         }
+    }
+
+    #[test]
+    fn texture_barrier_alias_requires_a_barrier_entry_point_or_extension() {
+        assert!(!texture_barrier_supported(
+            &caps_with(&[], 3, 1, 0),
+            false
+        ));
+        assert!(texture_barrier_supported(
+            &caps_with(&[], 3, 0, 0),
+            true
+        ));
+        assert!(texture_barrier_supported(
+            &caps_with(&[b"GL_NV_texture_barrier\0"], 3, 0, 0),
+            false
+        ));
     }
 
     #[test]

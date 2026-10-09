@@ -508,9 +508,8 @@ const GL_MINOR_VERSION: u32 = 0x821C;
 static SPOOF_VERSION: &[u8] = b"4.5 (Core Profile) RustGL\0";
 static SPOOF_GLSL: &[u8] = b"4.50\0";
 
-/// The renderer claims OpenGL 4.5 core.
-/// The claim is NOT backed by a full implementation. Off by default (spec: never advertise
-/// unsupported features).
+/// Whether the layer reports its OpenGL 4.5 compatibility version.
+/// This is always enabled and does not imply full GL 4.5 feature coverage.
 fn spoof_gl() -> bool {
     true
 }
