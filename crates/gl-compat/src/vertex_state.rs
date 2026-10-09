@@ -747,21 +747,45 @@ unsafe fn bind_vao(vao: u32) -> bool {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn glVertexArrayVertexBuffer(vao: u32, _binding: u32, buffer: u32, offset: isize) {
+pub unsafe extern "C" fn glVertexArrayVertexBuffer(
+    vao: u32,
+    binding: u32,
+    buffer: u32,
+    offset: isize,
+    stride: i32,
+) {
     if !bind_vao(vao) {
         errors().set(GL_INVALID_OPERATION);
+        return;
+    }
+    if crate::driver_supports_vertex_attrib_binding() {
+        if let Some(bind) = driver_fn_cached::<unsafe extern "C" fn(u32, u32, isize, i32)>(
+            "glBindVertexBuffer",
+        ) {
+            bind(binding, buffer, offset, stride);
+            return;
+        }
+        errors().set(GL_INVALID_OPERATION);
+        return;
+    }
+    if binding != 0 {
+        errors().set(GL_INVALID_OPERATION);
+        return;
+    }
+    if offset < 0 || stride < 0 {
+        errors().set(GL_INVALID_VALUE);
         return;
     }
     warn_array_buffer_is_global();
     with_buffers_vao(|v| {
         if let Some(e) = v.iter_mut().find(|(w, ..)| *w == vao) {
-            *e = (vao, buffer, offset, 0);
+            *e = (vao, buffer, offset, stride);
         } else {
-            v.push((vao, buffer, offset, 0));
+            v.push((vao, buffer, offset, stride));
         }
     });
     // Associate the buffer with this VAO's attributes, not merely the global binding.
-    apply_formats(vao, buffer, offset, 0);
+    apply_formats(vao, buffer, offset, stride);
 }
 
 #[no_mangle]
@@ -790,9 +814,18 @@ pub unsafe extern "C" fn glVertexArrayAttribFormat(
         errors().set(GL_INVALID_OPERATION);
         return;
     }
-    // Deliberately not calling glVertexAttribFormat: it is ES 3.1+, and an ES 3.0 context
-    // (what Android hands out by default) rejects it with GL_INVALID_ENUM. The description is
-    // recorded and applied through glVertexAttribPointer instead, which works on ES 2.0+.
+    if crate::driver_supports_vertex_attrib_binding() {
+        if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, i32, u32, u8, u32)>(
+            "glVertexAttribFormat",
+        ) {
+            f(index, size, ty, normalized as u8, relative_offset);
+            return;
+        }
+        errors().set(GL_INVALID_OPERATION);
+        return;
+    }
+    // ES 3.0 lacks separate vertex-buffer bindings, so record the format and apply it through
+    // glVertexAttribPointer when the buffer binding arrives.
     let stride = current_stride(index);
     record_format(vao, index, size, ty, normalized, relative_offset, stride);
 }
@@ -936,22 +969,35 @@ pub unsafe extern "C" fn glVertexArrayAttribBinding(vao: u32, attribindex: u32, 
         errors().set(GL_INVALID_OPERATION);
         return;
     }
-    match driver_fn_cached::<unsafe extern "C" fn(u32, u32, u32, u32)>(
-        "glVertexArrayAttribBinding",
-    ) {
-        Some(f) => f(vao, attribindex, bindingindex, 0),
-        None => errors().set(GL_INVALID_OPERATION),
+    if crate::driver_supports_vertex_attrib_binding() {
+        match driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glVertexAttribBinding") {
+            Some(f) => f(attribindex, bindingindex),
+            None => errors().set(GL_INVALID_OPERATION),
+        }
+    } else if bindingindex != 0 {
+        errors().set(GL_INVALID_OPERATION);
     }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn glBindVertexBuffer(bindingindex: u32, buffer: u32, offset: isize, stride: i32) {
-    if let Some(f) = driver_fn_cached::<unsafe extern "C" fn(u32, u32, isize, i32)>("glBindVertexBuffer") {
-        f(bindingindex, buffer, offset, stride);
+    let native = crate::driver_supports_vertex_attrib_binding();
+    if native {
+        if let Some(f) =
+            driver_fn_cached::<unsafe extern "C" fn(u32, u32, isize, i32)>("glBindVertexBuffer")
+        {
+            f(bindingindex, buffer, offset, stride);
+        } else {
+            errors().set(GL_INVALID_OPERATION);
+            return;
+        }
+    } else if bindingindex != 0 || offset < 0 || stride < 0 {
+        errors().set(if bindingindex != 0 { GL_INVALID_OPERATION } else { GL_INVALID_VALUE });
+        return;
     }
     let mut vao = 0i32;
     if let Some(get_int) = driver_fn_cached::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
-        get_int(0x8CA6, &mut vao);
+        get_int(crate::GL_VERTEX_ARRAY_BINDING, &mut vao);
     }
     with_buffers_vao(|v| {
         if let Some(e) = v.iter_mut().find(|(w, ..)| *w == vao as u32) {
@@ -960,6 +1006,10 @@ pub unsafe extern "C" fn glBindVertexBuffer(bindingindex: u32, buffer: u32, offs
             v.push((vao as u32, buffer, offset, stride));
         }
     });
+    if !native {
+        warn_array_buffer_is_global();
+        apply_formats(vao as u32, buffer, offset, stride);
+    }
 }
 
 #[no_mangle]

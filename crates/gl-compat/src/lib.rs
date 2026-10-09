@@ -533,6 +533,7 @@ const GL_VERSION: u32 = 0x1F02;
 const GL_SHADING_LANGUAGE_VERSION: u32 = 0x8B8C;
 const GL_MAJOR_VERSION: u32 = 0x821B;
 const GL_MINOR_VERSION: u32 = 0x821C;
+pub(crate) const GL_VERTEX_ARRAY_BINDING: u32 = 0x85B5;
 
 static SPOOF_VERSION: &[u8] = b"4.5 (Core Profile) RustGL\0";
 static SPOOF_GLSL: &[u8] = b"4.50\0";
@@ -607,6 +608,33 @@ pub(crate) fn shader_translation_is_es() -> bool {
         };
     }
     *SHADER_TRANSLATION_IS_ES.get_or_init(probe_shader_target_is_es)
+}
+
+fn version_supports_vertex_attrib_binding(is_es: bool, major: i32, minor: i32) -> bool {
+    if is_es {
+        (major, minor) >= (3, 1)
+    } else {
+        (major, minor) >= (4, 3)
+    }
+}
+
+pub(crate) fn driver_supports_vertex_attrib_binding() -> bool {
+    static SUPPORTED: OnceLock<bool> = OnceLock::new();
+    *SUPPORTED.get_or_init(|| {
+        let is_es = probe_shader_target_is_es();
+        let mut major = 0;
+        let mut minor = 0;
+        let Some(get) =
+            driver_fn_cached::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv")
+        else {
+            return false;
+        };
+        unsafe {
+            get(GL_MAJOR_VERSION, &mut major);
+            get(GL_MINOR_VERSION, &mut minor);
+        }
+        version_supports_vertex_attrib_binding(is_es, major, minor)
+    })
 }
 
 fn map_draw_buffer_query_pname(pname: u32, is_es: bool) -> u32 {
@@ -3498,6 +3526,22 @@ mod tests {
         assert!(!super::probe_shader_target_is_es_for_test("4.6 (Core Profile) Mesa 24.3"));
         assert!(!super::probe_shader_target_is_es_for_test("4.5 (Core Profile) NVIDIA Corp"));
         assert!(!super::probe_shader_target_is_es_for_test("4.5 (Core Profile) RustGL"));
+    }
+
+    #[test]
+    fn vertex_attrib_binding_support_uses_the_real_api_version_threshold() {
+        assert!(!version_supports_vertex_attrib_binding(true, 3, 0));
+        assert!(version_supports_vertex_attrib_binding(true, 3, 1));
+        assert!(version_supports_vertex_attrib_binding(true, 3, 2));
+        assert!(!version_supports_vertex_attrib_binding(false, 4, 2));
+        assert!(version_supports_vertex_attrib_binding(false, 4, 3));
+        assert!(version_supports_vertex_attrib_binding(false, 4, 5));
+    }
+
+    #[test]
+    fn vertex_array_binding_query_uses_the_vertex_array_enum() {
+        assert_eq!(GL_VERTEX_ARRAY_BINDING, 0x85B5);
+        assert_ne!(GL_VERTEX_ARRAY_BINDING, 0x8CA6);
     }
 
     #[test]

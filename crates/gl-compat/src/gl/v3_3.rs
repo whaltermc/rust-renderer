@@ -31,6 +31,14 @@ fn err(e: u32) { crate::errors().set(e); }
 
 unsafe fn f<T: Copy>(name: &'static str) -> Option<T> { crate::driver_fn_cached::<T>(name) }
 
+unsafe fn current_vertex_array() -> u32 {
+    let mut vao = 0i32;
+    if let Some(get_int) = f::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
+        get_int(crate::GL_VERTEX_ARRAY_BINDING, &mut vao);
+    }
+    vao as u32
+}
+
 unsafe fn call_void1(name: &'static str, a: u32) -> bool {
     if let Some(x) = f::<unsafe extern "C" fn(u32)>(name) { x(a); true } else { false }
 }
@@ -104,20 +112,23 @@ pub unsafe extern "C" fn glVertexAttribFormat(
     normalized: bool,
     relativeoffset: u32,
 ) {
-    let mut vao = 0i32;
-    if let Some(get_int) = f::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
-        get_int(0x8CA6, &mut vao);
-    }
-    crate::vertex_state::glVertexArrayAttribFormat(vao as u32, index, size, ty, normalized, relativeoffset);
+    crate::vertex_state::glVertexArrayAttribFormat(
+        current_vertex_array(),
+        index,
+        size,
+        ty,
+        normalized,
+        relativeoffset,
+    );
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn glVertexAttribBinding(attribindex: u32, bindingindex: u32) {
-    let mut vao = 0i32;
-    if let Some(get_int) = f::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
-        get_int(0x8CA6, &mut vao);
-    }
-    crate::vertex_state::glVertexArrayAttribBinding(vao as u32, attribindex, bindingindex);
+    crate::vertex_state::glVertexArrayAttribBinding(
+        current_vertex_array(),
+        attribindex,
+        bindingindex,
+    );
 }
 
 #[no_mangle]
@@ -136,11 +147,13 @@ pub unsafe extern "C" fn glVertexAttribIFormat(
     ty: u32,
     relativeoffset: u32,
 ) {
-    let mut vao = 0i32;
-    if let Some(get_int) = f::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv") {
-        get_int(0x8CA6, &mut vao);
-    }
-    crate::vertex_state::glVertexArrayAttribIFormat(vao as u32, index, size, ty, relativeoffset);
+    crate::vertex_state::glVertexArrayAttribIFormat(
+        current_vertex_array(),
+        index,
+        size,
+        ty,
+        relativeoffset,
+    );
 }
 
 // DSA Vertex Array - remaining functions for GL 4.5 / ARB_direct_state_access
