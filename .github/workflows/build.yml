@@ -1,3 +1,4 @@
+
 name: Build Renderer Plugin APK
 
 on:
@@ -11,7 +12,7 @@ permissions:
 
 jobs:
   apk:
-    name: Build APK
+    name: Build APK and AAR (All Android ABIs)
     runs-on: ubuntu-24.04
 
     steps:
@@ -28,7 +29,11 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android
+          targets: |
+            aarch64-linux-android
+            armv7-linux-androideabi
+            i686-linux-android
+            x86_64-linux-android
 
       - name: Install Android SDK and NDK
         run: |
@@ -51,54 +56,109 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
 
-      - name: Build Rust renderer
-        run: |
-          cargo test -p renderer-core
-          cargo ndk -t arm64-v8a build --release -p gl-compat
+      - name: Test Rust renderer
+        run: cargo test -p renderer-core
 
-      - name: Install renderer library
+      - name: Build Rust renderer for all ABIs
         run: |
-          install -D \
-            target/aarch64-linux-android/release/librust_gl.so \
-            android/app/src/main/jniLibs/arm64-v8a/librust_gl.so
+          cargo ndk \
+            -t arm64-v8a \
+            -t armeabi-v7a \
+            -t x86 \
+            -t x86_64 \
+            build --release -p gl-compat
 
-          install -D \
-            target/aarch64-linux-android/release/librust_gl.so \
-            android/renderer/src/main/jniLibs/arm64-v8a/librust_gl.so
+      - name: Install native libraries into APK and AAR modules
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          declare -A TARGETS=(
+            [arm64-v8a]="aarch64-linux-android"
+            [armeabi-v7a]="armv7-linux-androideabi"
+            [x86]="i686-linux-android"
+            [x86_64]="x86_64-linux-android"
+          )
+
+          for ABI in arm64-v8a armeabi-v7a x86 x86_64; do
+            LIB="target/${TARGETS[$ABI]}/release/librust_gl.so"
+
+            test -f "$LIB" || {
+              echo "::error::Missing $LIB"
+              exit 1
+            }
+
+            install -D "$LIB" \
+              "android/app/src/main/jniLibs/$ABI/librust_gl.so"
+
+            install -D "$LIB" \
+              "android/renderer/src/main/jniLibs/$ABI/librust_gl.so"
+          done
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: "8.7"
 
-      - name: Build APK
+      - name: Build APK and AAR
         working-directory: android
-        run: gradle :app:assembleDebug --stacktrace --no-daemon
-
-      - name: Verify APK
         run: |
-          test -f android/app/build/outputs/apk/debug/app-debug.apk
-          ls -lh android/app/build/outputs/apk/debug/app-debug.apk
+          gradle :app:assembleDebug :renderer:assembleRelease \
+            --stacktrace --no-daemon
+
+      - name: Verify APK contains all ABIs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK="android/app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK"
+
+          unzip -Z1 "$APK" > /tmp/apk-files.txt
+
+          for ABI in arm64-v8a armeabi-v7a x86 x86_64; do
+            ENTRY="lib/$ABI/librust_gl.so"
+            grep -Fxq "$ENTRY" /tmp/apk-files.txt || {
+              echo "::error::APK missing $ENTRY"
+              exit 1
+            }
+            echo "APK verified: $ENTRY"
+          done
+
+          ls -lh "$APK"
+
+      - name: Verify AAR contains all ABIs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          AAR="android/renderer/build/outputs/aar/renderer-release.aar"
+          test -f "$AAR"
+
+          unzip -Z1 "$AAR" > /tmp/aar-files.txt
+
+          for ABI in arm64-v8a armeabi-v7a x86 x86_64; do
+            ENTRY="jni/$ABI/librust_gl.so"
+            grep -Fxq "$ENTRY" /tmp/aar-files.txt || {
+              echo "::error::AAR missing $ENTRY"
+              exit 1
+            }
+            echo "AAR verified: $ENTRY"
+          done
+
+          ls -lh "$AAR"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: rust-renderer-plugin
+          name: rust-renderer-plugin-all-android-abis
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-
-      - name: Build AAR
-        working-directory: android
-        run: gradle :renderer:assembleRelease --stacktrace --no-daemon
-
-      - name: Verify AAR
-        run: |
-          test -f android/renderer/build/outputs/aar/renderer-release.aar
-          ls -lh android/renderer/build/outputs/aar/renderer-release.aar
 
       - name: Upload AAR
         uses: actions/upload-artifact@v4
         with:
-          name: rust-renderer-library
+          name: rust-renderer-library-all-android-abis
           path: android/renderer/build/outputs/aar/renderer-release.aar
           if-no-files-found: error
+          
