@@ -53,7 +53,7 @@ fn set_texture_target(id: u32, target: u32) {
     }
 }
 
-fn texture_target(id: u32) -> u32 {
+pub(crate) fn texture_target(id: u32) -> u32 {
     let mut v = TEXTURES.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(e) = v.iter_mut().find(|(i, _)| *i == id) {
         return e.1;
@@ -219,7 +219,7 @@ impl Drop for FboScope {
     }
 }
 
-unsafe fn scoped_fbo(fbo: u32) -> Option<FboScope> {
+pub(crate) unsafe fn scoped_fbo(fbo: u32) -> Option<FboScope> {
     let get = driver_fn_cached::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv")?;
     let bind = driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindFramebuffer")?;
     let (mut draw, mut read) = (0i32, 0i32);
@@ -727,14 +727,67 @@ pub unsafe extern "C" fn glGetNamedBufferParameteri64v(buffer: u32, pname: u32, 
 pub unsafe extern "C" fn glCopyNamedBufferSubData(
     src: u32, dst: u32, src_off: isize, dst_off: isize, size: isize,
 ) {
-    if let Some(f) =
-        driver_fn_cached::<unsafe extern "C" fn(u32, isize, u32, isize, isize)>("glCopyBufferSubData")
-    {
-        f(GL_COPY_READ_BUFFER, src_off, GL_COPY_WRITE_BUFFER, dst_off, size);
-    } else {
+    let (Some(copy), Some(bind), Some(get)) = (
+        driver_fn_cached::<unsafe extern "C" fn(u32, u32, isize, isize, isize)>(
+            "glCopyBufferSubData",
+        ),
+        driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindBuffer"),
+        driver_fn_cached::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv"),
+    ) else {
         mark_error_site("glCopyNamedBufferSubData");
         errors().set(0x0502);
+        return;
+    };
+
+    let mut previous_read = 0;
+    let mut previous_write = 0;
+    get(GL_COPY_READ_BUFFER, &mut previous_read);
+    get(GL_COPY_WRITE_BUFFER, &mut previous_write);
+
+    let (copy_bindings, restore_bindings) = named_buffer_copy_binding_sets(
+        src,
+        dst,
+        previous_read as u32,
+        previous_write as u32,
+    );
+    for (target, buffer) in copy_bindings {
+        bind(target, buffer);
     }
+    let (read_target, write_target, read_offset, write_offset, copy_size) =
+        named_buffer_copy_arguments(src_off, dst_off, size);
+    copy(read_target, write_target, read_offset, write_offset, copy_size);
+    for (target, buffer) in restore_bindings {
+        bind(target, buffer);
+    }
+}
+
+fn named_buffer_copy_binding_sets(
+    src: u32,
+    dst: u32,
+    previous_read: u32,
+    previous_write: u32,
+) -> ([(u32, u32); 2], [(u32, u32); 2]) {
+    (
+        [(GL_COPY_READ_BUFFER, src), (GL_COPY_WRITE_BUFFER, dst)],
+        [
+            (GL_COPY_READ_BUFFER, previous_read),
+            (GL_COPY_WRITE_BUFFER, previous_write),
+        ],
+    )
+}
+
+fn named_buffer_copy_arguments(
+    src_offset: isize,
+    dst_offset: isize,
+    size: isize,
+) -> (u32, u32, isize, isize, isize) {
+    (
+        GL_COPY_READ_BUFFER,
+        GL_COPY_WRITE_BUFFER,
+        src_offset,
+        dst_offset,
+        size,
+    )
 }
 
 // ---- creation helpers ------------------------------------------------------------------------
@@ -1369,6 +1422,24 @@ pub const EXPORTS: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn named_buffer_copy_binds_named_objects_and_orders_copy_arguments() {
+        let (copy_bindings, restore_bindings) = named_buffer_copy_binding_sets(34, 33, 7, 8);
+
+        assert_eq!(
+            copy_bindings,
+            [(GL_COPY_READ_BUFFER, 34), (GL_COPY_WRITE_BUFFER, 33)]
+        );
+        assert_eq!(
+            restore_bindings,
+            [(GL_COPY_READ_BUFFER, 7), (GL_COPY_WRITE_BUFFER, 8)]
+        );
+        assert_eq!(
+            named_buffer_copy_arguments(11, 17, 23),
+            (GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER, 11, 17, 23)
+        );
+    }
 
     #[test]
     fn every_export_is_reachable_through_the_resolver() {

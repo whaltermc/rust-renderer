@@ -273,7 +273,7 @@ static GENERATION: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::
 pub fn supported_aliases(c: &GlesCapabilities) -> Vec<&'static [u8]> {
     let mut out: Vec<&'static [u8]> = Vec::new();
     // Always available in ES 3.0 core, or backed by this crate rather than the driver.
-    const CORE: [&[u8]; 15] = [
+    const CORE: [&[u8]; 16] = [
         ext!("GL_ARB_vertex_array_object"),
         ext!("GL_ARB_explicit_attrib_location"),
         ext!("GL_ARB_explicit_uniform_location"),
@@ -292,6 +292,7 @@ pub fn supported_aliases(c: &GlesCapabilities) -> Vec<&'static [u8]> {
         // Implemented in gl33 by binding the unit explicitly, so it needs no ES feature.
         ext!("GL_ARB_multi_bind"),
         ext!("GL_ARB_direct_state_access"),
+        ext!("GL_KHR_robustness"),
     ];
     out.extend_from_slice(&CORE);
     // glVertexAttribDivisor is ES 3.1, or the OES extension on 3.0.
@@ -311,6 +312,15 @@ pub fn supported_aliases(c: &GlesCapabilities) -> Vec<&'static [u8]> {
     // Indirect draws (multi-draw indirect) are ES 3.2+ or GL_EXT_multi_draw_indirect
     if c.es_at_least(3, 2) || c.has(ext!("GL_EXT_multi_draw_indirect\0")) {
         out.push(ext!("GL_ARB_multi_draw_indirect"));
+    }
+    if c.has(ext!("GL_EXT_clip_control")) {
+        out.push(ext!("GL_ARB_clip_control"));
+    }
+    if texture_barrier_supported(
+        c,
+        unsafe { driver_fn_cached::<unsafe extern "C" fn()>("glTextureBarrier").is_some() },
+    ) {
+        out.push(ext!("GL_ARB_texture_barrier"));
     }
     // Only claim what the driver actually reports and can actually do.
     #[cfg(test)]
@@ -374,6 +384,10 @@ pub fn supported_aliases(c: &GlesCapabilities) -> Vec<&'static [u8]> {
     out
 }
 
+fn texture_barrier_supported(c: &GlesCapabilities, has_entry_point: bool) -> bool {
+    has_entry_point || c.has(ext!("GL_NV_texture_barrier"))
+}
+
 use std::sync::atomic::Ordering;
 
 #[cfg(test)]
@@ -423,6 +437,22 @@ mod tests {
         ] {
             assert!(a.contains(&expected.to_string()), "{expected} missing on ES 3.1");
         }
+    }
+
+    #[test]
+    fn texture_barrier_alias_requires_a_barrier_entry_point_or_extension() {
+        assert!(!texture_barrier_supported(
+            &caps_with(&[], 3, 1, 0),
+            false
+        ));
+        assert!(texture_barrier_supported(
+            &caps_with(&[], 3, 0, 0),
+            true
+        ));
+        assert!(texture_barrier_supported(
+            &caps_with(&[b"GL_NV_texture_barrier\0"], 3, 0, 0),
+            false
+        ));
     }
 
     #[test]

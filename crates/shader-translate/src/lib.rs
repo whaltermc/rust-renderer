@@ -6,7 +6,6 @@
 
 use std::borrow::Cow;
 use std::collections::HashSet;
-use std::collections::HashMap;
 
 pub mod compat;
 pub mod naga_translate;
@@ -123,7 +122,7 @@ fn rewrite_es300_tokens(mut s: String) -> String {
         }
         // GLSL desktop permits `layout(location=0, binding=1)`; after removing binding
         // clean up a dangling comma before `)`.
-        l = l.replace(", )", ")").replace("(,", "(");
+        l = l.replace(", )", ")").replace("(,", "(").replace("layout()", "");
         out.push_str(&l);
         out.push('\n');
     }
@@ -142,7 +141,7 @@ fn rewrite_es300_tokens(mut s: String) -> String {
     // conversion, so these are fixed structurally by `numeric::widen_int_literals` earlier in
     // the pipeline rather than by naming individual expressions here.
     s = s.replace("? 0 : skip", "? 0.0 : skip");
-    s = rewrite_texture_lod_integer_levels(&s);
+    s = rewrite_texture_lod_arguments(&s);
 
     // Desktop-only builtins with straightforward ES equivalents.
     s
@@ -150,51 +149,87 @@ fn rewrite_es300_tokens(mut s: String) -> String {
 
 fn strip_layout_key(line: &str, key: &str) -> String {
     let mut out = line.to_string();
-    // Try two patterns: `key = N` (desktop binding/index/component) and bare `key`
-    // (origin_upper_left, pixel_center_integer).
-    let needle_eq = format!("{} =", key);
-    let mut changed = true;
-    while changed {
-        changed = false;
-        // First try the `key = N` pattern.
-        if let Some(pos) = out.find(&needle_eq) {
-            let start = out[..pos].rfind(',').map(|p| p + 1)
-                .or_else(|| out[..pos].rfind('(').map(|p| p + 1));
-            let Some(start) = start else { continue; };
-            let tail = &out[pos + needle_eq.len()..];
-            let end_rel = tail.find(',').or_else(|| tail.find(')'));
-            let Some(end_rel) = end_rel else { continue; };
-            let end = pos + needle_eq.len() + end_rel + if tail.as_bytes()[end_rel] == b',' { 1 } else { 0 };
-            out.replace_range(start..end, "");
-            changed = true;
+    let mut search_from = 0;
+    while let Some(relative) = out[search_from..].find("layout") {
+        let start = search_from + relative;
+        let bytes = out.as_bytes();
+        let after_keyword = start + "layout".len();
+        let before_ok = start == 0 || !is_ident_byte(bytes[start - 1]);
+        let after_ok = after_keyword == bytes.len() || !is_ident_byte(bytes[after_keyword]);
+        if !before_ok || !after_ok {
+            search_from = after_keyword;
             continue;
         }
-        // Then try the bare `key` pattern, matching only whole words.
-        let mut search_from = 0;
-        while let Some(rel) = out[search_from..].find(key) {
-            let pos = search_from + rel;
-            let start = pos;
-            let end = pos + key.len();
-            let bytes = out.as_bytes();
-            let before_ok = start == 0 || !matches!(bytes[start - 1], b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_');
-            let after_ok = end == bytes.len() || !matches!(bytes[end], b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_');
-            if before_ok && after_ok {
-                // Remove the keyword and any immediately following whitespace/comma.
-                let mut del_start = start;
-                let mut del_end = end;
-                while del_end < bytes.len() && matches!(bytes[del_end], b' ' | b'\t' | b',') {
-                    del_end += 1;
-                }
-                // If we removed the first item in a comma-list, also remove the comma after it.
-                if del_end < bytes.len() && bytes[del_end] == b',' {
-                    del_end += 1;
-                }
-                out.replace_range(del_start..del_end, "");
-                changed = true;
-                break;
-            }
-            search_from = end;
+
+        let mut open = after_keyword;
+        while open < bytes.len() && bytes[open].is_ascii_whitespace() {
+            open += 1;
         }
+        if bytes.get(open) != Some(&b'(') {
+            search_from = after_keyword;
+            continue;
+        }
+
+        let mut depth = 1usize;
+        let mut close = None;
+        for (offset, byte) in bytes[open + 1..].iter().enumerate() {
+            match byte {
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = Some(open + 1 + offset);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(close) = close else {
+            break;
+        };
+
+        let contents = &out[open + 1..close];
+        let mut components = Vec::new();
+        let mut component_start = 0;
+        let mut nested_depth = 0usize;
+        for (index, byte) in contents.bytes().enumerate() {
+            match byte {
+                b'(' => nested_depth += 1,
+                b')' => nested_depth = nested_depth.saturating_sub(1),
+                b',' if nested_depth == 0 => {
+                    components.push(&contents[component_start..index]);
+                    component_start = index + 1;
+                }
+                _ => {}
+            }
+        }
+        components.push(&contents[component_start..]);
+
+        let is_key = |component: &str| {
+            let component = component.trim();
+            let Some(rest) = component.strip_prefix(key) else {
+                return false;
+            };
+            rest.is_empty() || rest.trim_start().starts_with('=')
+        };
+        if !components.iter().any(|component| is_key(component)) {
+            search_from = close + 1;
+            continue;
+        }
+
+        let kept = components
+            .into_iter()
+            .filter(|component| !is_key(component))
+            .collect::<Vec<_>>()
+            .join(",");
+        let replacement = if kept.trim().is_empty() {
+            String::new()
+        } else {
+            format!("{}({})", &out[start..open], kept)
+        };
+        out.replace_range(start..close + 1, &replacement);
+        search_from = start + replacement.len();
     }
     out
 }
@@ -790,13 +825,36 @@ fn looks_like_geometry_or_tess(src: &str) -> bool {
         || src.contains("layout(triangles_adjacency)")
 }
 
-fn rewrite_texture_lod_integer_levels(src: &str) -> String {
-    const CALL: &str = "textureLod(";
+fn rewrite_texture_lod_arguments(src: &str) -> String {
+    const CALLS: &[&str] = &[
+        "textureLod(",
+        "textureProjLod(",
+        "textureLodOffset(",
+        "textureProjLodOffset(",
+    ];
     let mut out = String::with_capacity(src.len());
     let mut copied_until = 0;
     let mut search_from = 0;
-    while let Some(relative) = src[search_from..].find(CALL) {
-        let open = search_from + relative + CALL.len() - 1;
+    while search_from < src.len() {
+        let Some((start, open, _)) = CALLS
+            .iter()
+            .filter_map(|call| {
+                src[search_from..]
+                    .find(call)
+                    .map(|relative| {
+                        let start = search_from + relative;
+                        (start, start + call.len() - 1, *call)
+                    })
+            })
+            .min_by_key(|(_, open, _)| *open)
+        else {
+            break;
+        };
+        let is_identifier_byte = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
+        if start > 0 && is_identifier_byte(src.as_bytes()[start - 1]) {
+            search_from = open + 1;
+            continue;
+        }
         let mut depth = 1usize;
         let mut commas = Vec::with_capacity(2);
         let mut close = None;
@@ -816,22 +874,20 @@ fn rewrite_texture_lod_integer_levels(src: &str) -> String {
             }
         }
         let Some(close) = close else { break };
-        if commas.len() == 2 {
+        if commas.len() >= 2 {
             let level_start = commas[1] + 1;
-            let raw_level = &src[level_start..close];
-            let level = raw_level.trim();
-            let digits = level.strip_prefix('-').or_else(|| level.strip_prefix('+')).unwrap_or(level);
-            if !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()) {
-                out.push_str(&src[copied_until..level_start]);
-                let leading = raw_level.len() - raw_level.trim_start().len();
-                let trailing = raw_level.trim_end().len();
-                out.push_str(&raw_level[..leading]);
-                out.push_str("float(");
-                out.push_str(level);
-                out.push(')');
-                out.push_str(&raw_level[trailing..]);
-                copied_until = close;
-            }
+            let level_end = commas.get(2).copied().unwrap_or(close);
+            let raw_level = &src[level_start..level_end];
+            let leading = raw_level.len() - raw_level.trim_start().len();
+            let trailing = raw_level.trim_end().len();
+            out.push_str(&src[copied_until..level_start]);
+            out.push_str(&raw_level[..leading]);
+            out.push_str("float(");
+            out.push_str(raw_level.trim());
+            out.push(')');
+            out.push_str(&raw_level[trailing..]);
+            out.push_str(&src[level_end..close]);
+            copied_until = close;
         }
         search_from = close + 1;
     }
@@ -1072,88 +1128,29 @@ pub fn translate(src: &str) -> Result<String, String> {
     Ok(out)
 }
 
-/// Desktop GLSL → desktop GLSL targeting the GL 4.4 core profile (GLSL 3.30 core language).
-///
-/// GL 4.4 core exposes only the GLSL 3.30 language: desktop GLSL 4.x versions were removed
-/// from the desktop core profile, so any shader declaring GLSL 4.00 or later is rewritten to
-/// `#version 330 core`. Shaders declaring GLSL 1.10-3.30 pass through unchanged because GL
-/// 4.4 core supports those natively.
+/// Desktop GLSL → desktop GLSL targeting the GL 4.5 core profile.
 ///
 /// The only rewrites beyond version normalization are fixes for legacy desktop fixed-function
-/// builtins (`gl_ModelView*`, `ftransform`) which GLSL 3.30 core does not provide, and
+/// builtins (`gl_ModelView*`, `ftransform`) which core GLSL does not provide, and
 /// non-GLSL lines the game injects (`#moj_*`, `#import`, `#include`) plus the GLSL ES-only
 /// `shared` qualifier; `#error` messages are sanitized so they lex. This keeps a broken
 /// legacy shader from hard-failing while remaining a best-effort rewrite: geometry,
-/// tessellation and compute shaders are supported by GL 4.4 core and are therefore passed
+/// tessellation and compute shaders are supported by GL 4.5 core and are therefore passed
 /// through rather than rejected. It does not translate desktop GLSL into GLSL ES.
-/// Desktop GLSL → desktop GLSL targeting the GL 4.4 core profile (GLSL 3.30 core language).
-///
-/// GL 4.4 core exposes only the GLSL 3.30 language: desktop GLSL 4.x versions were removed
-/// from the desktop core profile, so any shader declaring GLSL 4.00 or later is rewritten to
-/// `#version 330 core`. Shaders declaring GLSL 1.10-3.30 pass through unchanged because GL
-/// 4.4 core supports those natively.
-///
-/// The only rewrites beyond version normalization are fixes for legacy desktop fixed-function
-/// builtins (`gl_ModelView*`, `ftransform`) which GLSL 3.30 core does not provide, and
-/// non-GLSL lines the game injects (`#moj_*`, `#import`, `#include`) plus the GLSL ES-only
-/// `shared` qualifier; `#error` messages are sanitized so they lex. This keeps a broken
-/// legacy shader from hard-failing while remaining a best-effort rewrite: geometry,
-/// tessellation and compute shaders are supported by GL 4.4 core and are therefore passed
-/// through rather than rejected. It does not translate desktop GLSL into GLSL ES.
-pub fn translate_desktop_440(src: &str) -> Result<String, String> {
-    // Pre-scan for missing intrinsics that need to be injected
-    let mut needs_fma = false;
-    let mut needs_exp2 = false;
-    let mut needs_log2 = false;
-    let mut needs_frexp = false;
-    let mut needs_ldexp = false;
-    for line in src.lines() {
-        if line.contains("fma(") { needs_fma = true; }
-        if line.contains("exp2(") { needs_exp2 = true; }
-        if line.contains("log2(") { needs_log2 = true; }
-        if line.contains("frexp(") { needs_frexp = true; }
-        if line.contains("ldexp(") { needs_ldexp = true; }
-    }
-    let mut intrinsic_lines = Vec::new();
-    if needs_fma { intrinsic_lines.push("#define fma(a, b, c) ((a) * (b) + (c))"); }
-    if needs_exp2 { intrinsic_lines.push("#define exp2(x) exp((x) * 0.6931471805599453)"); }
-    if needs_log2 { intrinsic_lines.push("#define log2(x) (log(x) * 1.4426950408889634)"); }
-    if needs_frexp { intrinsic_lines.push("#define frexp(x, exp) /* frexp not available in desktop */"); }
-    if needs_ldexp { intrinsic_lines.push("#define ldexp(x, exp) ((x) * exp2(float(exp)))"); }
-    let intrinsic_block = if intrinsic_lines.is_empty() { String::new() } else { intrinsic_lines.join("\n") + "\n" };
-
+pub fn translate_desktop_450(src: &str) -> Result<String, String> {
     let mut out = String::with_capacity(src.len() + 64);
-    let mut version_written = false;
-    let mut intrinsic_injected = false;
     for line in src.lines() {
         let trimmed = line.trim_start();
 
-        // Version normalization: GL 4.4 core only has the GLSL 3.30 language, so versions
-        // 4.00+ (removed from the desktop core profile) map down to 330 core.
         if let Some(rest) = trimmed.strip_prefix("#version") {
             let mut it = rest.split_whitespace();
             let num = it.next().and_then(|n| n.parse::<u32>().ok());
             let es = it.next().is_some_and(|w| w == "es");
-            if !es {
-                let major = num.map_or(1, |v| v / 100); // 440/450 → 4, 330 → 3, 150 → 1, 100 → 1
-                if major >= 4 {
-                    out.push_str("#version 330 core\n");
-                    version_written = true;
-                    if !intrinsic_block.is_empty() && !intrinsic_injected {
-                        out.push_str(&intrinsic_block);
-                        intrinsic_injected = true;
-                    }
-                    continue;
-                }
-            }
-            // 1.10-3.30 desktop pass through; `#version 300 es` also passes through since
-            // desktop 4.4 compilers accept ES shaders, and desktop needs no precision decls.
-            out.push_str(line);
-            out.push('\n');
-            version_written = true;
-            if !intrinsic_block.is_empty() && !intrinsic_injected {
-                out.push_str(&intrinsic_block);
-                intrinsic_injected = true;
+            if !es && num.is_some_and(|version| version > 450) {
+                out.push_str("#version 450 core\n");
+            } else {
+                out.push_str(line);
+                out.push('\n');
             }
             continue;
         }
@@ -1174,7 +1171,7 @@ pub fn translate_desktop_440(src: &str) -> Result<String, String> {
 
         let mut s = line.to_string();
 
-        // Rare desktop fixed-function helpers are not part of GLSL 3.30 core; map them to
+        // Rare desktop fixed-function helpers are not part of modern core GLSL; map them to
         // identities, the same best-effort fallback the ES path uses for its target.
         s = s.replace("gl_TextureMatrix[0]", "mat4(1.0f)")
             .replace("gl_TextureMatrix[1]", "mat4(1.0f)")
@@ -1186,40 +1183,14 @@ pub fn translate_desktop_440(src: &str) -> Result<String, String> {
         // ftransform() is a legacy fixed-function call with no desktop core equivalent;
         // expand it to the classic desktop form (identity matrix since the matrix is gone).
         // Skip it if the shader declares a user-defined ftransform() function.
-        if !src.lines().any(|line| {
-            let Some(index) = line.find("ftransform()") else {
-                return false;
-            };
-            let preceded_by_identifier = index > 0
-                && (line.as_bytes()[index - 1].is_ascii_alphanumeric()
-                    || line.as_bytes()[index - 1] == b'_');
-            !preceded_by_identifier
-                && line[index + "ftransform()".len()..]
-                    .trim_start()
-                    .starts_with('{')
-        }) {
+        if !declares_ftransform(src) {
             s = replace_glsl_call(&s, "ftransform()", "(mat4(1.0f) * gl_Vertex)");
         }
-        // Fix parameter qualifier ordering (in const -> const in, etc.)
-        s = s
-            .replace("in const ", "const in ")
-            .replace("out const ", "const out ")
-            .replace("inout const ", "const inout ")
-            .replace("in precise ", "precise in ")
-            .replace("out precise ", "precise out ")
-            .replace("inout precise ", "precise inout ")
-            .replace("in const precise ", "const precise in ")
-            .replace("out const precise ", "const precise out ")
-            .replace("inout const precise ", "const precise inout ");
         match sanitize_error_directive(&s) {
             Cow::Borrowed(l) => out.push_str(l),
             Cow::Owned(o) => out.push_str(&o),
         }
         out.push('\n');
-    }
-    // If no version line was found, inject intrinsics at the beginning
-    if !version_written && !intrinsic_block.is_empty() && !intrinsic_injected {
-        out = intrinsic_block + &out;
     }
     Ok(out)
 }
@@ -1282,6 +1253,55 @@ mod tests {
     fn high_version_allowed() {
         let o = translate("#version 410 core\nvoid main(){ gl_Position = vec4(0); }\n").unwrap();
         assert!(o.starts_with("#version 300 es\n"));
+    }
+
+    #[test]
+    fn minecraft_glsl_450_layout_and_texel_fetch_translate_to_es() {
+        let source = "#version 450 core\n\
+                      layout(std140) uniform Globals { mat4 Projection; };\n\
+                      layout(binding = 3) uniform sampler2D CurrentSprite;\n\
+                      out vec4 fragColor;\n\
+                      void main() { fragColor = texelFetch(CurrentSprite, ivec2(0), 0) * Projection[0]; }\n";
+        let output = translate(source).unwrap();
+        assert!(output.starts_with("#version 300 es\n"), "{output}");
+        assert!(output.contains("layout(std140) uniform Globals"), "{output}");
+        assert!(output.contains("uniform sampler2D CurrentSprite"), "{output}");
+        assert!(!output.contains("binding = 3"), "{output}");
+        assert!(output.contains("texelFetch(CurrentSprite, ivec2(0), 0)"), "{output}");
+    }
+
+    #[test]
+    fn layout_qualifier_stripping_preserves_index_identifiers() {
+        let source = "#version 330\nlayout(index=1) out vec4 color;\n\
+                      void main() { int index = gl_VertexID & 7; vec2 uv = positions[index]; }\n";
+        let output = translate(source).unwrap();
+        assert!(!output.contains("layout(index"), "{output}");
+        assert!(output.contains("int index = gl_VertexID"), "{output}");
+        assert!(output.contains("positions[index]"), "{output}");
+    }
+
+    #[test]
+    fn texture_lod_argument_rewriter_casts_the_third_argument() {
+        assert_eq!(
+            rewrite_texture_lod_arguments("textureLod(tex, uv, lod);"),
+            "textureLod(tex, uv, float(lod));"
+        );
+    }
+
+    #[test]
+    fn es_lod_calls_cast_their_third_argument_and_keep_nested_arguments() {
+        let source = "#version 330 core\n\
+                      uniform int MipMapLevel;\n\
+                      uniform sampler2D tex;\n\
+                      void main() {\n\
+                        vec4 a = textureLod(tex, vec2(uv_fn(1, 2)), MipMapLevel);\n\
+                        vec4 b = textureProjLod(tex, project_fn(vec4(1)), 0.0);\n\
+                        vec4 c = textureLodOffset(tex, coord_fn(1, 2), max(MipMapLevel, level_fn(3, 4)), ivec2(0));\n\
+                      }\n";
+        let output = translate(source).unwrap();
+        assert!(output.contains("textureLod(tex, vec2(uv_fn(1, 2)), float(MipMapLevel))"), "{output}");
+        assert!(output.contains("textureProjLod(tex, project_fn(vec4(1)), float(0.0))"), "{output}");
+        assert!(output.contains("textureLodOffset(tex, coord_fn(1, 2), float(max(MipMapLevel, level_fn(3, 4))), ivec2(0))"), "{output}");
     }
 
     #[test]
@@ -1617,35 +1637,38 @@ mod tests {
     }
 
     #[test]
-    fn desktop_440_normalizes_glsl_4xx_versions() {
-        let o = translate_desktop_440("#version 450 core\nvoid main(){ gl_Position = vec4(0); }\n")
+    fn desktop_450_preserves_supported_versions_and_clamps_future_versions() {
+        let o = translate_desktop_450("#version 450 core\nvoid main(){ gl_Position = vec4(0); }\n")
             .unwrap();
-        assert!(o.starts_with("#version 330 core\n"), "{o}");
+        assert!(o.starts_with("#version 450 core\n"), "{o}");
 
-        let o = translate_desktop_440("#version 440\nvoid main(){}\n").unwrap();
-        assert!(o.starts_with("#version 330 core\n"), "{o}");
+        let o = translate_desktop_450("#version 440\nvoid main(){}\n").unwrap();
+        assert!(o.starts_with("#version 440\n"), "{o}");
 
-        let o = translate_desktop_440("#version 400 core\nvoid main(){}\n").unwrap();
-        assert!(o.starts_with("#version 330 core\n"), "{o}");
+        let o = translate_desktop_450("#version 400 core\nvoid main(){}\n").unwrap();
+        assert!(o.starts_with("#version 400 core\n"), "{o}");
+
+        let o = translate_desktop_450("#version 460 core\nvoid main(){}\n").unwrap();
+        assert!(o.starts_with("#version 450 core\n"), "{o}");
     }
 
     #[test]
-    fn desktop_440_passes_through_valid_versions() {
-        assert!(translate_desktop_440("#version 330 core\nvoid main(){ gl_Position = vec4(0); }\n")
+    fn desktop_450_passes_through_valid_versions() {
+        assert!(translate_desktop_450("#version 330 core\nvoid main(){ gl_Position = vec4(0); }\n")
             .unwrap()
             .starts_with("#version 330 core\n"));
-        assert!(translate_desktop_440("#version 150\nvoid main(){}\n").unwrap().starts_with("#version 150\n"));
-        assert!(translate_desktop_440("#version 110\nvoid main(){}\n").unwrap().starts_with("#version 110\n"));
-        // ES shaders pass through: desktop 4.4 compilers accept them, desktop needs no
+        assert!(translate_desktop_450("#version 150\nvoid main(){}\n").unwrap().starts_with("#version 150\n"));
+        assert!(translate_desktop_450("#version 110\nvoid main(){}\n").unwrap().starts_with("#version 110\n"));
+        // ES shaders pass through: desktop compilers accept them, desktop needs no
         // precision qualifiers.
-        assert!(translate_desktop_440("#version 300 es\nprecision highp float;\nvoid main(){}\n")
+        assert!(translate_desktop_450("#version 300 es\nprecision highp float;\nvoid main(){}\n")
             .unwrap()
             .starts_with("#version 300 es\n"));
     }
 
     #[test]
-    fn desktop_440_keeps_core_qualifiers_and_features() {
-        let o = translate_desktop_440(
+    fn desktop_450_keeps_core_qualifiers_and_features() {
+        let o = translate_desktop_450(
             "#version 330 core\n\
              layout(location=0, binding=2) in dvec3 p;\n\
              noperspective in vec2 uv;\n\
@@ -1661,8 +1684,8 @@ mod tests {
     }
 
     #[test]
-    fn desktop_440_strips_mojang_directives_and_shared() {
-        let o = translate_desktop_440(
+    fn desktop_450_strips_mojang_directives_and_shared() {
+        let o = translate_desktop_450(
             "#version 330 core\n\
              #moj_import <lighting>\n\
              #import <vsh_main>\n\
@@ -1678,8 +1701,8 @@ mod tests {
     }
 
     #[test]
-    fn desktop_440_rewrites_legacy_fixed_function_builtins() {
-        let o = translate_desktop_440(
+    fn desktop_450_rewrites_legacy_fixed_function_builtins() {
+        let o = translate_desktop_450(
             "#version 150\n\
              void main(){\n\
              gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;\n\
@@ -1700,8 +1723,8 @@ mod tests {
     }
 
     #[test]
-    fn desktop_440_rewrites_ftransform() {
-        let o = translate_desktop_440(
+    fn desktop_450_rewrites_ftransform() {
+        let o = translate_desktop_450(
             "#version 150\nvoid main(){ gl_Position = ftransform(); }\n",
         )
         .unwrap();
@@ -1709,8 +1732,8 @@ mod tests {
     }
 
     #[test]
-    fn desktop_440_sanitizes_error_directives() {
-        let o = translate_desktop_440(
+    fn desktop_450_sanitizes_error_directives() {
+        let o = translate_desktop_450(
             "#version 330 core\n#error \"GL_ARB_gpu_shader5 is required\"\nvoid main(){}\n",
         )
         .unwrap();
@@ -1719,28 +1742,28 @@ mod tests {
     }
 
     #[test]
-    fn desktop_440_does_not_reject_geometry_tessellation_or_compute() {
-        // GL 4.4 core supports geometry/tessellation/compute, so these are passed through
+    fn desktop_450_does_not_reject_geometry_tessellation_or_compute() {
+        // GL 4.5 core supports geometry/tessellation/compute, so these are passed through
         // rather than rejected.
-        assert!(translate_desktop_440("#version 330 core\nvoid main(){ EmitVertex(); }\n").is_ok());
-        assert!(translate_desktop_440("#version 330 core\nlayout(triangles) out;\nvoid main(){}\n").is_ok());
-        assert!(translate_desktop_440("#version 330 core\nlayout(local_size_x = 8);\nvoid main(){}\n").is_ok());
+        assert!(translate_desktop_450("#version 330 core\nvoid main(){ EmitVertex(); }\n").is_ok());
+        assert!(translate_desktop_450("#version 330 core\nlayout(triangles) out;\nvoid main(){}\n").is_ok());
+        assert!(translate_desktop_450("#version 330 core\nlayout(local_size_x = 8);\nvoid main(){}\n").is_ok());
     }
 
     #[test]
-    fn desktop_440_passthrough_matches_its_desktop_input() {
+    fn desktop_450_passthrough_matches_its_desktop_input() {
         let src = "#version 330 core\n\
                    in vec3 p;\nout vec4 c;\n\
                    uniform sampler2D s;\n\
                    void main() { c = texture(s, p.xy); }\n";
-        let o = translate_desktop_440(src).unwrap();
+        let o = translate_desktop_450(src).unwrap();
         assert_eq!(o.trim_end(), src.trim_end());
     }
 
     #[test]
-    fn desktop_440_realistic_iris_fragment_passes_through() {
+    fn desktop_450_realistic_iris_fragment_passes_through() {
         // A real-world style Iris/BSL fragment: desktop 3.30, in/out, sampler, and a
-        // legacy gl_TextureMatrix reference from mobile shader generators. GL 4.4 core
+        // legacy gl_TextureMatrix reference from mobile shader generators. GL 4.5 core
         // accepts this unchanged.
         let src = "#version 330 core\n\
                    in vec2 UV;\n\
@@ -1754,7 +1777,7 @@ mod tests {
                        color = color * V_COLOR;\n\
                        fragColor = color;\n\
                    }\n";
-        let o = translate_desktop_440(src).unwrap();
+        let o = translate_desktop_450(src).unwrap();
         assert!(o.contains("#version 330 core\n"));
         assert!(o.contains("in vec2 UV"));
         assert!(o.contains("out vec4 fragColor"));
