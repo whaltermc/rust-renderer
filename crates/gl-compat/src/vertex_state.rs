@@ -1459,11 +1459,23 @@ pub unsafe extern "C" fn glGetPointerv(pname: u32, params: *mut *mut c_void) {
     }
 }
 
-/// No way to observe context loss through this bridge, so report "no reset". Reporting a
-/// reset would make the game tear down and rebuild its GL objects for no reason.
 #[no_mangle]
 pub unsafe extern "C" fn glGetGraphicsResetStatus() -> u32 {
-    GL_NO_ERROR
+    if let Some(get) =
+        driver_fn_cached::<unsafe extern "C" fn() -> u32>("glGetGraphicsResetStatus")
+    {
+        get()
+    } else if let Some(get) =
+        driver_fn_cached::<unsafe extern "C" fn() -> u32>("glGetGraphicsResetStatusKHR")
+    {
+        get()
+    } else if let Some(get) =
+        driver_fn_cached::<unsafe extern "C" fn() -> u32>("glGetGraphicsResetStatusEXT")
+    {
+        get()
+    } else {
+        GL_NO_ERROR
+    }
 }
 
 

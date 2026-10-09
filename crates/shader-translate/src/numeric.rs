@@ -48,6 +48,17 @@ const FLOAT_BUILTINS: &[&str] = &[
     "gl_FragColor",
 ];
 
+const INT_SCALAR_BUILTINS: &[&str] = &[
+    "gl_VertexID",
+    "gl_InstanceID",
+    "gl_PrimitiveID",
+    "gl_InvocationID",
+    "gl_Layer",
+    "gl_ViewportIndex",
+    "gl_SampleID",
+    "gl_PatchVerticesIn",
+];
+
 /// Multi-character operators. Longest first, because the scanner takes the longest match;
 /// `<<` and `>>` matter because they are shifts rather than arithmetic and must not trigger a
 /// rewrite of their operands.
@@ -201,7 +212,7 @@ impl Declared {
                     }
                 }
                 Kind::Punct => {
-                    if !matches!(t.text, "(" | ")" | "?" | ":" | "," | "-" | "+" | "*" | "&&" | "||" | "<" | ">" | "<=" | ">=" | "==" | "!=") {
+                    if !matches!(t.text, "(" | ")" | "?" | ":" | "," | "-" | "+" | "*" | "%" | "&" | "|" | "^" | "~" | "<<" | ">>" | "&&" | "||" | "<" | ">" | "<=" | ">=" | "==" | "!=") {
                         return false;
                     }
                     if t.text == "(" && index > 0 && toks[index - 1].kind == Kind::Ident {
@@ -596,6 +607,9 @@ fn collect_declared<'a>(src: &'a str) -> Declared {
     }
 
     let mut declared = Declared::default();
+    declared
+        .int_scalars
+        .extend(INT_SCALAR_BUILTINS.iter().map(|name| (*name).to_string()));
     for (name, ty) in vars {
         if conflicted.contains(name) {
             continue;
@@ -1138,6 +1152,15 @@ mod tests {
     fn integer_contexts_are_untouched() {
         let src = "const uint MASK = 0xFFu;\nint f(){ return (MASK >> 2) & 0x0F | 3; }\n";
         assert_eq!(widen(src), src);
+    }
+
+    #[test]
+    fn integer_shift_expression_mixed_with_float_is_cast_as_a_whole() {
+        let out = widen("void main(){ float frameProgress = (gl_VertexID >> 3) / 1000.0; }\n");
+        assert!(
+            out.contains("float frameProgress = float((gl_VertexID >> 3)) / 1000.0"),
+            "{out}"
+        );
     }
 
     #[test]

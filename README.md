@@ -13,8 +13,8 @@ A desktop-GL-to-GLES translation layer packaged as a ZalithLauncher 2 renderer p
 | `backend::vulkan` | ✅ Discovery + pipeline path (triangle PoC) |
 | `backend::directvk` | ✅ DirectVK rendering backend with Vulkan pipeline |
 | `backend::angel` | ✅ ANGLE driver detection and configuration |
-| `gl-compat` (`librust_gl.so`) | ✅ GLES 3.x + OpenGL 4.4 compat layer |
-| Shader translator | ✅ Desktop GLSL → GLSL ES 3.00 / GL 4.4 core (1.21.4-26.4 rewrites) |
+| `gl-compat` (`librust_gl.so`) | Partial — GLES 3.x + OpenGL 4.5 compatibility path |
+| Shader translator | ✅ Desktop GLSL → GLSL ES 3.00 / GL 4.5 core |
 | `shader-manager` | ✅ Parallel shader translation, caching, pack management (1.21.4-26.4) |
 | Format translate | ✅ BGRA↔RGBA, depth formats, clamp-to-border |
 | OpenGL 3.3 core API | 669 entry points (complete vs 3.0–3.3 core) |
@@ -49,7 +49,7 @@ Or download from GitHub Actions artifacts (`.github/workflows/build.yml`).
 1. Install APK on device
 2. Open ZalithLauncher 2 → Renderer list → **RustGL**
 3. Set env vars in ZalithLauncher renderer settings:
-   - `RENDERER_SPOOF_GL=1` (default on) — advertises OpenGL 4.4 Core
+   - `RENDERER_SPOOF_GL=1` (default on) — advertises OpenGL 4.5 Core
    - `RENDERER_DEBUG=1` for verbose logging
    - `RENDERER_TRACE_GL=1` for GL call tracing
 
@@ -63,7 +63,8 @@ Logs: `adb logcat -s RustRenderer RendererV2Plugin`
 | Vanilla 1.12–1.15 | Likely (fixed-function path) |
 | Vanilla 1.17–1.20 | Partial — modern shaders via GLSL rewrite |
 | Vanilla 1.21.4 | GUI + world retrace pass; device launch unverified |
-| 26.3 improved transparency | Partial — SSIM 0.858, translation gaps remain |
+| Vanilla 1.21.5–26.2 | Translation path in place; device launch unverified |
+| 26.3 improved transparency | Partial — SSIM 0.869875, translation gaps remain |
 | Sodium | **Out of scope** — requires GL 4.5+ |
 | Iris / shader packs | ✅ 1.21.4 Iris/BSL passes; 26.3 needs more translation work |
 
@@ -71,7 +72,7 @@ Logs: `adb logcat -s RustRenderer RendererV2Plugin`
 
 - [x] Separate `shader-manager` module (pack discovery, caching, parallel pipeline)
 - [x] Separate `backend` module (DirectES, DirectVK, ANGEL, GLES, Vulkan)
-- [x] Separate `shader-translate` module (desktop GLSL → GLSL ES / GL 4.4 core)
+- [x] Separate `shader-translate` module (desktop GLSL → GLSL ES / GL 4.5 core)
 - [x] Separate `gl-compat` module (desktop GL compatibility layer)
 - [x] Separate `format-translate` module (BGRA↔RGBA, depth formats)
 - [x] Modern shader pack support (Complementary, Derivative, Bliss, BSL, SEUS)
@@ -88,7 +89,7 @@ Logs: `adb logcat -s RustRenderer RendererV2Plugin`
 ├─────────────────────────────────────────────────────────────┤
 │  glGetString / glGetProcAddress                             │
 ├─────────────────────────────────────────────────────────────┤
-│  librust_gl.so (gl-compat) — OpenGL 4.4 → GLES 3.x shim    │
+│  librust_gl.so (gl-compat) — OpenGL 4.5 → GLES 3.x shim    │
 ├─────────────────────────────────────────────────────────────┤
 │         shader-translate (GLSL 330 → ES 300)                │
 │         shader-manager (1.21.4-26.4 parallel pipeline)      │
@@ -106,8 +107,8 @@ Logs: `adb logcat -s RustRenderer RendererV2Plugin`
 - `backend::vulkan` — Vulkan device discovery
 - `backend::directvk` — DirectVK Vulkan rendering backend
 - `backend::angel` — ANGLE driver support (Vulkan/D3D11/D3D12/GL/SwiftShader)
-- `gl-compat` — OpenGL 4.4 → GLES 3.x translation layer (GLES driver) / desktop GL 4.4 core
-- `shader-translate` — Desktop GLSL → GLSL ES 3.00 (GLES) / GL 4.4 core (desktop)
+- `gl-compat` — OpenGL 4.5 → GLES 3.x translation layer (GLES driver) / desktop GL 4.5 core
+- `shader-translate` — Desktop GLSL → GLSL ES 3.00 (GLES) / GL 4.5 core (desktop)
 - `shader-manager` — Modern shader pack manager (Complementary, Derivative, Bliss, BSL, SEUS)
 - `format-translate` — BGRA↔RGBA, depth formats, clamp-to-border
 
@@ -116,7 +117,7 @@ Logs: `adb logcat -s RustRenderer RendererV2Plugin`
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `RENDERER_BACKEND` | `gles` | `gles` \| `hybrid` \| `vulkan` \| `auto` |
-| `RENDERER_SPOOF_GL` | `1` | Advertise OpenGL 4.4 Core (always on) |
+| `RENDERER_SPOOF_GL` | `1` | Advertise OpenGL 4.5 Core (always on) |
 | `RENDERER_DEBUG` | `0` | Enable verbose logging |
 | `RENDERER_TRACE_GL` | `0` | Trace GL calls (1=ring, all=full) |
 | `RENDERER_TRACE_GL=all` | — | Full call sequence for debugging |

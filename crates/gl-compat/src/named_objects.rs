@@ -53,7 +53,7 @@ fn set_texture_target(id: u32, target: u32) {
     }
 }
 
-fn texture_target(id: u32) -> u32 {
+pub(crate) fn texture_target(id: u32) -> u32 {
     let mut v = TEXTURES.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(e) = v.iter_mut().find(|(i, _)| *i == id) {
         return e.1;
@@ -219,7 +219,7 @@ impl Drop for FboScope {
     }
 }
 
-unsafe fn scoped_fbo(fbo: u32) -> Option<FboScope> {
+pub(crate) unsafe fn scoped_fbo(fbo: u32) -> Option<FboScope> {
     let get = driver_fn_cached::<unsafe extern "C" fn(u32, *mut i32)>("glGetIntegerv")?;
     let bind = driver_fn_cached::<unsafe extern "C" fn(u32, u32)>("glBindFramebuffer")?;
     let (mut draw, mut read) = (0i32, 0i32);

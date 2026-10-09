@@ -4,7 +4,7 @@
 //! - shader source rewriting (desktop GLSL → GLSL ES)
 //! - BGRA upload swizzle, clamp-to-border → clamp-to-edge
 //! - glMapBuffer → glMapBufferRange, glDrawBuffer → glDrawBuffers, glClearDepth → f
-//! - optional GL 3.2 version spoof (`RENDERER_SPOOF_GL=1`, off by default)
+//! - GL 4.5 core compatibility surface and shader translation
 //!
 //! This is still incomplete for full Minecraft parity (no Vulkan, limited shader rewrite,
 //! missing some desktop-only APIs). Expect crash/black-screen on unhandled paths.
@@ -505,10 +505,10 @@ const GL_SHADING_LANGUAGE_VERSION: u32 = 0x8B8C;
 const GL_MAJOR_VERSION: u32 = 0x821B;
 const GL_MINOR_VERSION: u32 = 0x821C;
 
-static SPOOF_VERSION: &[u8] = b"4.4 (Core Profile) RustGL\0";
-static SPOOF_GLSL: &[u8] = b"3.30\0";
+static SPOOF_VERSION: &[u8] = b"4.5 (Core Profile) RustGL\0";
+static SPOOF_GLSL: &[u8] = b"4.50\0";
 
-/// OPT-IN, EXPERIMENTAL: `RENDERER_SPOOF_GL=1` makes the renderer claim OpenGL 4.4 core.
+/// The renderer claims OpenGL 4.5 core.
 /// The claim is NOT backed by a full implementation. Off by default (spec: never advertise
 /// unsupported features).
 fn spoof_gl() -> bool {
@@ -553,8 +553,7 @@ fn gles_driver() -> Option<&'static GlesDriver> {
 }
 
 /// Whether the current driver context is OpenGL ES, which decides whether desktop GLSL is
-/// rewritten to GLSL ES 3.00 or to desktop GLSL targeting GL 4.4 core (GLSL 3.30 core
-/// language).
+/// rewritten to GLSL ES 3.00 or to desktop GLSL targeting GL 4.5 core (GLSL 4.50).
 ///
 /// Probed once from the real driver's `GL_VERSION` string (never the spoofed one): ES
 /// drivers report "OpenGL ES 3.x ...", desktop drivers report "<major>.<minor> (Core
@@ -563,14 +562,14 @@ fn gles_driver() -> Option<&'static GlesDriver> {
 static SHADER_TRANSLATION_IS_ES: OnceLock<bool> = OnceLock::new();
 
 /// True when shaders must be rewritten to GLSL ES 3.00 (GLES driver); false when they can be
-/// compiled as desktop GLSL against a GL 4.4 core driver.
+/// compiled as desktop GLSL against a GL 4.5 core driver.
 pub(crate) fn shader_translation_is_es() -> bool {
-    // Optional explicit override (RENDERER_SHADER_TRANSLATION_TARGET=es|desktop_440),
+    // Optional explicit override (RENDERER_SHADER_TRANSLATION_TARGET=es|desktop_450),
     // useful for testing the desktop path on an ES context and vice versa.
     if let Ok(t) = std::env::var("RENDERER_SHADER_TRANSLATION_TARGET") {
         return match t.as_str() {
             "es" => true,
-            "desktop_440" => false,
+            "desktop_440" | "desktop_450" => false,
             other => {
                 log(&format!(
                     "[GLBridge] unknown RENDERER_SHADER_TRANSLATION_TARGET={other:?}, ignoring"
@@ -584,7 +583,7 @@ pub(crate) fn shader_translation_is_es() -> bool {
 
 fn probe_shader_target_is_es() -> bool {
     // Query the real driver, not the spoof: with `RENDERER_SPOOF_GL=1` GL_VERSION is
-    // always the desktop 4.4 string. A context must be current for `glGetString` to return
+    // always the desktop 4.5 string. A context must be current for `glGetString` to return
     // anything useful, and shader compilation can only happen with one current.
     unsafe {
         type F = unsafe extern "C" fn(u32) -> *const u8;
@@ -803,10 +802,14 @@ pub unsafe extern "C" fn glGetIntegerv(pname: u32, data: *mut i32) {
         errors().set(GL_INVALID_VALUE);
         return;
     }
+    if let Some(value) = gl::v4_5::clip_control_value(pname) {
+        *data = value;
+        return;
+    }
     if spoof_gl() {
         match pname {
             GL_MAJOR_VERSION => { *data = 4; return; }
-            GL_MINOR_VERSION => { *data = 4; return; }
+            GL_MINOR_VERSION => { *data = 5; return; }
             0x9126 => { *data = 0x0001; return; } // GL_CONTEXT_PROFILE_MASK = CORE_PROFILE_BIT
             GL_NUM_EXTENSIONS => {
                 *data = merged_extensions().len() as i32;
@@ -1020,18 +1023,9 @@ pub unsafe extern "C" fn glShaderSource(
     }
     let is_es = shader_translation_is_es();
     let translated = if is_es {
-        // Determine shader stage from source
-        let stage = if src.contains("gl_Position") || src.contains("gl_Vertex") || src.contains("attribute ") {
-            // Vertex shader
-            shader_translate::naga_translate::ShaderStageType::Vertex
-        } else {
-            // Fragment shader
-            shader_translate::naga_translate::ShaderStageType::Fragment
-        };
-        let defines: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        shader_translate::naga_translate::translate_glsl_to_essl(&src, stage, &std::collections::HashMap::new())
+        shader_translate::translate(&src)
     } else {
-        shader_translate::translate_desktop_440(&src).map_err(|e| shader_translate::naga_translate::TranslateError::UnsupportedFeature(e))
+        shader_translate::translate_desktop_450(&src)
     };
     let translated = match translated {
         Ok(t) => t,
@@ -1053,11 +1047,11 @@ void main(){ c = vec4(1.0); }
                 }
             } else {
                 if src.contains("gl_Position") || src.contains("gl_Vertex") {
-                    "#version 330 core
+                    "#version 450 core
 void main(){ gl_Position = vec4(0.0); }
 ".into()
                 } else {
-                    "#version 330 core
+                    "#version 450 core
 out vec4 c;
 void main(){ c = vec4(1.0); }
 ".into()
@@ -1978,7 +1972,7 @@ pub unsafe extern "C" fn glDrawArrays(mode: u32, first: i32, count: i32) {
 /// Shared with the reachability test, which walks it to prove no exported name resolves to the
 /// shared no-op instead of its implementation.
 static LEGACY_NAMES: &[&[u8]] = &[
-        b"glAccum", b"glAlphaFunc", b"glAreTexturesResident", b"glArrayElement",
+        b"glAccum", b"glAlphaFunc", b"glAreTexturesResident",
         b"glBegin", b"glBitmap", b"glCallList", b"glCallLists", b"glClearAccum",
         b"glClearIndex", b"glClipPlane", b"glColor3b", b"glColor3bv", b"glColor3d",
         b"glColor3dv", b"glColor3f", b"glColor3fv", b"glColor3i", b"glColor3iv",
@@ -2589,6 +2583,10 @@ fn resolve_proc(n: &[u8]) -> *const c_void {
             if !compat.is_null() {
                 return compat;
             }
+            let compat = gl::v4_5::resolve(n);
+            if !compat.is_null() {
+                return compat;
+            }
             let f = forwarded(n);
             if !f.is_null() {
                 return f;
@@ -2997,6 +2995,25 @@ mod tests {
         assert_eq!(renderer.to_bytes(), b"OpenGL ES 3.2 RustGL");
     }
 
+    #[test]
+    fn spoofed_gl_version_matches_the_supported_target() {
+        assert_eq!(
+            CStr::from_bytes_until_nul(SPOOF_VERSION).unwrap().to_bytes(),
+            b"4.5 (Core Profile) RustGL"
+        );
+        assert_eq!(
+            CStr::from_bytes_until_nul(SPOOF_GLSL).unwrap().to_bytes(),
+            b"4.50"
+        );
+        let mut major = 0;
+        let mut minor = 0;
+        unsafe {
+            glGetIntegerv(GL_MAJOR_VERSION, &mut major);
+            glGetIntegerv(GL_MINOR_VERSION, &mut minor);
+        }
+        assert_eq!((major, minor), (4, 5));
+    }
+
     /// One representative entry point per advertised extension. Claiming an extension
     /// makes a client bind the call it advertises; if the layer resolves that symbol to
     /// null, the probe succeeded and the call crashes. `GL_KHR_debug` used to fail this.
@@ -3019,6 +3036,9 @@ mod tests {
         ("GL_ARB_multi_bind", &["glBindTextureUnit"]),
         ("GL_ARB_get_program_binary", &["glGetProgramBinary", "glProgramBinary"]),
         ("GL_ARB_direct_state_access", &["glGetTextureParameteriv", "glGetTextureImage", "glGetTextureLevelParameteriv"]),
+        ("GL_KHR_robustness", &["glGetGraphicsResetStatus", "glReadnPixels", "glGetnUniformfv"]),
+        ("GL_ARB_clip_control", &["glClipControl"]),
+        ("GL_ARB_texture_barrier", &["glTextureBarrier"]),
         ("GL_ARB_program_interface_query", &["glGetProgramInterfaceiv", "glGetProgramResourceIndex", "glGetProgramResourceName"]),
         ("GL_EXT_texture_filter_anisotropic", &["glTexParameterf", "glTexParameteri"]),
         ("GL_OES_element_index_uint", &["glDrawElements", "glDrawElementsBaseVertex"]),
@@ -3034,12 +3054,12 @@ mod tests {
         // check the entry points for whatever is actually advertised, and additionally
         // require the always-on set to be present unconditionally.
         let advertised_now: Vec<&[u8]> = compat_extensions();
+        let stub = legacy_noop_fn as *const c_void;
         for (ext, entry_points) in ADVERTISED_ENTRY_POINTS {
             for entry in *entry_points {
-                assert!(
-                    !resolve_proc(entry.as_bytes()).is_null(),
-                    "{ext} may be advertised but {entry} resolves to null"
-                );
+                let resolved = resolve_proc(entry.as_bytes());
+                assert!(!resolved.is_null(), "{ext} may be advertised but {entry} resolves to null");
+                assert_ne!(resolved, stub, "{ext} may be advertised but {entry} resolves to the no-op stub");
             }
         }
         // Whatever we did advertise must have a backing entry point, and every always-on
@@ -3283,7 +3303,7 @@ mod tests {
         assert!(super::probe_shader_target_is_es_for_test("OpenGL ES GLX Mesa 24.3"));
         assert!(!super::probe_shader_target_is_es_for_test("4.6 (Core Profile) Mesa 24.3"));
         assert!(!super::probe_shader_target_is_es_for_test("4.5 (Core Profile) NVIDIA Corp"));
-        assert!(!super::probe_shader_target_is_es_for_test("4.4 (Core Profile) RustGL"));
+        assert!(!super::probe_shader_target_is_es_for_test("4.5 (Core Profile) RustGL"));
     }
 
     #[test]
@@ -3291,6 +3311,8 @@ mod tests {
         std::env::set_var("RENDERER_SHADER_TRANSLATION_TARGET", "es");
         assert!(crate::shader_translation_is_es());
         std::env::set_var("RENDERER_SHADER_TRANSLATION_TARGET", "desktop_440");
+        assert!(!crate::shader_translation_is_es());
+        std::env::set_var("RENDERER_SHADER_TRANSLATION_TARGET", "desktop_450");
         assert!(!crate::shader_translation_is_es());
         std::env::set_var("RENDERER_SHADER_TRANSLATION_TARGET", "invalid");
         // Unknown values fall back to probing instead of panicking.
